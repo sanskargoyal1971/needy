@@ -1,0 +1,22 @@
+{
+  "name": "needy",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Needy — a realtime help-matching platform where every signal is evidence of a real, present human.",
+  "workspaces": [
+    "packages/shared",
+    "packages/backend",
+    "packages/frontend"
+  ],
+  "scripts": {
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "build:shared": "npm run build --workspace @needy/shared",
+    "dev:backend": "npm run dev --workspace @needy/backend",
+    "dev:frontend": "npm run dev --workspace @needy/frontend",
+    "dev": "npm run build:shared && concurrently -n backend,frontend -c blue,magenta \"npm run dev:backend\" \"npm run dev:frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

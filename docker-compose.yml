@@ -1,0 +1,36 @@
+# Infra services for Needy's realtime layer.
+# Presence, matching, tracking and rate-limiting all live in Redis (geo + TTL keys).
+# Postgres holds durable data (chat history, receipts, users). Run: `npm run infra:up`.
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: needy
+      POSTGRES_PASSWORD: needy
+      POSTGRES_DB: needy
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U needy"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:
+  pg-data:

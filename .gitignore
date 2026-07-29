@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+coverage/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# editor/tooling cruft
+* 2.json
+*.tsbuildinfo

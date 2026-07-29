@@ -1,0 +1,41 @@
+:root {
+  /* Warm, calm surface theme. Motion accents live in motion.config.ts; these are chrome. */
+  --needy-bg: #faf5ee;
+  --needy-surface: #ffffff;
+  --needy-surface-2: #f3ece2;
+  --needy-border: #e7ddcf;
+  --needy-text: #2a2320;
+  --needy-text-soft: #6b615a;
+  --needy-warm: #e8935a;
+  --needy-presence: #5fb98e;
+  --needy-alarm: #e5484d;
+  --needy-radius: 16px;
+}
+
+:root[data-theme="dark"] {
+  --needy-bg: #14110e;
+  --needy-surface: #1e1a16;
+  --needy-surface-2: #262019;
+  --needy-border: #342c23;
+  --needy-text: #f3ece2;
+  --needy-text-soft: #b3a595;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--needy-bg);
+  color: var(--needy-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
