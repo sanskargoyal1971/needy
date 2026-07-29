@@ -63,7 +63,62 @@ CREATE TABLE IF NOT EXISTS messages (
   status     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_task ON messages (task_id, created_at);
+
+-- Durable SOS alerts. Rows are never deleted: a withdrawn alarm is recorded as
+-- status='cancelled' because "there was an alarm and it was stood down" is itself
+-- safety-relevant history an operator may need to review.
+CREATE TABLE IF NOT EXISTS sos_alerts (
+  id         TEXT PRIMARY KEY,
+  task_id    TEXT NOT NULL,
+  raised_by  TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  status     TEXT NOT NULL,
+  at_lat     DOUBLE PRECISION,
+  at_lng     DOUBLE PRECISION,
+  note       TEXT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sos_task ON sos_alerts (task_id, created_at);
+-- Partial index: the operator surface only ever queries LIVE alerts.
+CREATE INDEX IF NOT EXISTS idx_sos_live ON sos_alerts (created_at)
+  WHERE status NOT IN ('resolved','cancelled');
 `;
+
+/** Constraints and foreign keys applied AFTER the base tables (audit: the schema had no FKs
+ *  at all, so a message could reference a task that never existed and an orphaned session
+ *  could outlive its user).
+ *
+ *  Kept separate from SCHEMA_SQL and applied defensively for two reasons: `ADD CONSTRAINT`
+ *  has no `IF NOT EXISTS` in Postgres 16, and on an existing database with dirty rows a
+ *  constraint can legitimately fail to validate — in which case we want a loud warning and a
+ *  running app, not a boot loop. Each statement is independent so one failure doesn't block
+ *  the rest.
+ *
+ *  ON DELETE: sessions/sos cascade (meaningless without their parent), while tasks.helper_id
+ *  is SET NULL — losing a helper account must not delete the requester's task history. */
+export const CONSTRAINTS_SQL: readonly string[] = [
+  `ALTER TABLE sessions ADD CONSTRAINT fk_sessions_user
+     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE`,
+  `ALTER TABLE messages ADD CONSTRAINT fk_messages_task
+     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE`,
+  `ALTER TABLE sos_alerts ADD CONSTRAINT fk_sos_task
+     FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE`,
+  `ALTER TABLE tasks ADD CONSTRAINT chk_tasks_state CHECK (state IN
+     ('searching','matched','verifying','en-route','arrived','in-progress','completed','cancelled'))`,
+  `ALTER TABLE tasks ADD CONSTRAINT chk_tasks_category CHECK (category IN
+     ('errand','companionship','social-service','urgent'))`,
+  `ALTER TABLE tasks ADD CONSTRAINT chk_tasks_origin CHECK (
+     origin_lat BETWEEN -90 AND 90 AND origin_lng BETWEEN -180 AND 180)`,
+  `ALTER TABLE users ADD CONSTRAINT chk_users_role CHECK (role IN
+     ('requester','helper','both','admin'))`,
+  `ALTER TABLE users ADD CONSTRAINT chk_users_kyc CHECK (kyc_status IN
+     ('unverified','pending','verified','rejected'))`,
+  `ALTER TABLE messages ADD CONSTRAINT chk_messages_status CHECK (status IN
+     ('sent','delivered','read'))`,
+  `ALTER TABLE sos_alerts ADD CONSTRAINT chk_sos_status CHECK (status IN
+     ('raised','acknowledged','resolved','cancelled'))`,
+];
 
 export function createPool(databaseUrl: string): DbPool {
   return new Pool({ connectionString: databaseUrl });
@@ -71,9 +126,41 @@ export function createPool(databaseUrl: string): DbPool {
 
 export async function runMigrations(pool: DbPool): Promise<void> {
   await pool.query(SCHEMA_SQL);
+  await applyConstraints(pool);
 }
 
-/** Upsert seed helper profiles (dev stand-in for a KYC-backed profile service). */
+/**
+ * Apply CONSTRAINTS_SQL, tolerating "already exists" (42710 / 42P07) so boots are idempotent.
+ * Anything else is logged as a warning and skipped rather than thrown: a pre-existing row
+ * that violates a new CHECK is a data problem for an operator to resolve, and it must not
+ * take the service down on restart. `console.warn` rather than the app logger to keep db.ts
+ * dependency-free (it is imported by migration tooling and tests).
+ */
+async function applyConstraints(pool: DbPool): Promise<void> {
+  for (const sql of CONSTRAINTS_SQL) {
+    try {
+      await pool.query(sql);
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === "42710" || code === "42P07") continue; // already exists — expected
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          msg: "constraint not applied (existing data may violate it)",
+          code,
+          detail: (err as Error).message,
+        }),
+      );
+    }
+  }
+}
+
+/** Upsert seed helper profiles (dev stand-in for a KYC-backed profile service).
+ *
+ *  `ON CONFLICT DO UPDATE` means this OVERWRITES existing rows, and it used to run on every
+ *  single boot — so a deploy would stomp real helper profiles (name, rating, helped count)
+ *  with dev fixture data. Callers must now gate this on a dev/test environment; see the
+ *  guard in index.ts. */
 export async function seedHelperProfiles(
   pool: DbPool,
   seed: Record<string, Omit<MatchedHelper, "etaSeconds">>,

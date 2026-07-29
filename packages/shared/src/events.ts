@@ -9,8 +9,27 @@ export const NS = {
   tracking: "/tracking",
   chat: "/chat",
   matching: "/matching",
+  sos: "/sos",
 } as const;
 export type Namespace = (typeof NS)[keyof typeof NS];
+
+/** Every namespace surfaces refusals on this one channel rather than dropping payloads
+ *  silently. `code` is machine-readable so a client can branch (re-auth, back off, drop a
+ *  stale subscription); `message` is for logs, never for display to a user as-is. */
+export interface SocketErrorPayload {
+  event: string;
+  code:
+    | "AUTH_REQUIRED"
+    | "INVALID_PAYLOAD"
+    | "NOT_A_PARTICIPANT"
+    | "NOT_TASK_HELPER"
+    | "NOT_AUTHORIZED"
+    | "RATE_LIMITED"
+    | "NOT_FOUND"
+    | "INTERNAL";
+  message: string;
+  taskId?: string;
+}
 
 /** ── /presence ─────────────────────────────────────────────────────────────
  *  Presence changes are broadcast only to subscribers of a given helper (§2.2),
@@ -20,9 +39,25 @@ export interface PresenceClientEvents {
   "set-activity": (activity: Presence["activity"]) => void;
   subscribe: (payload: { helperId: string }) => void;
   unsubscribe: (payload: { helperId: string }) => void;
+  /**
+   * IDLE availability publish (audit A1). A helper who is on no task at all publishes
+   * their position here so matching's GEOSEARCH can find them. This is deliberately
+   * SEPARATE from `/tracking`'s `location`: that event is task-bound (it relays
+   * `helper-moved` to a requester watching a live task), whereas this one only says
+   * "I am available around here". Conflating them is what produced the original
+   * deadlock — the only writer to the geo index required already being matched.
+   *
+   * Requires a helper-capable role and `kyc: "verified"`; entries are TTL'd so a helper
+   * who vanishes ages out of the index instead of lingering as a phantom candidate.
+   */
+  "publish-availability": (
+    payload: { point: LatLng; available: boolean },
+    ack?: (result: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
 }
 export interface PresenceServerEvents {
   "presence-changed": (presence: Presence) => void;
+  error: (payload: SocketErrorPayload) => void;
 }
 
 /** ── /tracking ─────────────────────────────────────────────────────────────
@@ -36,6 +71,7 @@ export interface TrackingClientEvents {
 export interface TrackingServerEvents {
   "helper-moved": (payload: { taskId: string; update: LocationUpdate }) => void;
   eta: (payload: { taskId: string; etaSeconds: number; distanceMeters: number }) => void;
+  error: (payload: SocketErrorPayload) => void;
 }
 
 /** ── /chat ─────────────────────────────────────────────────────────────────
@@ -63,6 +99,7 @@ export interface ChatServerEvents {
   message: (message: ChatMessage) => void;
   "helper-typing": (payload: { taskId: string; userId: string; isTyping: boolean }) => void;
   "receipt-changed": (payload: { taskId: string; messageId: string; status: ReceiptStatus }) => void;
+  error: (payload: SocketErrorPayload) => void;
 }
 
 /** ── /matching ─────────────────────────────────────────────────────────────
@@ -97,6 +134,50 @@ export interface MatchingClientEvents {
     ack: (result: { ok: true; task: Task } | { ok: false; error: string }) => void,
   ) => void;
 }
+/** ── SOS (audit: previously UI-only) ───────────────────────────────────────
+ *  The SOS button used to be local `useState` — arming it notified nobody, persisted
+ *  nothing, and reached no operator. For an app aimed at vulnerable users that is the
+ *  most serious kind of gap: the control implies a promise of help that did not exist.
+ *
+ *  An alert is durable (Postgres) so it survives a restart and can be audited after the
+ *  fact, and is acknowledged back to the raiser so the UI can honestly say "help has
+ *  been notified" rather than only looking like it did. */
+export type SosKind = "panic" | "medical" | "unsafe" | "other";
+export type SosStatus = "raised" | "acknowledged" | "resolved" | "cancelled";
+
+export interface SosAlert {
+  id: string;
+  taskId: string;
+  /** Who pulled the alarm. Either participant may — a helper can be at risk too. */
+  raisedBy: string;
+  kind: SosKind;
+  status: SosStatus;
+  /** Last known position of the raiser, so responders have somewhere to go. */
+  at: LatLng | null;
+  note: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SosClientEvents {
+  raise: (
+    payload: { taskId: string; kind: SosKind; at?: LatLng; note?: string },
+    ack: (result: { ok: true; alert: SosAlert } | { ok: false; error: string }) => void,
+  ) => void;
+  /** Stand down a false alarm. Deliberately still recorded, never deleted. */
+  cancel: (
+    payload: { alertId: string },
+    ack: (result: { ok: true; alert: SosAlert } | { ok: false; error: string }) => void,
+  ) => void;
+}
+
+export interface SosServerEvents {
+  /** To both participants + any operator listener: an alert is live on this task. */
+  "sos-raised": (alert: SosAlert) => void;
+  "sos-updated": (alert: SosAlert) => void;
+  error: (payload: SocketErrorPayload) => void;
+}
+
 export interface MatchingServerEvents {
   /** delivered to eligible helpers when a nearby request opens. */
   offer: (offer: MatchOffer) => void;
@@ -107,6 +188,7 @@ export interface MatchingServerEvents {
   matched: (payload: { task: Task; helper: MatchedHelper }) => void;
   /** delivered to BOTH participants whenever the task's lifecycle state changes after match. */
   "task-updated": (payload: { task: Task }) => void;
+  error: (payload: SocketErrorPayload) => void;
 }
 
 /** The human-framed helper card the reveal moment renders (§3 Stage 2). */

@@ -37,19 +37,62 @@ export async function clearTaskLocation(
   await redis.del(keys.taskLocation(taskId));
 }
 
-/** Upsert a helper's live position into the GEO set matching queries with GEOSEARCH. */
+/** Upsert a helper's live position into the GEO set matching queries with GEOSEARCH.
+ *
+ *  `at` stamps a companion freshness index (audit A1/B9). Redis GEO members have no
+ *  individual TTL, so without this an entry written once stayed forever and matching would
+ *  keep offering work to a helper who closed their laptop days ago. Callers pass
+ *  `deps.now()` so the decay is testable against the injected clock. */
 export async function upsertHelperGeo(
   redis: RedisClient,
   helperId: string,
   lng: number,
   lat: number,
+  at: number,
 ): Promise<void> {
-  await redis.geoadd(keys.helperGeo(), lng, lat, helperId);
+  await redis
+    .multi()
+    .geoadd(keys.helperGeo(), lng, lat, helperId)
+    .zadd(keys.helperGeoFresh(), at, helperId)
+    .exec();
 }
 
+/** Drop a helper from the availability index entirely — they went offline, went busy, or
+ *  aged out. Removes from both the GEO set and the freshness index. */
 export async function removeHelperGeo(
   redis: RedisClient,
   helperId: string,
 ): Promise<void> {
-  await redis.zrem(keys.helperGeo(), helperId);
+  await redis
+    .multi()
+    .zrem(keys.helperGeo(), helperId)
+    .zrem(keys.helperGeoFresh(), helperId)
+    .exec();
+}
+
+/** helperIds whose availability publish is newer than `cutoff`. Matching intersects its
+ *  GEOSEARCH hits with this so a stale position can never produce an offer. */
+export async function freshHelperIds(
+  redis: RedisClient,
+  cutoff: number,
+): Promise<Set<string>> {
+  const ids = await redis.zrangebyscore(keys.helperGeoFresh(), cutoff, "+inf");
+  return new Set(ids);
+}
+
+/** Evict everything that stopped publishing before `cutoff`. Run periodically so the GEO
+ *  set stays bounded even for helpers who never cleanly disconnected. Returns the count
+ *  removed, for logging. */
+export async function sweepStaleHelperGeo(
+  redis: RedisClient,
+  cutoff: number,
+): Promise<number> {
+  const stale = await redis.zrangebyscore(keys.helperGeoFresh(), "-inf", cutoff);
+  if (stale.length === 0) return 0;
+  await redis
+    .multi()
+    .zrem(keys.helperGeo(), ...stale)
+    .zrem(keys.helperGeoFresh(), ...stale)
+    .exec();
+  return stale.length;
 }

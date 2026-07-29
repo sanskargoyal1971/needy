@@ -2,6 +2,8 @@ import type { Server } from "socket.io";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { RedisClients } from "../redis.js";
+import type { UserRepository } from "../auth/repos.js";
+import type { SosRepository } from "./sosStore.js";
 import type {
   HelperProfileRepository,
   MessageRepository,
@@ -19,6 +21,12 @@ export interface Deps {
   tasks: TaskRepository;
   messages: MessageRepository;
   helpers: HelperProfileRepository;
+  /** Durable SOS alerts — a safety alarm must outlive the socket that raised it. */
+  sos: SosRepository;
+  /** Identity lookup. Matching needs a CANDIDATE's role + kycStatus, which cannot come from
+   *  the JWT (that only ever describes the caller), so eligibility is resolved against the
+   *  durable record instead of assumed (audit B11). */
+  users: UserRepository;
   /** Injectable clock so tests are deterministic (rate-limit refills, offer windows,
    *  away-sweeps all read time through this). Defaults to Date.now in production wiring. */
   now: () => number;

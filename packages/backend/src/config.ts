@@ -7,10 +7,39 @@ function num(name: string, fallback: number): number {
   return n;
 }
 
+/** True when running as a real deployment. Drives the fail-fast secret checks below and the
+ *  mounting of dev-only routes (audit A4: `config.env` existed but was read NOWHERE, so
+ *  /dev/token — which mints a token for any userId and role — shipped unconditionally). */
+const nodeEnv = process.env.NODE_ENV ?? "development";
+const isProduction = nodeEnv === "production";
+
+const DEV_JWT_SECRET = "dev-only-change-me";
+
+/** Refuse to boot a production process with a placeholder or weak signing key. A default
+ *  JWT secret means anyone who has read the repo can mint a valid token for any account, so
+ *  this is a hard failure at startup rather than a warning nobody reads. */
+function requireSecret(name: string, value: string | undefined, devFallback: string): string {
+  if (value == null || value === "") {
+    if (isProduction) {
+      throw new Error(
+        `env ${name} is required in production (refusing to start with the development default)`,
+      );
+    }
+    return devFallback;
+  }
+  if (isProduction && value === devFallback) {
+    throw new Error(`env ${name} must not be the development default in production`);
+  }
+  if (isProduction && value.length < 32) {
+    throw new Error(`env ${name} must be at least 32 characters in production`);
+  }
+  return value;
+}
+
 export const config = {
   port: num("PORT", 4000),
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
-  jwtSecret: process.env.JWT_SECRET ?? "dev-only-change-me",
+  jwtSecret: requireSecret("JWT_SECRET", process.env.JWT_SECRET, DEV_JWT_SECRET),
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
   databaseUrl: process.env.DATABASE_URL ?? "",
   match: {
@@ -21,8 +50,18 @@ export const config = {
     provider: process.env.DIRECTIONS_PROVIDER ?? "",
     apiKey: process.env.DIRECTIONS_API_KEY ?? "",
   },
-  env: process.env.NODE_ENV ?? "development",
+  env: nodeEnv,
+  isProduction,
+  /** Dev-only affordances (POST /dev/token, fixture seeding) mount ONLY when true. */
+  allowDevRoutes: nodeEnv === "development" || nodeEnv === "test",
   auth: {
+    /** HMAC secret the KYC provider signs its callbacks with (audit A5: the callback had no
+     *  signature verification at all, so anyone could self-verify). Required in production. */
+    kycCallbackSecret: requireSecret(
+      "KYC_CALLBACK_SECRET",
+      process.env.KYC_CALLBACK_SECRET,
+      "dev-only-kyc-callback-secret",
+    ),
     /** Short-lived access token; refresh rotates behind it. */
     accessTtlSeconds: num("AUTH_ACCESS_TTL_SECONDS", 900),
     refreshTtlDays: num("AUTH_REFRESH_TTL_DAYS", 30),
