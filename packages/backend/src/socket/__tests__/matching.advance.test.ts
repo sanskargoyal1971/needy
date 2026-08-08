@@ -1,7 +1,6 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-// @ts-ignore -- untyped module
 import RedisMock from "ioredis-mock";
 import { Server as IOServer } from "socket.io";
 import { io as ioClient, type Socket as ClientSocket } from "socket.io-client";
@@ -22,6 +21,8 @@ import {
   createInMemoryMessageRepo,
   createInMemoryTaskRepo,
 } from "../../domain/stores.js";
+import { createInMemorySosRepo } from "../../domain/sosStore.js";
+import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { authMiddleware } from "../auth.js";
 import { registerMatching } from "../matching.js";
 
@@ -63,6 +64,9 @@ describe("/matching advance-task lifecycle guard", () => {
   let io: IOServer;
   let mock: { disconnect(): void };
   let requester: AppClient;
+  /** The assigned helper. Needed because the helper-driven edges of the lifecycle can no
+   *  longer be driven by the requester (audit B12 — see the walk below). */
+  let helper: AppClient;
   let stranger: AppClient;
   const tasks = createInMemoryTaskRepo();
 
@@ -80,7 +84,7 @@ describe("/matching advance-task lifecycle guard", () => {
       state: "matched",
       origin: { lat: 12.9716, lng: 77.5946 },
       title: "Pick up medicine",
-      createdAt: 1_700_000_000_000,
+      description: "test", price: 100, createdAt: 1_700_000_000_000,
       updatedAt: 1_700_000_000_000,
     });
 
@@ -94,6 +98,11 @@ describe("/matching advance-task lifecycle guard", () => {
       tasks,
       messages: createInMemoryMessageRepo(),
       helpers: createInMemoryHelperProfileRepo(),
+      // `sos` and `users` are new required Deps fields. Neither is reachable from
+      // `advance-task`, so empty in-memory repos keep the container type-complete without
+      // adding fixtures this suite would never read.
+      sos: createInMemorySosRepo(),
+      users: createInMemoryUserRepo(),
       now: () => 1_700_000_050_000,
     };
     io.of(NS.matching).use(authMiddleware);
@@ -102,12 +111,13 @@ describe("/matching advance-task lifecycle guard", () => {
     await new Promise<void>((r) => httpServer.listen(0, r));
     const port = (httpServer.address() as AddressInfo).port;
     requester = await connect(port, REQUESTER_ID);
+    helper = await connect(port, HELPER_ID);
     stranger = await connect(port, STRANGER_ID);
   });
 
   afterAll(async () => {
-    for (const c of [requester, stranger]) c?.disconnect();
-    await new Promise<void>((r) => io.close(() => r()));
+    for (const c of [requester, helper, stranger]) c?.disconnect();
+    await io.close();
     await new Promise<void>((r) => httpServer.close(() => r()));
     mock.disconnect();
   });
@@ -134,9 +144,21 @@ describe("/matching advance-task lifecycle guard", () => {
     const seen: TaskState[] = [];
     requester.on("task-updated", ({ task }) => seen.push(task.state));
 
+    // MECHANICAL UPDATE (audit B12): this walk used to drive every edge from the requester's
+    // socket, which is precisely the defect the shared TRANSITION_ACTORS matrix now refuses —
+    // a requester declaring the helper `en-route`/`arrived`/`in-progress`. Each step is now
+    // driven by the actor the matrix names for it; the lifecycle path and every assertion
+    // below are unchanged. Role coverage itself lives in matching.authz.test.ts.
     const path: TaskState[] = ["verifying", "en-route", "arrived", "in-progress", "completed"];
+    const actorFor: Record<string, AppClient> = {
+      verifying: requester, //   either party may open verification
+      "en-route": helper, //     physical-progress claims belong to the person moving
+      arrived: helper,
+      "in-progress": helper, //  the helper starts the work
+      completed: requester, //   the requester confirms — the one edge they hold alone
+    };
     for (const to of path) {
-      const ack = await advance(requester, to);
+      const ack = await advance(actorFor[to]!, to);
       expect(ack.ok).toBe(true);
       if (ack.ok) expect(ack.task.state).toBe(to);
     }

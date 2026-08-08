@@ -11,19 +11,29 @@ import { formatEta } from "./shared.js";
  */
 export function EnRouteStage() {
   const { task, location, eta, milestones, helper } = useTaskExperience();
-  const origin = task?.origin ?? { lat: 0, lng: 0 };
+  const origin = task?.origin ?? null;
   const latestMilestone = milestones[milestones.length - 1];
+  const helperName = helper?.displayName ?? "Your helper";
 
   return (
     <div style={{ display: "grid", placeItems: "center", gap: 16, padding: "8px 0" }}>
       <div style={{ width: "100%", maxWidth: 380 }}>
-        <LiveMap
-          origin={origin}
-          helper={location ? { lat: location.lat, lng: location.lng } : null}
-          heading={location?.heading ?? 0}
-          durationMs={4000}
-          height={260}
-        />
+        {origin ? (
+          <LiveMap
+            origin={origin}
+            helper={location ? { lat: location.lat, lng: location.lng } : null}
+            heading={location?.heading ?? 0}
+            durationMs={4000}
+            height={260}
+          />
+        ) : (
+          // We have no destination to draw yet (the task hasn't resynced, or it arrived
+          // without an origin). This used to default to { lat: 0, lng: 0 } — Null Island —
+          // so the user was shown an empty stretch of the Atlantic labelled as their own
+          // street, which for this audience is worse than showing no map at all. Say plainly
+          // that the map isn't available; the ETA and milestones below still work.
+          <LocationUnavailable helperName={helperName} />
+        )}
       </div>
 
       <div style={{ textAlign: "center" }}>
@@ -31,7 +41,7 @@ export function EnRouteStage() {
           {eta ? formatEta(eta.etaSeconds) : "finding the fastest way to you"}
         </div>
         <div style={{ fontSize: 14, color: "var(--needy-text-soft)", marginTop: 2 }}>
-          {helper?.displayName ?? "Your helper"} is on the way
+          {helperName} is on the way
         </div>
       </div>
 
@@ -57,6 +67,34 @@ export function EnRouteStage() {
             </motion.div>
           )}
         </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+/** The honest stand-in for the map when we have no origin to centre it on. Same rounded
+ *  surface and height as {@link LiveMap} so the stage doesn't jump if the origin arrives a
+ *  moment later, and worded as a temporary, non-alarming gap — the helper is still coming. */
+function LocationUnavailable({ helperName }: { helperName: string }) {
+  return (
+    <div
+      role="status"
+      style={{
+        height: 260,
+        borderRadius: 18,
+        border: "1px dashed var(--needy-border)",
+        background: "var(--needy-surface-2)",
+        display: "grid",
+        placeItems: "center",
+        textAlign: "center",
+        padding: 24,
+        gap: 6,
+      }}
+    >
+      <div style={{ fontSize: 15, fontWeight: 700 }}>The map isn't available just now</div>
+      <div style={{ fontSize: 13, color: "var(--needy-text-soft)", lineHeight: 1.5, maxWidth: 260 }}>
+        We can't show {helperName}'s position on a map at the moment, but they're still on
+        their way — you'll see the time below update as they get closer.
       </div>
     </div>
   );

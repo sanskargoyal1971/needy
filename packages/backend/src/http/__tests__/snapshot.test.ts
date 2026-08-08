@@ -13,6 +13,8 @@ import {
   createInMemoryMessageRepo,
   createInMemoryTaskRepo,
 } from "../../domain/stores.js";
+import { createInMemorySosRepo } from "../../domain/sosStore.js";
+import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { setTaskLocation } from "../../domain/location-store.js";
 import { createHttpRouter } from "../router.js";
 
@@ -60,6 +62,10 @@ beforeAll(() => {
     tasks: createInMemoryTaskRepo(),
     messages: createInMemoryMessageRepo(),
     helpers,
+    // Unused by /snapshot, but the container is a single shape and a partial one would only
+    // typecheck by casting — which is how a missing dependency stays invisible until runtime.
+    sos: createInMemorySosRepo(),
+    users: createInMemoryUserRepo(),
     now: () => NOW,
   };
 
@@ -89,7 +95,7 @@ describe("GET /snapshot (§2.1 reconnect)", () => {
     const createRes = await request(app)
       .post("/tasks")
       .set("Authorization", `Bearer ${token}`)
-      .send({ category: "errand", title: "Pick up medicine", origin });
+      .send({ category: "errand", title: "Pick up medicine", description: "test", origin });
     expect(createRes.status).toBe(201);
     const taskId: string = createRes.body.id;
 

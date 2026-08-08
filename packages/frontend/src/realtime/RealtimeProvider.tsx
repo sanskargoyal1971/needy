@@ -1,10 +1,6 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useSyncExternalStore, type ReactNode } from "react";
+import { ExperienceErrorBoundary } from "../experience/ExperienceErrorBoundary.js";
+import { useDriverLifecycle } from "./driverLifecycle.js";
 import type { NeedyDriver, TaskExperienceState } from "./types.js";
 
 /**
@@ -18,13 +14,27 @@ const DriverContext = createContext<NeedyDriver | null>(null);
 export function RealtimeProvider({
   driver,
   children,
+  supportPhone,
 }: {
   driver: NeedyDriver;
   children: ReactNode;
+  /** Passed to the error-boundary fallback so it can offer a real human to call. */
+  supportPhone?: string;
 }) {
-  // Tear the driver down when it's swapped or the tree unmounts.
-  useEffect(() => () => driver.dispose(), [driver]);
-  return <DriverContext.Provider value={driver}>{children}</DriverContext.Provider>;
+  // StrictMode-safe disposal (audit C21). The refcount-and-defer rule lives in
+  // driverLifecycle.ts so the helper provider enforces exactly the same one.
+  useDriverLifecycle(driver);
+
+  // The boundary sits INSIDE the provider (audit C22): every consumer of the driver is behind
+  // it, so a throw anywhere in the experience tree is caught, while the provider itself — and
+  // therefore the driver and its live socket — survives to be reused by the recovered tree.
+  // (The boundary lives under experience/ because its copy is experience copy; it imports
+  // nothing from realtime/, so there's no cycle.)
+  return (
+    <DriverContext.Provider value={driver}>
+      <ExperienceErrorBoundary supportPhone={supportPhone}>{children}</ExperienceErrorBoundary>
+    </DriverContext.Provider>
+  );
 }
 
 export function useDriver(): NeedyDriver {

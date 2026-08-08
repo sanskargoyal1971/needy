@@ -1,14 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express, { type Express } from "express";
-// @ts-ignore -- untyped module
 import RedisMock from "ioredis-mock";
 import request from "supertest";
+import { config } from "../../config.js";
 import type { RedisClient } from "../../redis.js";
 import { createInMemorySessionRepo, createInMemoryUserRepo } from "../repos.js";
 import { AuthService } from "../service.js";
 import { OtpService } from "../otp.js";
-import { ConsoleSmsProvider, SandboxKycProvider } from "../providers.js";
-import { createAuthRouter } from "../router.js";
+import {
+  ConsoleSmsProvider,
+  KYC_SIGNATURE_HEADER,
+  SandboxKycProvider,
+  signKycCallback,
+} from "../providers.js";
+import { createAuthRouter, KYC_CALLBACK_PATH, kycRawBodyParser } from "../router.js";
 
 /**
  * Stage A end-to-end over the real router + services (in-memory repos, ioredis-mock). Proves
@@ -18,6 +23,18 @@ import { createAuthRouter } from "../router.js";
 
 const CODE = "123456";
 const NOW = 1_700_000_000_000;
+
+/** POST a KYC callback the way an authentic provider does: exact raw bytes, HMAC over those
+ *  bytes. Audit A5 made signing mandatory, so every caller of this endpoint — tests included —
+ *  now has to go through the real authenticity path. */
+function postSignedKycCallback(app: Express, payload: unknown, secret?: string) {
+  const raw = JSON.stringify(payload);
+  return request(app)
+    .post(KYC_CALLBACK_PATH)
+    .set("Content-Type", "application/json")
+    .set(KYC_SIGNATURE_HEADER, signKycCallback(raw, secret ?? config.auth.kycCallbackSecret))
+    .send(raw);
+}
 
 function setCookie(res: request.Response, name: string): string | undefined {
   const raw = res.headers["set-cookie"] as unknown as string[] | undefined;
@@ -35,6 +52,10 @@ describe("Stage A — auth", () => {
     const sessions = createInMemorySessionRepo();
     const now = () => NOW;
     app = express();
+    // The raw-body capture is scoped to the KYC callback path only and mounted BEFORE the
+    // app-wide JSON parser, exactly as the composition root does it — the callback's HMAC is
+    // over the raw bytes, which express.json() would otherwise have already consumed.
+    app.use(KYC_CALLBACK_PATH, kycRawBodyParser);
     app.use(express.json());
     app.use(
       createAuthRouter({
@@ -137,14 +158,18 @@ describe("Stage A — auth", () => {
     const start = await agent.post("/auth/kyc/start").send();
     expect(start.status).toBe(200);
     expect(start.body.verificationUrl).toContain("/verify/");
-    const reference = start.body.verificationUrl.split("/verify/")[1];
+    const reference: string = start.body.reference;
+    // Audit A5(b): start now also issues a single-use nonce bound to THIS user, which the
+    // callback must present. The reference alone is no longer sufficient (and is no longer
+    // guessable — it carries no userId or timestamp).
+    const nonce: string = start.body.callbackNonce;
+    expect(reference).toBeTruthy();
+    expect(nonce).toBeTruthy();
 
     expect((await agent.get("/auth/kyc/status")).body.kycStatus).toBe("pending");
 
-    // Provider callback confirms verification.
-    const cb = await request(app)
-      .post("/auth/kyc/callback")
-      .send({ reference, decision: "verified" });
+    // Provider callback confirms verification — signed over the raw body, carrying the nonce.
+    const cb = await postSignedKycCallback(app, { reference, nonce, decision: "verified" });
     expect(cb.status).toBe(200);
     expect((await agent.get("/auth/kyc/status")).body.kycStatus).toBe("verified");
   });

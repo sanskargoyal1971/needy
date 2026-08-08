@@ -77,3 +77,53 @@ export async function listPresenceSubs(
 ): Promise<string[]> {
   return redis.smembers(keys.presenceSubs(helperId));
 }
+
+/** ── Per-user socket refcount (audit B10) ──────────────────────────────────
+ *
+ *  The bug: `disconnect` unconditionally wrote `state: "offline"`. A user with the app open
+ *  on a phone and a tablet — or simply one who had just reconnected, since socket.io's new
+ *  socket connects BEFORE the old one's disconnect always lands — was marked offline while
+ *  still very much present. For a helper that means matching stops considering them; for a
+ *  requester it means their helper sees them go dark mid-task.
+ *
+ *  A per-process counter would not fix it: with the Redis adapter the two tabs may be on
+ *  different instances, so the count has to live where both can see it. INCR/DECR return the
+ *  new value atomically, which is exactly the "am I the last one out?" test we need.
+ *
+ *  The key is TTL'd on every increment. Without that, a process killed between INCR and DECR
+ *  leaves a permanently positive count and the user can never go offline again — a leak that
+ *  only ever accumulates. The TTL is refreshed by each new connection, so it can only expire
+ *  once genuinely nobody has connected for that long.
+ */
+const SOCKET_COUNT_TTL_SECONDS = 60 * 60 * 12;
+
+/** Register a new live socket. Returns the resulting count (≥1). */
+export async function incrSocketCount(
+  redis: RedisClient,
+  userId: string,
+): Promise<number> {
+  const key = keys.socketCount(userId);
+  const [[, count]] = (await redis
+    .multi()
+    .incr(key)
+    .expire(key, SOCKET_COUNT_TTL_SECONDS)
+    .exec()) as [[Error | null, number], ...unknown[]];
+  return count;
+}
+
+/** Release a socket. Returns the remaining count; 0 means this was the last one and the
+ *  caller should flip the user offline. Clamped at 0 and self-healing: a stray decrement
+ *  (a double-disconnect, a count lost to a restart) deletes the key rather than leaving a
+ *  negative value that would make every future disconnect look like "others still here". */
+export async function decrSocketCount(
+  redis: RedisClient,
+  userId: string,
+): Promise<number> {
+  const key = keys.socketCount(userId);
+  const remaining = await redis.decr(key);
+  if (remaining <= 0) {
+    await redis.del(key);
+    return 0;
+  }
+  return remaining;
+}

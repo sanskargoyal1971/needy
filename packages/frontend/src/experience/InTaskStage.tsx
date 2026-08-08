@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import type { ChatMessage } from "@needy/shared";
-import { BreathingPulse, TypingDots, spring } from "../motion/index.js";
+import { TypingDots } from "../motion/index.js";
 import { useDriver, useTaskExperience } from "../realtime/index.js";
-
-const ME = "me";
+import { SosControl, SosLiveBanner } from "../safety/SosControl.js";
+import { useRequesterSosPort } from "../safety/usePorts.js";
 
 /**
  * Stage 6 — In-task (§3). Live chat with the same breathing TypingDots as the rest of the
@@ -13,18 +13,24 @@ const ME = "me";
  * visually distinct from every other motion, since ambiguity here has real consequences.
  */
 export function InTaskStage() {
-  const { messages, otherTyping, helper } = useTaskExperience();
+  // `userId` comes from the driver, which is the only thing that actually knows who we are.
+  // This used to be a module-level `const ME = "me"` (audit B13): true only for the scripted
+  // mock, so against the live backend — where ids look like `req-a1b2c3` — every message the
+  // user sent rendered left-aligned as the helper's, receipts never showed, and the markRead
+  // effect below marked the user's OWN messages as read.
+  const { messages, otherTyping, helper, userId } = useTaskExperience();
   const driver = useDriver();
+  const sosPort = useRequesterSosPort();
   const [draft, setDraft] = useState("");
   const typingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Mark unread inbound messages as read once they're on screen.
+  // Mark unread INBOUND messages as read once they're on screen.
   useEffect(() => {
     const unread = messages
-      .filter((m) => m.senderId !== ME && m.status !== "read")
+      .filter((m) => m.senderId !== userId && m.status !== "read")
       .map((m) => m.id);
     if (unread.length) driver.markRead(unread);
-  }, [messages, driver]);
+  }, [messages, driver, userId]);
 
   const send = () => {
     if (!draft.trim()) return;
@@ -42,7 +48,15 @@ export function InTaskStage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: 460, gap: 12 }}>
-      <MessageList messages={messages} otherTyping={otherTyping} helperName={helper?.displayName} />
+      {/* A live alarm outranks the conversation, so it sits above it and is announced. */}
+      <AnimatePresence>{sosPort.sos && <SosLiveBanner port={sosPort} />}</AnimatePresence>
+
+      <MessageList
+        messages={messages}
+        otherTyping={otherTyping}
+        helperName={helper?.displayName}
+        myUserId={userId}
+      />
 
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <input
@@ -74,7 +88,7 @@ export function InTaskStage() {
         >
           Send
         </button>
-        <SosButton />
+        <SosControl port={sosPort} />
       </div>
     </div>
   );
@@ -84,10 +98,13 @@ function MessageList({
   messages,
   otherTyping,
   helperName,
+  myUserId,
 }: {
   messages: ChatMessage[];
   otherTyping: boolean;
   helperName?: string;
+  /** Passed in rather than re-derived here so there is exactly one source of "who am I". */
+  myUserId: string;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -106,10 +123,11 @@ function MessageList({
       }}
     >
       {messages.map((m) => {
-        const mine = m.senderId === ME;
+        const mine = m.senderId === myUserId;
         return (
           <div
             key={m.id}
+            data-testid={mine ? "msg-mine" : "msg-theirs"}
             style={{
               alignSelf: mine ? "flex-end" : "flex-start",
               maxWidth: "78%",
@@ -158,71 +176,15 @@ function MessageList({
   );
 }
 
-function SosButton() {
-  const [armed, setArmed] = useState(false);
-
-  if (armed) {
-    return (
-      <div style={{ position: "relative", width: 52, height: 52 }}>
-        <AnimatePresence>
-          {[0, 1, 2].map((i) => (
-            <motion.span
-              key={i}
-              style={{
-                position: "absolute",
-                inset: 0,
-                borderRadius: "50%",
-                border: "2px solid var(--needy-alarm)",
-              }}
-              initial={{ scale: 0.7, opacity: 0.6 }}
-              animate={{ scale: 2, opacity: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 1.4, ease: "easeOut", repeat: Infinity, delay: i * 0.45 }}
-            />
-          ))}
-        </AnimatePresence>
-        <motion.button
-          onClick={() => setArmed(false)}
-          animate={{ scale: [1, 1.08, 1], x: [0, -2, 2, -2, 2, 0] }}
-          transition={{
-            scale: { repeat: Infinity, duration: 0.9 },
-            x: { repeat: Infinity, duration: 0.5 },
-          }}
-          style={sosStyle(true)}
-          aria-label="Cancel SOS"
-        >
-          Cancel
-        </motion.button>
-      </div>
-    );
-  }
-
-  return (
-    <BreathingPulse size={64} color="alarm" intensity="subtle">
-      <motion.button
-        onClick={() => setArmed(true)}
-        whileTap={{ scale: 0.92 }}
-        transition={spring.alarm}
-        style={sosStyle(false)}
-        aria-label="Send SOS"
-      >
-        SOS
-      </motion.button>
-    </BreathingPulse>
-  );
-}
-
-function sosStyle(armed: boolean) {
-  return {
-    width: 52,
-    height: 52,
-    borderRadius: "50%",
-    border: "none",
-    background: "var(--needy-alarm)",
-    color: "#fff",
-    fontWeight: 800,
-    fontSize: armed ? 12 : 13,
-    cursor: "pointer",
-    boxShadow: armed ? "0 0 22px var(--needy-alarm)" : "0 3px 10px rgba(0,0,0,.15)",
-  } as const;
-}
+/* The local `SosButton` that used to live here has been deleted, not refactored.
+ *
+ * It was a `useState` flag driving an infinite red pulse-and-shake, with no `raiseSos` behind it
+ * — `NeedyDriver` had no such method to call. Pressing it told the user help was coming while
+ * emitting nothing to any server, and a reload erased the "alarm" entirely. It also ignored
+ * `useReducedMotionPref`, making it the app's most physically risky animation as well as its
+ * most dishonest one.
+ *
+ * It is replaced by the shared `<SosControl>` above, which both roles now use: it raises a
+ * durable alert over the `/sos` namespace, waits for the server's ack before claiming anything,
+ * and says so plainly when the alarm did not go through. See `safety/sosPort.ts` for why there
+ * is exactly one implementation rather than one per role. */

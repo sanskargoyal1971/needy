@@ -1,5 +1,6 @@
 import pg from "pg";
 import type { MatchedHelper } from "@needy/shared";
+import { logger } from "./logger.js";
 
 const { Pool } = pg;
 export type DbPool = pg.Pool;
@@ -32,12 +33,30 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id);
 
 CREATE TABLE IF NOT EXISTS helpers (
-  id           TEXT PRIMARY KEY,
-  display_name TEXT NOT NULL,
-  photo_url    TEXT NOT NULL DEFAULT '',
-  rating       DOUBLE PRECISION NOT NULL DEFAULT 0,
-  helped_count INTEGER NOT NULL DEFAULT 0
+  id             TEXT PRIMARY KEY,
+  display_name   TEXT NOT NULL,
+  photo_url      TEXT NOT NULL DEFAULT '',
+  bio            TEXT NOT NULL DEFAULT '',
+  rating         DOUBLE PRECISION NOT NULL DEFAULT 0,
+  helped_count   INTEGER NOT NULL DEFAULT 0,
+  total_earnings INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS helper_applications (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  phone        TEXT NOT NULL,
+  aadhaar_last4 TEXT NOT NULL,
+  experience   TEXT NOT NULL DEFAULT '',
+  status       TEXT NOT NULL DEFAULT 'pending',
+  reviewed_by  TEXT,
+  review_note  TEXT,
+  created_at   BIGINT NOT NULL,
+  updated_at   BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_applications_user ON helper_applications (user_id);
+CREATE INDEX IF NOT EXISTS idx_applications_status ON helper_applications (status);
 
 CREATE TABLE IF NOT EXISTS tasks (
   id           TEXT PRIMARY KEY,
@@ -48,6 +67,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   origin_lat   DOUBLE PRECISION NOT NULL,
   origin_lng   DOUBLE PRECISION NOT NULL,
   title        TEXT NOT NULL,
+  description  TEXT NOT NULL DEFAULT '',
+  price        INTEGER NOT NULL DEFAULT 0,
   created_at   BIGINT NOT NULL,
   updated_at   BIGINT NOT NULL
 );
@@ -118,12 +139,30 @@ export const CONSTRAINTS_SQL: readonly string[] = [
      ('sent','delivered','read'))`,
   `ALTER TABLE sos_alerts ADD CONSTRAINT chk_sos_status CHECK (status IN
      ('raised','acknowledged','resolved','cancelled'))`,
+  `ALTER TABLE helper_applications ADD CONSTRAINT fk_applications_user
+     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE`,
+  `ALTER TABLE helper_applications ADD CONSTRAINT chk_applications_status CHECK (status IN
+     ('pending','approved','rejected'))`,
+  `ALTER TABLE helper_applications ADD CONSTRAINT chk_aadhaar_last4 CHECK (
+     LENGTH(aadhaar_last4) = 4 AND aadhaar_last4 ~ '^[0-9]{4}$')`,
 ];
 
 export function createPool(databaseUrl: string): DbPool {
   return new Pool({ connectionString: databaseUrl });
 }
 
+/**
+ * Raw one-shot DDL application. **Not the boot path** — production boots through
+ * `migrate()` in migrations.ts, which is versioned and advisory-locked.
+ *
+ * This remains for tests, which run against pg-mem: pg-mem implements neither
+ * `pg_advisory_lock` nor a real `schema_migrations` round-trip, so the versioned runner cannot
+ * execute there. Tests want "give me these tables and nothing clever" anyway.
+ *
+ * Because migration 1 is the same `SCHEMA_SQL` baseline, a database set up by either path is
+ * identical in shape — the only difference is whether the ledger row exists, and `migrate()`
+ * will record it on the next real boot without re-doing any work.
+ */
 export async function runMigrations(pool: DbPool): Promise<void> {
   await pool.query(SCHEMA_SQL);
   await applyConstraints(pool);
@@ -133,24 +172,28 @@ export async function runMigrations(pool: DbPool): Promise<void> {
  * Apply CONSTRAINTS_SQL, tolerating "already exists" (42710 / 42P07) so boots are idempotent.
  * Anything else is logged as a warning and skipped rather than thrown: a pre-existing row
  * that violates a new CHECK is a data problem for an operator to resolve, and it must not
- * take the service down on restart. `console.warn` rather than the app logger to keep db.ts
- * dependency-free (it is imported by migration tooling and tests).
+ * take the service down on restart.
+ *
+ * Uses the app logger, not `console.warn`. An earlier version chose console to keep this module
+ * dependency-free for migration tooling, but `logger.ts` imports nothing at all, so there was no
+ * dependency to avoid — and the logger REDACTS, which matters because a constraint violation's
+ * `detail` can quote the offending row and our rows contain phone numbers.
+ *
+ * The SQLSTATE is reported as `sqlState`, not `code`: `code` is on the logger's redaction list
+ * (it is the OTP field name), so the more obvious key would have logged `[redacted]` and left an
+ * operator with a warning that names no cause.
  */
 async function applyConstraints(pool: DbPool): Promise<void> {
   for (const sql of CONSTRAINTS_SQL) {
     try {
       await pool.query(sql);
     } catch (err) {
-      const code = (err as { code?: string }).code;
-      if (code === "42710" || code === "42P07") continue; // already exists — expected
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          msg: "constraint not applied (existing data may violate it)",
-          code,
-          detail: (err as Error).message,
-        }),
-      );
+      const sqlState = (err as { code?: string }).code;
+      if (sqlState === "42710" || sqlState === "42P07") continue; // already exists — expected
+      logger.warn("constraint not applied (existing data may violate it)", {
+        sqlState,
+        detail: (err as Error).message,
+      });
     }
   }
 }

@@ -61,6 +61,9 @@ function sanitize(value: unknown, depth = 0): unknown {
 
 function emit(level: Level, msg: string, meta?: Record<string, unknown>) {
   const line = { level, msg, ...(meta ? (sanitize(meta) as object) : {}) };
+  // The one place console is legitimate: this IS the logging sink. Everywhere else the
+  // no-console rule stands, so nothing can bypass the redaction above.
+  // eslint-disable-next-line no-console
   const out = level === "error" || level === "warn" ? console.error : console.log;
   // A circular structure would otherwise throw *inside the error path*, masking the
   // original failure — fall back to a best-effort line instead.

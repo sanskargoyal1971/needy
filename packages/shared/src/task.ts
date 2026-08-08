@@ -15,6 +15,18 @@ export type TaskState =
 /** Categories change matching weights: social-service tasks factor volunteer standing. */
 export type TaskCategory = "errand" | "companionship" | "social-service" | "urgent";
 
+/** Flat-rate pricing per category in whole rupees. Social-service is volunteer (free).
+ *  These are the base prices shown to the requester; helpers earn HELPER_SHARE_PERCENT. */
+export const CATEGORY_PRICING: Record<TaskCategory, number> = {
+  errand: 149,
+  companionship: 199,
+  "social-service": 0,
+  urgent: 299,
+};
+
+/** The fraction of the task price credited to the helper on completion. */
+export const HELPER_SHARE_PERCENT = 80;
+
 export interface Task {
   id: string;
   requesterId: string;
@@ -23,6 +35,10 @@ export interface Task {
   state: TaskState;
   origin: LatLng;
   title: string;
+  /** Free-text description of what the requester needs help with. */
+  description: string;
+  /** Price in whole rupees, auto-set from CATEGORY_PRICING at creation. */
+  price: number;
   createdAt: number;
   updatedAt: number;
 }

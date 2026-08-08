@@ -1,9 +1,8 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-// ioredis-mock ships no type declarations; it is only ever used through the RedisClient
-// cast below, so a value import is enough here.
-// @ts-ignore -- untyped module
+// Typed by the ambient `declare module "ioredis-mock"` in src/types/ioredis-mock.d.ts — the
+// package ships none of its own, and it is only ever used through the RedisClient cast below.
 import RedisMock from "ioredis-mock";
 import { Server as IOServer } from "socket.io";
 import { io as ioClient, type Socket as ClientSocket } from "socket.io-client";
@@ -25,6 +24,8 @@ import {
 } from "../../domain/stores.js";
 import { upsertHelperGeo } from "../../domain/location-store.js";
 import { writePresence } from "../../domain/presence-store.js";
+import { createInMemorySosRepo } from "../../domain/sosStore.js";
+import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { authMiddleware } from "../auth.js";
 import { registerMatching } from "../matching.js";
 
@@ -34,6 +35,7 @@ import { registerMatching } from "../matching.js";
 interface MockRedis {
   geoadd(key: string, lng: number, lat: number, member: string): Promise<number>;
   geosearch(...args: unknown[]): Promise<unknown[]>;
+  geopos(key: string, member: string): Promise<unknown[]>;
   disconnect(): void;
   [command: string]: unknown;
 }
@@ -60,9 +62,10 @@ const REQUESTER_ID = "req-1";
 const HELPER_A = "helper-a";
 const HELPER_B = "helper-b";
 
-/** ioredis-mock does not implement the GEO command family (geoadd/geosearch). Matching's
- *  candidate search relies on them, so we install a tiny in-memory GEO shim that returns the
- *  exact `[member, distString, [lngString, latString]]` tuple shape matching.ts parses. */
+/** ioredis-mock does not implement the GEO command family (geoadd/geosearch/geopos).
+ *  Matching's candidate search relies on them, so we install a tiny in-memory GEO shim that
+ *  returns the exact `[member, distString, [lngString, latString]]` tuple shape matching.ts
+ *  parses. `multi().geoadd` and `geopos` are shimmed too — see the notes on each below. */
 function installGeoShim(mock: MockRedis): void {
   const points = new Map<string, { lng: number; lat: number }>();
 
@@ -85,6 +88,26 @@ function installGeoShim(mock: MockRedis): void {
   ): Promise<number> => {
     points.set(member, { lng: Number(lng), lat: Number(lat) });
     return 1;
+  };
+
+  // `upsertHelperGeo` now writes the point and its freshness score in ONE transaction (the
+  // freshness index the lead added for A1/B9), so the shim has to cover the pipelined form
+  // too — ioredis-mock's multi() has no `geoadd` at all and threw before this.
+  const realMulti = mock.multi as (...a: unknown[]) => Record<string, unknown>;
+  mock.multi = (...a: unknown[]): Record<string, unknown> => {
+    const chain = realMulti.apply(mock, a);
+    chain.geoadd = (_k: string, lng: number, lat: number, member: string) => {
+      points.set(member, { lng: Number(lng), lat: Number(lat) });
+      return chain; // chainable, like every other ioredis multi command
+    };
+    return chain;
+  };
+
+  // GEOPOS backs matching's ETA fallback to a helper's idle availability position (A6).
+  // Returns the same `[[lng, lat]] | [null]` shape real Redis does.
+  mock.geopos = async (_key: string, member: string): Promise<unknown[]> => {
+    const p = points.get(member);
+    return [p ? [String(p.lng), String(p.lat)] : null];
   };
 
   // Signature matches matching.ts: GEOSEARCH key FROMLONLAT lng lat BYRADIUS r m ASC WITHCOORD WITHDIST
@@ -176,6 +199,10 @@ describe("/matching double-accept race (§2.4)", () => {
   };
 
   const tasks = createInMemoryTaskRepo();
+  /** Matching now resolves a CANDIDATE's role + KYC from the durable user record rather than
+   *  assuming it (audit B11), so both helpers need a verified row here or they are — correctly
+   *  — never offered the task and the race has nothing to race. */
+  const users = createInMemoryUserRepo();
 
   beforeAll(async () => {
     // ── Redis (ioredis-mock) with the GEO shim the matching search needs. ──
@@ -210,19 +237,30 @@ describe("/matching double-accept race (§2.4)", () => {
       state: "searching",
       origin: ORIGIN,
       title: "Pick up medicine",
-      createdAt: FIXED_NOW,
+      description: "test", price: 100, createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
 
-    // Both helpers are online-available and geographically nearby, so both get the offer.
-    await upsertHelperGeo(client, HELPER_A, 77.595, 12.972);
-    await upsertHelperGeo(client, HELPER_B, 77.594, 12.9712);
+    // Both helpers are online-available, verified, and geographically nearby, so both get the
+    // offer. `upsertHelperGeo` takes the publish timestamp now (A1/B9 freshness index).
+    await upsertHelperGeo(client, HELPER_A, 77.595, 12.972, FIXED_NOW);
+    await upsertHelperGeo(client, HELPER_B, 77.594, 12.9712, FIXED_NOW);
     for (const helperId of [HELPER_A, HELPER_B]) {
       await writePresence(client, {
         userId: helperId,
         state: "online-available",
         activity: "idle",
         lastActiveAt: FIXED_NOW,
+      });
+      await users.create({
+        id: helperId,
+        phone: `+9199990${helperId.slice(-1)}`,
+        email: null,
+        displayName: helperId,
+        role: "helper",
+        kycStatus: "verified",
+        createdAt: FIXED_NOW,
+        updatedAt: FIXED_NOW,
       });
     }
 
@@ -237,6 +275,8 @@ describe("/matching double-accept race (§2.4)", () => {
       tasks,
       messages: createInMemoryMessageRepo(),
       helpers,
+      sos: createInMemorySosRepo(),
+      users,
       now: () => FIXED_NOW,
     };
     io.of(NS.matching).use(authMiddleware);
@@ -257,7 +297,7 @@ describe("/matching double-accept race (§2.4)", () => {
 
   afterAll(async () => {
     for (const c of [requester, helperA, helperB]) c?.disconnect();
-    await new Promise<void>((resolve) => io.close(() => resolve()));
+    await io.close();
     await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     mock.disconnect();
   });

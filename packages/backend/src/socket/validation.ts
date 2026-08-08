@@ -92,6 +92,34 @@ export function emitSocketError(
 }
 
 /**
+ * Normalise a possibly-absent acknowledgement into one that is always callable.
+ *
+ * The typed contract in `shared/events.ts` declares `ack` as required on `send`, but a socket
+ * payload is whatever the wire delivers: a client — buggy, outdated, or hostile — can emit
+ * `send` with no callback at all, and socket.io hands the handler `undefined`. Calling it then
+ * throws `ack is not a function` *mid-handler*.
+ *
+ * That is not merely noise. In `send` the ack fires AFTER the message is persisted and BEFORE
+ * it is broadcast, so the throw would leave the message durably stored and never delivered to
+ * anyone — the sender sees nothing, the recipient sees nothing, and the row sits in Postgres.
+ * A silent write-then-drop is the worst available outcome for a chat, and it is trivially
+ * reachable from any client. Handlers therefore wrap the parameter once, at the top, and call
+ * the result freely instead of remembering `?.` at six separate call sites.
+ *
+ * A dropped ack is logged at debug rather than refused: the message itself is well-formed and
+ * the sender simply forfeits their receipt, which is a strictly better outcome than rejecting
+ * a legitimate message because the client's socket.io version disagrees about callbacks.
+ */
+export function optionalAck<A extends (result: never) => void>(
+  ack: A | undefined,
+): (result: Parameters<A>[0]) => void {
+  if (typeof ack === "function") return ack as (result: Parameters<A>[0]) => void;
+  return () => {
+    /* no callback supplied — nothing to acknowledge to */
+  };
+}
+
+/**
  * Parse `payload` or refuse. Returns the typed value on success and `null` on failure,
  * having already emitted the error — so a handler reads:
  *

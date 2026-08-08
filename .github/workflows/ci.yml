@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+# A newer push to the same branch makes the older run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Static checks: fast, no services needed. Runs first so an obvious type error doesn't
+  #    wait behind a Postgres container coming up.
+  static:
+    name: Lint, format, typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      # `npm ci` from the committed lockfile — this is the "fresh clone" property the audit
+      # asked for: if a dependency is missing from package.json, this step fails.
+      - run: npm ci
+      # shared must be built before anything typechecks against it: backend and frontend both
+      # import @needy/shared by its published `dist` types, not by source.
+      - run: npm run build:shared
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+
+  # ── Backend tests against REAL Redis and REAL Postgres.
+  #    The audit's central complaint was that the suite only ever proved things against
+  #    ioredis-mock and pg-mem — neither of which has real GEO semantics, real transaction
+  #    isolation, or real constraint enforcement. So CI runs both for real.
+  backend:
+    name: Backend tests (real Redis + Postgres)
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: needy
+          POSTGRES_PASSWORD: needy
+          POSTGRES_DB: needy
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      REDIS_URL: redis://localhost:6379
+      DATABASE_URL: postgres://needy:needy@localhost:5432/needy
+      JWT_SECRET: ci-only-secret-not-used-in-production-000000
+      KYC_CALLBACK_SECRET: ci-only-kyc-secret-not-used-in-prod-00000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build:shared
+      - run: npm run test --workspace @needy/backend
+
+  # ── The /dev/token gate (audit A4) verified under a production environment specifically.
+  #    A test that only runs with NODE_ENV=test can never catch the route being mounted in
+  #    production, which is the actual failure mode.
+  production-gate:
+    name: Dev routes absent in production
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NODE_ENV: production
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-only-secret-not-used-in-production-000000
+      KYC_CALLBACK_SECRET: ci-only-kyc-secret-not-used-in-prod-00000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build:shared
+      - run: npm run test:prod-gate --workspace @needy/backend
+
+  frontend:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build:shared
+      - run: npm run test --workspace @needy/frontend
+
+  # ── Prove the images build. Not pushed anywhere; this only guards against a Dockerfile
+  #    that rots because nobody builds it until a deploy is urgent.
+  docker:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/backend/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/frontend/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -50,6 +50,20 @@ export const config = {
     provider: process.env.DIRECTIONS_PROVIDER ?? "",
     apiKey: process.env.DIRECTIONS_API_KEY ?? "",
   },
+  /**
+   * Express `trust proxy` setting, off by default.
+   *
+   * This governs whether `req.ip` comes from `X-Forwarded-For`, which the per-IP OTP limiter
+   * depends on. Both defaults are wrong in one deployment and right in the other, so it has to
+   * be explicit:
+   *   - unset behind a load balancer → every request appears to come from the proxy, and the
+   *     per-IP OTP budget becomes one bucket shared by all users;
+   *   - set when NOT behind a proxy → any client can spoof `X-Forwarded-For` and mint itself a
+   *     fresh IP per request, which defeats the limiter completely.
+   * The insecure-by-default direction is the second one, hence off unless declared. Accepts
+   * Express's own syntax: "1" (one hop), a CIDR, or a comma-separated list.
+   */
+  trustProxy: process.env.TRUST_PROXY ?? "",
   env: nodeEnv,
   isProduction,
   /** Dev-only affordances (POST /dev/token, fixture seeding) mount ONLY when true. */
@@ -77,10 +91,24 @@ export const config = {
       ttlSeconds: num("OTP_TTL_SECONDS", 300),
       maxPerHour: num("OTP_MAX_PER_HOUR", 5),
       maxAttempts: num("OTP_MAX_ATTEMPTS", 5),
+      /** Per-source-IP request cap (audit C15: only per-phone existed, so one host could walk
+       *  a list of numbers unthrottled). Deliberately a multiple of the per-phone cap rather
+       *  than equal to it: carrier NAT, offices and shared wifi legitimately put many distinct
+       *  users behind one address, and this must not lock out a household. */
+      maxPerHourPerIp: num("OTP_MAX_PER_HOUR_PER_IP", num("OTP_MAX_PER_HOUR", 5) * 4),
     },
     /** Which OTP/SMS + KYC providers to use. "console"/"sandbox" are dev stand-ins. */
     smsProvider: process.env.SMS_PROVIDER ?? "console",
     kycProvider: process.env.KYC_PROVIDER ?? "sandbox",
+    /** Twilio credentials, read only when SMS_PROVIDER=twilio. Not routed through
+     *  `requireSecret` because they are legitimately absent whenever another provider is
+     *  selected; `createSmsProvider` validates them at boot for the case that needs them. */
+    twilio: {
+      accountSid: process.env.TWILIO_ACCOUNT_SID ?? "",
+      authToken: process.env.TWILIO_AUTH_TOKEN ?? "",
+      /** An E.164 sender number, or a Messaging Service SID (starts with "MG"). */
+      from: process.env.TWILIO_FROM ?? "",
+    },
   },
 } as const;
 

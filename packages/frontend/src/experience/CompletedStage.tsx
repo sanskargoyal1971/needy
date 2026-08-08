@@ -41,20 +41,15 @@ export function CompletedStage() {
             {helper?.displayName ?? "Your helper"} helped you
             {minutes ? ` for ${minutes} minute${minutes === 1 ? "" : "s"}` : ""} today.
           </div>
-          <button
-            style={{
-              marginTop: 6,
-              border: "none",
-              background: "var(--needy-warm)",
-              color: "#fff",
-              borderRadius: 12,
-              padding: "11px 20px",
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
-          >
-            Rate {helper?.displayName ?? "your helper"}
-          </button>
+          {/* The "Rate {helper}" button that used to sit here had NO onClick — it was the third
+              instance of the same defect as the SOS button and the missing cancel flow: a
+              control promising an action the app does not take. Tapping it did nothing at all,
+              which for the closing beat of the experience reads as the app being broken.
+
+              It is removed rather than left inert. Rating needs a `ratings` table, a repository,
+              a route and a screen; that is real work owned by the product-flow pass, and the
+              rule this codebase now holds to is that nothing ships on screen offering an action
+              it cannot perform. The warm close stands on its own until the flow exists. */}
         </div>
       </SoftScaleReveal>
     </div>

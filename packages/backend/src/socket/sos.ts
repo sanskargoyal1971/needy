@@ -11,7 +11,14 @@ import { keys } from "../domain/keys.js";
 import { getTaskLocation } from "../domain/location-store.js";
 import { consumeToken } from "../services/ratelimit.js";
 import { requireParticipant } from "./guards.js";
-import { emitSocketError, parseOrRefuse, sosCancelSchema, sosRaiseSchema } from "./validation.js";
+import { joinRoom } from "./rooms.js";
+import {
+  emitSocketError,
+  optionalAck,
+  parseOrRefuse,
+  sosCancelSchema,
+  sosRaiseSchema,
+} from "./validation.js";
 
 /** ── /sos ──────────────────────────────────────────────────────────────────
  *  The SOS button previously existed only as local component state: arming it set a React
@@ -50,9 +57,14 @@ export const registerSos: NamespaceRegistrar = (deps) => {
 
   nsp.on("connection", (socket: SosSocket) => {
     const userId = socket.data.user.sub;
-    socket.join(personalRoom(userId));
+    void joinRoom(deps, socket, "connection", personalRoom(userId), { userId });
 
-    socket.on("raise", async (payload, ack) => {
+    socket.on("raise", async (payload, rawAck) => {
+      // A missing callback must never be the reason an alarm fails. Without this, a client that
+      // emits `raise` with no ack throws inside the handler — and on the success path that throw
+      // lands after the alert is persisted but before the operator room is notified, so the row
+      // exists and nobody is told. For an SOS that is the single worst outcome in the system.
+      const ack = optionalAck(rawAck);
       const p = parseOrRefuse(socket as unknown as Socket, "raise", sosRaiseSchema, payload, ack);
       if (!p) return;
 
@@ -126,7 +138,8 @@ export const registerSos: NamespaceRegistrar = (deps) => {
       }
     });
 
-    socket.on("cancel", async (payload, ack) => {
+    socket.on("cancel", async (payload, rawAck) => {
+      const ack = optionalAck(rawAck);
       const p = parseOrRefuse(socket as unknown as Socket, "cancel", sosCancelSchema, payload, ack);
       if (!p) return;
 

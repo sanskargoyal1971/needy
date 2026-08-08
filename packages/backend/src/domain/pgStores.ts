@@ -24,6 +24,8 @@ interface TaskRow {
   origin_lat: number | string;
   origin_lng: number | string;
   title: string;
+  description: string;
+  price: number | string;
   created_at: number | string;
   updated_at: number | string;
 }
@@ -37,6 +39,8 @@ function rowToTask(r: TaskRow): Task {
     state: r.state as Task["state"],
     origin: { lat: Number(r.origin_lat), lng: Number(r.origin_lng) },
     title: r.title,
+    description: r.description,
+    price: Number(r.price),
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
   };
@@ -52,8 +56,8 @@ export function createPgTaskRepo(pool: DbPool): TaskRepository {
     async create(task) {
       await pool.query(
         `INSERT INTO tasks
-           (id, requester_id, helper_id, category, state, origin_lat, origin_lng, title, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+           (id, requester_id, helper_id, category, state, origin_lat, origin_lng, title, description, price, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [
           task.id,
           task.requesterId,
@@ -63,6 +67,8 @@ export function createPgTaskRepo(pool: DbPool): TaskRepository {
           task.origin.lat,
           task.origin.lng,
           task.title,
+          task.description,
+          task.price,
           task.createdAt,
           task.updatedAt,
         ],
@@ -70,31 +76,48 @@ export function createPgTaskRepo(pool: DbPool): TaskRepository {
       return task;
     },
 
-    // Read-modify-write, mirroring the in-memory repo. Callers that need atomicity across a
-    // read+update (matching accept) already serialize via the Redis match lock.
+    /**
+     * Atomic partial update (audit C14).
+     *
+     * This used to be a read-modify-write that SELECTed the row, merged the patch in JS, and
+     * then rewrote EVERY column — including `created_at` and `requester_id`. Two concurrent
+     * callers would each read the same snapshot and the second write would silently discard
+     * the first's change (a lost update). The Redis match lock only serializes `accept`;
+     * `advance-task` and the SOS/chat paths were unprotected.
+     *
+     * Now a single UPDATE sets only the columns actually present in the patch and returns the
+     * committed row, so the value we hand back is what the database really holds rather than
+     * what we hoped it would hold. Immutable columns (`id`, `requester_id`, `created_at`) are
+     * never writable: a task must not be able to change hands or backdate itself.
+     */
     async update(id, patch) {
-      const existing = await this.get(id);
-      if (!existing) throw new Error(`task not found: ${id}`);
-      const next: Task = { ...existing, ...patch, id: existing.id };
-      await pool.query(
-        `UPDATE tasks SET
-           requester_id = $2, helper_id = $3, category = $4, state = $5,
-           origin_lat = $6, origin_lng = $7, title = $8, created_at = $9, updated_at = $10
-         WHERE id = $1`,
-        [
-          next.id,
-          next.requesterId,
-          next.helperId,
-          next.category,
-          next.state,
-          next.origin.lat,
-          next.origin.lng,
-          next.title,
-          next.createdAt,
-          next.updatedAt,
-        ],
+      const sets: string[] = [];
+      const values: unknown[] = [id];
+      const put = (column: string, value: unknown): void => {
+        values.push(value);
+        sets.push(`${column} = $${values.length}`);
+      };
+
+      if (patch.helperId !== undefined) put("helper_id", patch.helperId);
+      if (patch.category !== undefined) put("category", patch.category);
+      if (patch.state !== undefined) put("state", patch.state);
+      if (patch.origin !== undefined) {
+        put("origin_lat", patch.origin.lat);
+        put("origin_lng", patch.origin.lng);
+      }
+      if (patch.title !== undefined) put("title", patch.title);
+      if (patch.description !== undefined) put("description", patch.description);
+      if (patch.price !== undefined) put("price", patch.price);
+      // Always stamp updatedAt so a caller that forgets can't leave a stale timestamp; an
+      // explicit value in the patch still wins (callers pass deps.now() for test determinism).
+      put("updated_at", patch.updatedAt ?? Date.now());
+
+      const { rows } = await pool.query<TaskRow>(
+        `UPDATE tasks SET ${sets.join(", ")} WHERE id = $1 RETURNING *`,
+        values,
       );
-      return next;
+      if (!rows[0]) throw new Error(`task not found: ${id}`);
+      return rowToTask(rows[0]);
     },
 
     async activeForUser(userId) {
@@ -156,6 +179,26 @@ export function createPgMessageRepo(pool: DbPool): MessageRepository {
       );
       return rows[0] ? rowToMessage(rows[0]) : null;
     },
+
+    /** Task-scoped status write (audit A3). `setStatus` keys on a global message id alone,
+     *  which let `mark-read` flip receipts on ANY message in the system. The task id in the
+     *  WHERE clause makes the caller's authorization for *that task* actually bind to the row
+     *  being written, rather than being checked and then ignored. */
+    async setStatusForTask(messageId, taskId, status) {
+      const { rows } = await pool.query<MessageRow>(
+        `UPDATE messages SET status = $3 WHERE id = $1 AND task_id = $2 RETURNING *`,
+        [messageId, taskId, status],
+      );
+      return rows[0] ? rowToMessage(rows[0]) : null;
+    },
+
+    async get(messageId) {
+      const { rows } = await pool.query<MessageRow>(
+        `SELECT * FROM messages WHERE id = $1`,
+        [messageId],
+      );
+      return rows[0] ? rowToMessage(rows[0]) : null;
+    },
   };
 }
 
@@ -183,6 +226,12 @@ export function createPgHelperProfileRepo(pool: DbPool): HelperProfileRepository
         helpedCount: Number(r.helped_count),
       };
       return profile;
+    },
+    async addEarnings(helperId, amount) {
+      await pool.query(
+        `UPDATE helpers SET total_earnings = total_earnings + $2, helped_count = helped_count + 1 WHERE id = $1`,
+        [helperId, amount],
+      );
     },
   };
 }

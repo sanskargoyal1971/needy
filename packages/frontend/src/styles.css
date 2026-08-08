@@ -1,4 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
+  --font-inter: 'Inter', sans-serif;
+  --font-merriweather: 'Merriweather', serif;
+  
   /* Warm, calm surface theme. Motion accents live in motion.config.ts; these are chrome. */
   --needy-bg: #faf5ee;
   --needy-surface: #ffffff;

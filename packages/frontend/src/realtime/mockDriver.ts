@@ -1,5 +1,13 @@
 import { canTransition } from "@needy/shared";
-import type { ChatMessage, LatLng, MatchedHelper, Task, TaskState } from "@needy/shared";
+import type {
+  ChatMessage,
+  LatLng,
+  MatchedHelper,
+  SosAlert,
+  SosKind,
+  Task,
+  TaskState,
+} from "@needy/shared";
 import {
   initialTaskState,
   type NeedyDriver,
@@ -8,6 +16,13 @@ import {
 import { nextMilestone } from "./milestones.js";
 
 const ORIGIN: LatLng = { lat: 12.9716, lng: 77.5946 };
+/** Default identity for the scripted requester. Callers may override it, and every place the
+ *  mock used to hardcode `"me"` now reads `this.userId` — the same field the real client
+ *  publishes — so the UI can never again assume a literal id (audit B13). */
+const DEFAULT_USER_ID = "mock-me";
+/** How far from the origin the scripted helpers scatter, in degrees (~1.1 km). Roughly the
+ *  radius SearchingStage's radar projects, so the blips land inside it. */
+const MOCK_SPREAD_DEG = 0.01;
 const HELPER: MatchedHelper = {
   id: "helper-priya",
   displayName: "Priya",
@@ -24,7 +39,8 @@ const HELPER: MatchedHelper = {
  * how the Phase 2 vocabulary was tuned in isolation before wiring to data.
  */
 export class MockNeedyClient implements NeedyDriver {
-  private state: TaskExperienceState = { ...initialTaskState(), connection: "online" };
+  private readonly userId: string;
+  private state: TaskExperienceState;
   private readonly listeners = new Set<() => void>();
   private timers: ReturnType<typeof setTimeout>[] = [];
   private taskId = "mock-task";
@@ -32,6 +48,8 @@ export class MockNeedyClient implements NeedyDriver {
 
   constructor(opts: { speed?: number; userId?: string } = {}) {
     this.speed = opts.speed ?? 1;
+    this.userId = opts.userId ?? DEFAULT_USER_ID;
+    this.state = { ...initialTaskState(this.userId), connection: "online" };
   }
 
   getState(): TaskExperienceState {
@@ -57,13 +75,13 @@ export class MockNeedyClient implements NeedyDriver {
   private makeTask(state: Task["state"], helperId: string | null = null): Task {
     return {
       id: this.taskId,
-      requesterId: "me",
+      requesterId: this.userId,
       helperId,
       category: "errand",
       state,
       origin: ORIGIN,
       title: "Pick up medicine from the pharmacy",
-      createdAt: 0,
+      description: "test", price: 100, createdAt: 0,
       updatedAt: 0,
     };
   }
@@ -72,15 +90,19 @@ export class MockNeedyClient implements NeedyDriver {
   requestHelp(): void {
     this.clearTimers();
     this.patch({
-      ...initialTaskState(),
+      ...initialTaskState(this.userId),
       connection: "online",
       task: this.makeTask("searching"),
     });
 
-    // Stage 1 — helpers surface one by one.
-    this.at(700, () => this.addHelper(0.55, -0.35));
-    this.at(1600, () => this.addHelper(-0.5, 0.2));
-    this.at(2500, () => this.addHelper(0.15, 0.6));
+    // Stage 1 — helpers surface one by one. These are REAL coordinates around the origin now,
+    // not normalized radar offsets: the server's `helpers-nearby` sends coarsened lat/lng, and
+    // the mock exists to exercise the real event *shapes*. Feeding it fake unit offsets is what
+    // let SearchingStage's broken coordinate fold survive review — everything looked fine in
+    // the demo and collapsed to the radar centre against the live backend.
+    this.at(700, () => this.addHelperAt(-0.35, 0.55));
+    this.at(1600, () => this.addHelperAt(0.2, -0.5));
+    this.at(2500, () => this.addHelperAt(0.6, 0.15));
 
     // Stage 2 — matched.
     this.at(3600, () =>
@@ -141,8 +163,17 @@ export class MockNeedyClient implements NeedyDriver {
     });
   }
 
-  private addHelper(x: number, y: number): void {
-    const points = [...this.state.helpersNearby.approxPoints, { lat: x, lng: y }];
+  /** Surface a helper at a position expressed as a fraction of {@link MOCK_SPREAD_DEG} north
+   *  and east of the origin, then converted to a real lat/lng — the shape the server actually
+   *  sends. `northFrac`/`eastFrac` are in [-1, 1]. */
+  private addHelperAt(northFrac: number, eastFrac: number): void {
+    const lat = ORIGIN.lat + northFrac * MOCK_SPREAD_DEG;
+    // Longitude degrees shrink with latitude, so widen the east offset to keep the visual
+    // spread roughly circular rather than squashed.
+    const lng =
+      ORIGIN.lng +
+      (eastFrac * MOCK_SPREAD_DEG) / Math.max(0.2, Math.cos((ORIGIN.lat * Math.PI) / 180));
+    const points = [...this.state.helpersNearby.approxPoints, { lat, lng }];
     this.patch({ helpersNearby: { count: points.length, approxPoints: points } });
   }
 
@@ -153,7 +184,7 @@ export class MockNeedyClient implements NeedyDriver {
       senderId,
       body,
       createdAt: 0,
-      status: senderId === "me" ? "sent" : "read",
+      status: senderId === this.userId ? "sent" : "read",
     };
     this.patch({ messages: [...this.state.messages, msg] });
   }
@@ -161,7 +192,7 @@ export class MockNeedyClient implements NeedyDriver {
   // ── requester actions ──────────────────────────────────────────────────────
   sendMessage(body: string): void {
     if (body.trim().length === 0) return;
-    this.pushMessage("me", body.trim());
+    this.pushMessage(this.userId, body.trim());
     // Scripted reply so chat feels two-way.
     this.at(1200, () => this.patch({ otherTyping: true }));
     this.at(2600, () => {
@@ -187,6 +218,53 @@ export class MockNeedyClient implements NeedyDriver {
       messages: this.state.messages.map((m) =>
         messageIds.includes(m.id) ? { ...m, status: "read" } : m,
       ),
+    });
+  }
+
+  // ── SOS ────────────────────────────────────────────────────────────────────
+  /**
+   * Simulate the server accepting a durable alert, including its LATENCY.
+   *
+   * The delay is deliberate rather than resolving synchronously. The whole reason the real
+   * button was dangerous is that a local flag flipped instantly and the UI read as "help is
+   * coming" with nothing behind it; if the mock resolved instantly too, the "sending…" state
+   * would never be visible in the demo and the one piece of UI that has to prove it waits for
+   * the server would go permanently untested. A scripted driver's job is to exercise the real
+   * event *shapes and timings*, not to make the happy path look fast.
+   */
+  raiseSos(kind: SosKind, note?: string): Promise<SosAlert | null> {
+    const task = this.state.task;
+    if (!task) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      this.at(600, () => {
+        const now = Date.now();
+        const alert: SosAlert = {
+          id: `mock-sos-${now}`,
+          taskId: task.id,
+          raisedBy: this.userId,
+          kind,
+          status: "raised",
+          at: task.origin,
+          note: note ?? null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        this.patch({ sos: alert, lastError: null });
+        resolve(alert);
+      });
+    });
+  }
+
+  cancelSos(alertId: string): Promise<boolean> {
+    const current = this.state.sos;
+    if (!current || current.id !== alertId) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      this.at(400, () => {
+        // Status flips to `cancelled`; the record is NOT dropped, mirroring the server's rule
+        // that a stood-down alarm is still an auditable event.
+        this.patch({ sos: { ...current, status: "cancelled", updatedAt: Date.now() } });
+        resolve(true);
+      });
     });
   }
 

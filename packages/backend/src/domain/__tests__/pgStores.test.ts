@@ -32,7 +32,7 @@ describe("postgres repositories", () => {
     state: "searching",
     origin: { lat: 12.9716, lng: 77.5946 },
     title: "Pick up medicine",
-    createdAt: 1_700_000_000_000,
+    description: "test", price: 100, createdAt: 1_700_000_000_000,
     updatedAt: 1_700_000_000_000,
   };
 

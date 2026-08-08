@@ -16,8 +16,18 @@ import { TaskExperience } from "./TaskExperience.js";
  * (mirroring how Phase 2 was tuned in isolation). "Connect to live backend" swaps in the real
  * {@link RealNeedyClient} against a running server — same UI, real socket events.
  */
+/** Shape the mock's identity like a real one (`req-xxxxxx`) rather than leaving it as the
+ *  literal default. A mock that uses a distinctive placeholder id is how the B13 `ME = "me"`
+ *  bug stayed invisible: every ownership check compared against the same constant the mock
+ *  minted, so nothing could disagree. */
+function demoUserId(): string {
+  return `req-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function ExperienceDemo() {
-  const [driver, setDriver] = useState<NeedyDriver>(() => new MockNeedyClient());
+  const [driver, setDriver] = useState<NeedyDriver>(
+    () => new MockNeedyClient({ userId: demoUserId() }),
+  );
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -29,7 +39,7 @@ export function ExperienceDemo() {
       },
       restartMock() {
         setLive(false);
-        setDriver(new MockNeedyClient());
+        setDriver(new MockNeedyClient({ userId: demoUserId() }));
       },
       complete() {
         if (driver instanceof MockNeedyClient) driver.complete();
@@ -41,7 +51,7 @@ export function ExperienceDemo() {
   async function goLive(baseUrl: string) {
     setBusy(true);
     try {
-      const userId = `req-${Math.random().toString(36).slice(2, 8)}`;
+      const userId = demoUserId();
       const tokRes = await fetch(`${baseUrl}/dev/token`, {
         method: "POST",
         headers: { "content-type": "application/json" },

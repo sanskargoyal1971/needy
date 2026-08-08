@@ -13,3 +13,16 @@ coverage/
 # editor/tooling cruft
 * 2.json
 *.tsbuildinfo
+
+# Secrets. Two deploy keys already sit untracked in the repo root; without this rule a
+# single `git add -A` publishes a private key to the remote, which is unrecoverable —
+# rotating the key is the only real remedy once it has been pushed.
+*.pem
+*.key
+.env.*
+!.env.example
+!.env.*.example
+
+# Private KYC uploads (gov ID scans, selfies, video testimony) written by the local-disk
+# StorageProvider adapter. These are the most sensitive bytes the app touches.
+private-uploads/

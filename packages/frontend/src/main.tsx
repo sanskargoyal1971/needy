@@ -1,68 +1,56 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { MotionPreferencesProvider } from "./motion/preferences.js";
 import { Playground } from "./playground/Playground.js";
 import { ExperienceDemo } from "./experience/ExperienceDemo.js";
+import { ExperienceErrorBoundary } from "./experience/ExperienceErrorBoundary.js";
+import { AuthProvider, useAuth } from "./auth/AuthProvider.js";
+import { LoginScreen } from "./auth/LoginScreen.js";
+import { Dashboard } from "./app/Dashboard.js";
+import { CreateTaskFlow } from "./app/CreateTaskFlow.js";
+import { HelperApplicationForm } from "./app/HelperApplicationForm.js";
+import { TaskHistory } from "./app/TaskHistory.js";
+import { AdminPanel } from "./app/AdminPanel.js";
 import "./styles.css";
 
-/** Minimal hash routing — enough to switch between the Phase 2 vocabulary playground and the
- *  Phase 3 wired task experience without pulling in a router dependency. */
-function useHashRoute(): string {
-  const [hash, setHash] = useState(() => window.location.hash || "#/experience");
-  useEffect(() => {
-    const on = () => setHash(window.location.hash || "#/experience");
-    window.addEventListener("hashchange", on);
-    return () => window.removeEventListener("hashchange", on);
-  }, []);
-  return hash;
-}
+const SUPPORT_PHONE = import.meta.env.VITE_SUPPORT_PHONE ?? "";
 
-function App() {
-  const route = useHashRoute();
-  const isPlayground = route.startsWith("#/playground");
-  return (
-    <div>
-      <nav
-        style={{
-          display: "flex",
-          gap: 8,
-          justifyContent: "center",
-          padding: "12px 0",
-          borderBottom: "1px solid var(--needy-border)",
-        }}
-      >
-        <NavLink href="#/experience" active={!isPlayground}>Task experience</NavLink>
-        <NavLink href="#/playground" active={isPlayground}>Motion vocabulary</NavLink>
-      </nav>
-      {isPlayground ? <Playground /> : <ExperienceDemo />}
-    </div>
-  );
-}
+function AppRoutes() {
+  const { user, status } = useAuth();
 
-function NavLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+  if (status === "loading") {
+    return <div style={{ padding: 40, textAlign: "center" }}>Loading...</div>;
+  }
+
+  if (status === "signed-out" || !user) {
+    return <LoginScreen />;
+  }
+
   return (
-    <a
-      href={href}
-      style={{
-        textDecoration: "none",
-        fontSize: 13,
-        fontWeight: 600,
-        padding: "6px 14px",
-        borderRadius: 999,
-        color: active ? "#fff" : "var(--needy-text)",
-        background: active ? "var(--needy-warm)" : "transparent",
-        border: "1px solid var(--needy-border)",
-      }}
-    >
-      {children}
-    </a>
+    <Routes>
+      <Route path="/" element={<Dashboard />} />
+      <Route path="/create-task" element={<CreateTaskFlow />} />
+      <Route path="/become-helper" element={<HelperApplicationForm />} />
+      <Route path="/history" element={<TaskHistory />} />
+      <Route path="/admin" element={<AdminPanel />} />
+      <Route path="/experience" element={<ExperienceDemo />} />
+      <Route path="/playground" element={<Playground />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <MotionPreferencesProvider>
-      <App />
+      <ExperienceErrorBoundary {...(SUPPORT_PHONE ? { supportPhone: SUPPORT_PHONE } : {})}>
+        <AuthProvider>
+          <HashRouter>
+            <AppRoutes />
+          </HashRouter>
+        </AuthProvider>
+      </ExperienceErrorBoundary>
     </MotionPreferencesProvider>
   </StrictMode>,
 );

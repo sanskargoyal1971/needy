@@ -13,12 +13,25 @@ export interface MessageRepository {
   append(message: ChatMessage): Promise<ChatMessage>;
   list(taskId: string): Promise<ChatMessage[]>;
   setStatus(messageId: string, status: ChatMessage["status"]): Promise<ChatMessage | null>;
+  /** Task-scoped status write (audit A3). `setStatus` keys on a global message id, so
+   *  `mark-read` could flip receipts on ANY message in the system regardless of which task
+   *  the caller belonged to. Binding the task id into the write makes the caller's
+   *  authorization for that task actually constrain the row being changed. Returns null when
+   *  the message doesn't exist OR belongs to a different task — the caller cannot tell which,
+   *  which is deliberate: otherwise this becomes an oracle for probing message ids. */
+  setStatusForTask(
+    messageId: string,
+    taskId: string,
+    status: ChatMessage["status"],
+  ): Promise<ChatMessage | null>;
+  get(messageId: string): Promise<ChatMessage | null>;
 }
 
 /** Minimal helper-profile lookup for the match reveal card (§3 Stage 2). Backed by
  *  KYC-verified profile data in production; in-memory seed for Phase 1. */
 export interface HelperProfileRepository {
   get(helperId: string): Promise<Omit<MatchedHelper, "etaSeconds"> | null>;
+  addEarnings(helperId: string, amount: number): Promise<void>;
 }
 
 // ── In-memory implementations (Phase 1) ─────────────────────────────────────
@@ -73,6 +86,17 @@ export function createInMemoryMessageRepo(): MessageRepository {
       msg.status = status;
       return msg;
     },
+    async setStatusForTask(messageId, taskId, status) {
+      const msg = byId.get(messageId);
+      // The taskId check is the point: without it a caller authorized for one task could
+      // rewrite receipts on another task's messages (audit A3).
+      if (!msg || msg.taskId !== taskId) return null;
+      msg.status = status;
+      return msg;
+    },
+    async get(messageId) {
+      return byId.get(messageId) ?? null;
+    },
   };
 }
 
@@ -83,6 +107,9 @@ export function createInMemoryHelperProfileRepo(
   return {
     async get(helperId) {
       return profiles.get(helperId) ?? null;
+    },
+    async addEarnings(helperId, amount) {
+      // In-memory doesn't store earnings on the basic profile seed right now
     },
   };
 }
