@@ -62,6 +62,16 @@ import {
   type AuditLogger,
 } from "./audit/log.js";
 import { createStorageProvider } from "./services/storage.js";
+import {
+  createInMemoryServiceCatalog,
+  createPgServiceCatalog,
+  type ServiceCatalog,
+} from "./services/catalog.js";
+import {
+  createInMemoryExceptionRepo,
+  createPgExceptionRepo,
+  type ExceptionRepository,
+} from "./domain/exceptions.js";
 import { createVerificationRouter } from "./admin/verification.js";
 import {
   createInMemoryAdminUserQueries,
@@ -99,6 +109,8 @@ async function main(): Promise<void> {
   let phoneBlockRepo: PhoneBlockRepository;
   let audit: AuditLogger;
   let adminQueries: AdminUserQueries;
+  let serviceCatalog: ServiceCatalog;
+  let exceptionRepo: ExceptionRepository;
   if (config.databaseUrl) {
     pool = createPool(config.databaseUrl);
     // Versioned, advisory-locked migrations (see migrations.ts). Replaces re-executing the
@@ -120,6 +132,8 @@ async function main(): Promise<void> {
     phoneBlockRepo = createPgPhoneBlockRepo(pool);
     audit = createPgAuditLogger(pool, () => Date.now());
     adminQueries = createPgAdminUserQueries(pool);
+    serviceCatalog = createPgServiceCatalog(pool);
+    exceptionRepo = createPgExceptionRepo(pool);
     logger.info("using postgres repositories");
   } else {
     repos = {
@@ -138,6 +152,8 @@ async function main(): Promise<void> {
     // The in-memory admin queries read straight out of the in-memory user repo, which is the
     // only implementation that can enumerate — see the note on InMemoryUserRepository.
     adminQueries = createInMemoryAdminUserQueries(() => inMemoryUsers.all());
+    serviceCatalog = createInMemoryServiceCatalog();
+    exceptionRepo = createInMemoryExceptionRepo();
     if (config.isProduction) {
       // Non-durable storage in production means tasks, chat history and SOS alerts vanish
       // on restart. That is a data-loss configuration, not a degraded mode.
@@ -173,6 +189,8 @@ async function main(): Promise<void> {
     helpers: repos.helpers,
     sos: sosRepo,
     users: userRepo,
+    services: serviceCatalog,
+    exceptions: exceptionRepo,
     now,
   };
 

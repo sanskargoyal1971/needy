@@ -8,7 +8,12 @@ import type {
   TaskCategory,
   TaskSnapshot,
 } from "@needy/shared";
-import { CATEGORY_PRICING } from "@needy/shared";
+import {
+  CATEGORY_PRICING,
+  EXCEPTION_REVIEW_SLA_MS,
+  pairingDecision,
+  scheduleProblem,
+} from "@needy/shared";
 import type { DbPool } from "../db.js";
 import type { Deps } from "../domain/deps.js";
 import { getTaskLocation } from "../domain/location-store.js";
@@ -63,6 +68,15 @@ const createTaskSchema = z.object({
   title: z.string().trim().min(1).max(140),
   /** What the requester actually needs help with. */
   description: z.string().trim().min(1).max(500),
+  /** Catalog service code. Optional for now so existing clients keep working; when absent
+   *  the task matches any helper, which is the pre-catalog behaviour. */
+  serviceCode: z.string().trim().min(1).max(64).optional(),
+  /** Epoch ms. Present only for an exception-gated booking, which needs a day's lead time
+   *  because a human has to review two video testimonies before it can go ahead. */
+  scheduledFor: z.number().int().positive().optional(),
+  /** Required when the pairing is restricted: the specific helper this booking is for. A
+   *  restricted pairing is unlocked per-pair, so there is nothing to check without it. */
+  helperId: z.string().trim().min(1).max(128).optional(),
 });
 
 const devTokenSchema = z.object({
@@ -237,14 +251,75 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
         res.status(400).json({ error: "invalid-input", details: parsed.error.flatten() });
         return;
       }
-      const { category, origin, title, description } = parsed.data;
+      const { category, origin, title, description, serviceCode, scheduledFor, helperId } =
+        parsed.data;
       try {
         const now = deps.now();
+
+        // ── the eligibility gate ────────────────────────────────────────────
+        // Only reachable when the requester named a specific helper, which is what a
+        // restricted booking must do. An open search does not name one, and the matrix is
+        // applied per candidate inside matching instead — see `findEligibleHelpers`.
+        if (helperId) {
+          const [requester, helper] = await Promise.all([
+            deps.users.getById(requesterId),
+            deps.users.getById(helperId),
+          ]);
+          if (!helper) {
+            res.status(404).json({ error: "helper-not-found" });
+            return;
+          }
+          const decision = pairingDecision(
+            requester ?? { dateOfBirth: null, gender: null },
+            helper,
+            now,
+          );
+          if (decision.kind === "denied") {
+            res.status(403).json({ error: "pairing-denied", reason: decision.reason });
+            return;
+          }
+          if (decision.kind === "requires-exception") {
+            // An approved, unexpired exception for this exact ordered pair is the only thing
+            // that unlocks it. Checked here rather than trusted from the client, which has
+            // its own copy of the matrix purely to explain the rule, not to enforce it.
+            const approved = await deps.exceptions.isApproved(requesterId, helperId, now);
+            if (!approved) {
+              res.status(403).json({
+                error: "exception-required",
+                reason: decision.reason,
+                requesterId,
+                helperId,
+              });
+              return;
+            }
+            // Exception-gated bookings are scheduled, not live: the approval that permits
+            // them takes up to a working day, so there is a lead time to respect.
+            if (scheduledFor == null) {
+              res.status(422).json({ error: "schedule-required" });
+              return;
+            }
+          }
+        }
+
+        if (scheduledFor != null) {
+          const problem = scheduleProblem(scheduledFor, now);
+          if (problem) {
+            res.status(422).json({
+              error: "invalid-schedule",
+              problem,
+              minimumLeadMs: EXCEPTION_REVIEW_SLA_MS,
+            });
+            return;
+          }
+        }
+
         const price = CATEGORY_PRICING[category];
         const task: Task = {
           id: nanoid(),
           requesterId,
-          helperId: null,
+          // A scheduled booking is already tied to the helper the exception was granted for.
+          // Assigning it here is what stops the search fanning it out to strangers.
+          helperId: helperId ?? null,
           // Narrowed by zod against the real union — no cast (see TASK_CATEGORIES).
           category,
           state: "searching",
@@ -252,6 +327,8 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
           title,
           description,
           price,
+          serviceCode: serviceCode ?? null,
+          scheduledFor: scheduledFor ?? null,
           createdAt: now,
           updatedAt: now,
         };

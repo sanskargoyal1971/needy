@@ -17,6 +17,8 @@ import type { Deps } from "../../domain/deps.js";
 import type { RedisClient, RedisClients } from "../../redis.js";
 import type { Logger } from "../../logger.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
+import { createInMemoryServiceCatalog } from "../../services/catalog.js";
+import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
 import { createInMemorySosRepo, type SosRepository } from "../../domain/sosStore.js";
 import {
   createInMemoryHelperProfileRepo,
@@ -169,7 +171,7 @@ describe("requester SOS reaches a real server (frontend audit: the button called
       state: "in-progress",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, createdAt: FIXED_NOW,
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
 
@@ -185,6 +187,8 @@ describe("requester SOS reaches a real server (frontend audit: the button called
       helpers: createInMemoryHelperProfileRepo(),
       sos,
       users: createInMemoryUserRepo(),
+      services: createInMemoryServiceCatalog(),
+      exceptions: createInMemoryExceptionRepo(),
       now: () => clockNow,
     };
     io.of(NS.sos).use(authMiddleware);

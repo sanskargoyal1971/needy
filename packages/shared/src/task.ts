@@ -39,8 +39,54 @@ export interface Task {
   description: string;
   /** Price in whole rupees, auto-set from CATEGORY_PRICING at creation. */
   price: number;
+
+  /**
+   * Which catalog service was requested (`services.code`).
+   *
+   * Nullable because rows created before the catalog existed have no code beyond what
+   * migration 4's backfill inferred from `category`. Every task created since carries one,
+   * and matching uses it to offer work only to helpers who actually provide that service.
+   */
+  serviceCode: string | null;
+
+  /**
+   * When the task should happen, or null to dispatch NOW.
+   *
+   * Null is the overwhelmingly common case: ordinary bookings are live, the way a
+   * ride-hailing app is. A timestamp appears only on an exception-gated booking, where the
+   * pairing needs a human to review two video testimonies first and the lead time is what
+   * makes that review possible.
+   */
+  scheduledFor: number | null;
+
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * Build a `Task` from the fields a caller actually cares about, defaulting the rest.
+ *
+ * Same rationale as `makeUser` on the backend: this interface has grown twice now, and
+ * without a factory every new field has to be pasted into a dozen fixtures — where the one
+ * that gets missed is `undefined` at runtime while typechecking fine everywhere it was
+ * remembered.
+ *
+ * Defaults are the ordinary case: no schedule (dispatch now) and no service code.
+ */
+export function makeTask(
+  seed: Pick<Task, "id" | "requesterId" | "category" | "state" | "origin" | "title"> &
+    Partial<Task>,
+): Task {
+  return {
+    helperId: null,
+    description: "",
+    price: CATEGORY_PRICING[seed.category],
+    serviceCode: null,
+    scheduledFor: null,
+    createdAt: 0,
+    updatedAt: 0,
+    ...seed,
+  };
 }
 
 /** Terminal states never transition further; the reconnect snapshot uses this to decide

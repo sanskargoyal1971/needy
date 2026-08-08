@@ -7,6 +7,23 @@ function num(name: string, fallback: number): number {
   return n;
 }
 
+/** A comma-separated list of numbers, e.g. `MATCH_RADIUS_WAVES_METERS=1000,5000,10000`.
+ *  Validated strictly and sorted ascending: an unsorted or non-numeric list would produce a
+ *  search that narrows instead of widening, which is the kind of misconfiguration that looks
+ *  like it works until nobody within 1 km is ever reached. */
+function numList(name: string, fallback: number[]): number[] {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return fallback;
+  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const nums = parts.map((p) => {
+    const n = Number(p);
+    if (Number.isNaN(n) || n <= 0) throw new Error(`env ${name} has a non-positive entry: ${p}`);
+    return n;
+  });
+  if (nums.length === 0) throw new Error(`env ${name} is empty`);
+  return [...nums].sort((a, b) => a - b);
+}
+
 /** True when running as a real deployment. Drives the fail-fast secret checks below and the
  *  mounting of dev-only routes (audit A4: `config.env` existed but was read NOWHERE, so
  *  /dev/token — which mints a token for any userId and role — shipped unconditionally). */
@@ -43,7 +60,24 @@ export const config = {
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
   databaseUrl: process.env.DATABASE_URL ?? "",
   match: {
+    /**
+     * The hard ceiling, not the search radius.
+     *
+     * A search does not go straight to 10 km — it walks the waves below. This value is the
+     * cap `accept` re-checks: a helper further away than this may not take the task even if
+     * they somehow received an offer. It must equal the last wave.
+     */
     radiusMeters: num("MATCH_RADIUS_METERS", 10_000),
+    /**
+     * Escalating search rings, in metres, nearest first.
+     *
+     * Offering to everyone within 10 km immediately would be simpler and worse: the nearest
+     * helper is the one who arrives soonest, and a 9 km helper accepting a task a 600 m
+     * helper would also have taken is a worse outcome for the requester and a longer trip
+     * for the helper. Each ring gets its own offer window; if nobody accepts, the next ring
+     * is offered. Progress is stored in Redis so a restart mid-search still escalates.
+     */
+    radiusWavesMeters: numList("MATCH_RADIUS_WAVES_METERS", [1_000, 5_000, 10_000]),
     offerWindowMs: num("MATCH_OFFER_WINDOW_MS", 50_000),
   },
   directions: {

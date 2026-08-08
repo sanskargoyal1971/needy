@@ -1,6 +1,8 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createInMemoryServiceCatalog } from "../../services/catalog.js";
+import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
 // Typed by the ambient `declare module "ioredis-mock"` in src/types/ioredis-mock.d.ts — the
 // package ships none of its own, and it is only ever used through the RedisClient cast below.
 import RedisMock from "ioredis-mock";
@@ -238,9 +240,24 @@ describe("/matching double-accept race (§2.4)", () => {
       state: "searching",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, createdAt: FIXED_NOW,
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
+
+    // The requester needs a durable record too: matching evaluates the eligibility matrix
+    // against BOTH parties, and it fails closed — an unknown requester matches nobody.
+    await users.create(
+      makeUser({
+        id: REQUESTER_ID,
+        phone: "+919111100001",
+        displayName: "Requester",
+        dateOfBirth: "1985-06-15",
+        gender: "male",
+        onboardingStatus: "approved",
+        createdAt: FIXED_NOW,
+        updatedAt: FIXED_NOW,
+      }),
+    );
 
     // Both helpers are online-available, verified, and geographically nearby, so both get the
     // offer. `upsertHelperGeo` takes the publish timestamp now (A1/B9 freshness index).
@@ -255,6 +272,8 @@ describe("/matching double-accept race (§2.4)", () => {
       });
       await users.create(
         makeUser({
+        dateOfBirth: "1985-06-15",
+        gender: "male",
           id: helperId,
           phone: `+9199990${helperId.slice(-1)}`,
           displayName: helperId,
@@ -279,6 +298,8 @@ describe("/matching double-accept race (§2.4)", () => {
       helpers,
       sos: createInMemorySosRepo(),
       users,
+      services: createInMemoryServiceCatalog(),
+      exceptions: createInMemoryExceptionRepo(),
       now: () => FIXED_NOW,
     };
     io.of(NS.matching).use(authMiddleware);

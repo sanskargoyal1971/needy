@@ -26,6 +26,8 @@ interface TaskRow {
   title: string;
   description: string;
   price: number | string;
+  service_code: string | null;
+  scheduled_for: number | string | null;
   created_at: number | string;
   updated_at: number | string;
 }
@@ -41,6 +43,8 @@ function rowToTask(r: TaskRow): Task {
     title: r.title,
     description: r.description,
     price: Number(r.price),
+    serviceCode: r.service_code ?? null,
+    scheduledFor: r.scheduled_for == null ? null : Number(r.scheduled_for),
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
   };
@@ -56,8 +60,9 @@ export function createPgTaskRepo(pool: DbPool): TaskRepository {
     async create(task) {
       await pool.query(
         `INSERT INTO tasks
-           (id, requester_id, helper_id, category, state, origin_lat, origin_lng, title, description, price, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+           (id, requester_id, helper_id, category, state, origin_lat, origin_lng, title,
+            description, price, service_code, scheduled_for, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
         [
           task.id,
           task.requesterId,
@@ -69,6 +74,8 @@ export function createPgTaskRepo(pool: DbPool): TaskRepository {
           task.title,
           task.description,
           task.price,
+          task.serviceCode,
+          task.scheduledFor,
           task.createdAt,
           task.updatedAt,
         ],
@@ -108,6 +115,8 @@ export function createPgTaskRepo(pool: DbPool): TaskRepository {
       if (patch.title !== undefined) put("title", patch.title);
       if (patch.description !== undefined) put("description", patch.description);
       if (patch.price !== undefined) put("price", patch.price);
+      if (patch.serviceCode !== undefined) put("service_code", patch.serviceCode);
+      if (patch.scheduledFor !== undefined) put("scheduled_for", patch.scheduledFor);
       // Always stamp updatedAt so a caller that forgets can't leave a stale timestamp; an
       // explicit value in the patch still wins (callers pass deps.now() for test determinism).
       put("updated_at", patch.updatedAt ?? Date.now());

@@ -10,6 +10,8 @@ import { signAccessToken } from "../../auth/jwt.js";
 import type { Deps } from "../../domain/deps.js";
 import type { RedisClient, RedisClients } from "../../redis.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
+import { createInMemoryServiceCatalog } from "../../services/catalog.js";
+import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
 import { createInMemorySosRepo } from "../../domain/sosStore.js";
 import {
   createInMemoryHelperProfileRepo,
@@ -71,7 +73,7 @@ describe("socket acks are optional on the wire", () => {
       state: "in-progress",
       origin: { lat: 12.9716, lng: 77.5946 },
       title: "groceries",
-      description: "test", price: 100, createdAt: 1,
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: 1,
       updatedAt: 1,
     });
 
@@ -87,6 +89,8 @@ describe("socket acks are optional on the wire", () => {
       helpers: createInMemoryHelperProfileRepo(),
       sos: createInMemorySosRepo(),
       users: createInMemoryUserRepo(),
+      services: createInMemoryServiceCatalog(),
+      exceptions: createInMemoryExceptionRepo(),
       now: () => Date.now(),
     };
     io.of(NS.chat).use(authMiddleware);

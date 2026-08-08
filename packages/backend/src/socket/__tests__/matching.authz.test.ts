@@ -1,6 +1,8 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createInMemoryServiceCatalog } from "../../services/catalog.js";
+import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
 import { Redis } from "ioredis";
 import { Server as IOServer } from "socket.io";
 import { io as ioClient, type Socket as ClientSocket } from "socket.io-client";
@@ -209,7 +211,7 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
       state: "searching",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, createdAt: FIXED_NOW,
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
       ...over,
     });
@@ -255,6 +257,8 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
   const seedUser = (id: string, role: Role, kycStatus: User["kycStatus"]) =>
     users.create(
       makeUser({
+        dateOfBirth: "1985-06-15",
+        gender: "male",
         id,
         phone: `+9199990${id.length}${id.slice(-2)}`,
         displayName: id,
@@ -332,7 +336,18 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
       logger: silentLogger,
       config: {
         ...config,
-        match: { ...config.match, offerWindowMs: OFFER_WINDOW_MS },
+        match: {
+          ...config.match,
+          offerWindowMs: OFFER_WINDOW_MS,
+          // ONE wave, deliberately. This suite's subject is the offer lifecycle — the
+          // audience, the durable expiry claim, the exactly-once close. With the production
+          // three-wave ladder a lapsed window ESCALATES rather than closing, which is correct
+          // behaviour but would mean these assertions were waiting for a closure that is not
+          // due until the outermost ring lapses. Escalation has its own suite
+          // (matching.escalation.test.ts); collapsing the ladder here keeps each test about
+          // one thing.
+          radiusWavesMeters: [config.match.radiusMeters],
+        },
       } as Config,
       tasks,
       messages: createInMemoryMessageRepo(),
@@ -347,6 +362,8 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
       }),
       sos: createInMemorySosRepo(),
       users,
+      services: createInMemoryServiceCatalog(),
+      exceptions: createInMemoryExceptionRepo(),
       now: () => clock,
     };
     io.of(NS.matching).use(authMiddleware);

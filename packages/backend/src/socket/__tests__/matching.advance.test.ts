@@ -23,6 +23,8 @@ import {
 } from "../../domain/stores.js";
 import { createInMemorySosRepo } from "../../domain/sosStore.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
+import { createInMemoryServiceCatalog } from "../../services/catalog.js";
+import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
 import { authMiddleware } from "../auth.js";
 import { registerMatching } from "../matching.js";
 
@@ -84,7 +86,7 @@ describe("/matching advance-task lifecycle guard", () => {
       state: "matched",
       origin: { lat: 12.9716, lng: 77.5946 },
       title: "Pick up medicine",
-      description: "test", price: 100, createdAt: 1_700_000_000_000,
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: 1_700_000_000_000,
       updatedAt: 1_700_000_000_000,
     });
 
@@ -103,6 +105,8 @@ describe("/matching advance-task lifecycle guard", () => {
       // adding fixtures this suite would never read.
       sos: createInMemorySosRepo(),
       users: createInMemoryUserRepo(),
+      services: createInMemoryServiceCatalog(),
+      exceptions: createInMemoryExceptionRepo(),
       now: () => 1_700_000_050_000,
     };
     io.of(NS.matching).use(authMiddleware);

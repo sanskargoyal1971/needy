@@ -1,3 +1,5 @@
+import type { ExceptionRepository } from "./exceptions.js";
+import type { ServiceCatalog } from "../services/catalog.js";
 import type { Server } from "socket.io";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
@@ -27,6 +29,11 @@ export interface Deps {
    *  the JWT (that only ever describes the caller), so eligibility is resolved against the
    *  durable record instead of assumed (audit B11). */
   users: UserRepository;
+  /** Service catalog + helper enrolment. Matching consults it to avoid offering a task to a
+   *  helper who does not provide that service. */
+  services: ServiceCatalog;
+  /** Approved waivers for pairings the eligibility matrix restricts. */
+  exceptions: ExceptionRepository;
   /** Injectable clock so tests are deterministic (rate-limit refills, offer windows,
    *  away-sweeps all read time through this). Defaults to Date.now in production wiring. */
   now: () => number;

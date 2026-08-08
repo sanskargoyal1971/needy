@@ -1,3 +1,4 @@
+import { SEED_SERVICES } from "@needy/shared";
 import type { DbPool } from "./db.js";
 import { CONSTRAINTS_SQL, SCHEMA_SQL } from "./db.js";
 
@@ -218,7 +219,142 @@ export const MIGRATIONS: readonly Migration[] = [
       `CREATE RULE audit_log_no_delete AS ON DELETE TO audit_log DO INSTEAD NOTHING`,
     ],
   },
+  {
+    id: 4,
+    name: "services-exceptions-scheduling",
+    statements: [
+      // ── the catalog ─────────────────────────────────────────────────────────────────────
+      `CREATE TABLE IF NOT EXISTS services (
+         code         TEXT PRIMARY KEY,
+         name         TEXT NOT NULL,
+         description  TEXT NOT NULL DEFAULT '',
+         is_mandatory BOOLEAN NOT NULL DEFAULT FALSE,
+         is_immediate BOOLEAN NOT NULL DEFAULT TRUE,
+         base_price   INTEGER NOT NULL DEFAULT 0,
+         active       BOOLEAN NOT NULL DEFAULT TRUE
+       )`,
+      // Seeded from SEED_SERVICES so a fresh database and a long-running one agree on what
+      // these codes mean. DO UPDATE on name/description/flags but NOT on price: re-running a
+      // migration must not silently re-price services an operator has since adjusted.
+      ...SEED_SERVICES.map(
+        (s) =>
+          `INSERT INTO services (code, name, description, is_mandatory, is_immediate, base_price)
+           VALUES (${lit(s.code)}, ${lit(s.name)}, ${lit(s.description)}, ${s.isMandatory}, ${s.isImmediate}, ${s.basePrice})
+           ON CONFLICT (code) DO UPDATE
+             SET name = EXCLUDED.name,
+                 description = EXCLUDED.description,
+                 is_mandatory = EXCLUDED.is_mandatory,
+                 is_immediate = EXCLUDED.is_immediate`,
+      ),
+
+      // ── which helper offers what ────────────────────────────────────────────────────────
+      `CREATE TABLE IF NOT EXISTS helper_services (
+         helper_id    TEXT NOT NULL,
+         service_code TEXT NOT NULL,
+         created_at   BIGINT NOT NULL,
+         PRIMARY KEY (helper_id, service_code)
+       )`,
+      // The matching filter's query is "who offers X", so the index leads with service_code.
+      // The primary key already covers the other direction.
+      `CREATE INDEX IF NOT EXISTS idx_helper_services_code ON helper_services (service_code)`,
+
+      // Backfill: every existing helper is enrolled in the mandatory services. Without this,
+      // shipping the service filter would empty the hospital pool on deploy — the emergency
+      // path would silently have zero helpers, which is the worst possible regression here.
+      `INSERT INTO helper_services (helper_id, service_code, created_at)
+       SELECT u.id, s.code, 0
+         FROM users u CROSS JOIN services s
+        WHERE u.role IN ('helper','both') AND s.is_mandatory
+       ON CONFLICT DO NOTHING`,
+
+      // ── exceptions ──────────────────────────────────────────────────────────────────────
+      //
+      // A restricted pairing (two young adults of different gender) is unlocked by an
+      // approved exception. Both parties record a video testimony; an admin decides within
+      // one working day. Scoped to a PAIR, not to a person: consenting to be matched with one
+      // specific individual is not consent to have the rule waived generally.
+      `CREATE TABLE IF NOT EXISTS booking_exceptions (
+         id                   TEXT PRIMARY KEY,
+         requester_id         TEXT NOT NULL,
+         helper_id            TEXT NOT NULL,
+         status               TEXT NOT NULL DEFAULT 'awaiting_videos',
+         requester_video_key  TEXT,
+         helper_video_key     TEXT,
+         reviewed_by          TEXT,
+         review_note          TEXT,
+         created_at           BIGINT NOT NULL,
+         submitted_at         BIGINT,
+         decided_at           BIGINT,
+         -- Approvals lapse. An indefinite waiver would mean one review in 2026 still
+         -- authorising a booking in 2029, long after either party could reasonably be said
+         -- to have consented to it.
+         expires_at           BIGINT
+       )`,
+      // One live exception per ordered pair. Partial, so a settled request does not block the
+      // pair from ever applying again — only a request already in flight does.
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_exception_live_pair
+         ON booking_exceptions (requester_id, helper_id)
+         WHERE status IN ('awaiting_videos','under_review')`,
+      `CREATE INDEX IF NOT EXISTS idx_exception_queue ON booking_exceptions (submitted_at)
+         WHERE status = 'under_review'`,
+      `CREATE INDEX IF NOT EXISTS idx_exception_approved
+         ON booking_exceptions (requester_id, helper_id, expires_at)
+         WHERE status = 'approved'`,
+
+      // ── tasks: service, schedule, handoff ───────────────────────────────────────────────
+      `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS service_code TEXT`,
+      // NULL = dispatch now. Set only for exception-gated bookings, which need the lead time
+      // because the review they depend on takes up to a working day.
+      `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS scheduled_for BIGINT`,
+      // Only ever a hash. The code is shown to the requester and typed by the helper; storing
+      // it in the clear would let anyone with database access complete a handoff.
+      `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS handoff_otp_hash TEXT`,
+      `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS handoff_otp_expires_at BIGINT`,
+      `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS handoff_verified_at BIGINT`,
+      // The brief the helper sends before the handoff: what they will and will not do.
+      `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS service_brief TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_tasks_scheduled ON tasks (scheduled_for)
+         WHERE scheduled_for IS NOT NULL AND state = 'searching'`,
+
+      // Existing rows predate the catalog. Map the old free-text category onto a code so the
+      // service filter does not exclude every task created before this migration.
+      `UPDATE tasks SET service_code = CASE category
+         WHEN 'urgent' THEN 'hospital'
+         WHEN 'errand' THEN 'groceries'
+         WHEN 'companionship' THEN 'companion-walk'
+         WHEN 'social-service' THEN 'social-service'
+         ELSE 'groceries' END
+       WHERE service_code IS NULL`,
+    ],
+    tolerant: [
+      `ALTER TABLE helper_services ADD CONSTRAINT fk_helper_services_user
+         FOREIGN KEY (helper_id) REFERENCES users (id) ON DELETE CASCADE`,
+      `ALTER TABLE helper_services ADD CONSTRAINT fk_helper_services_code
+         FOREIGN KEY (service_code) REFERENCES services (code) ON DELETE CASCADE`,
+      `ALTER TABLE booking_exceptions ADD CONSTRAINT fk_exception_requester
+         FOREIGN KEY (requester_id) REFERENCES users (id) ON DELETE CASCADE`,
+      `ALTER TABLE booking_exceptions ADD CONSTRAINT fk_exception_helper
+         FOREIGN KEY (helper_id) REFERENCES users (id) ON DELETE CASCADE`,
+      `ALTER TABLE booking_exceptions ADD CONSTRAINT chk_exception_status CHECK (status IN
+         ('awaiting_videos','under_review','approved','rejected','expired'))`,
+      // A pair cannot vouch for itself.
+      `ALTER TABLE booking_exceptions ADD CONSTRAINT chk_exception_distinct
+         CHECK (requester_id <> helper_id)`,
+      `ALTER TABLE tasks ADD CONSTRAINT fk_tasks_service
+         FOREIGN KEY (service_code) REFERENCES services (code)`,
+    ],
+  },
 ];
+
+/** Single-quote a string for inline SQL.
+ *
+ *  These are compile-time constants from SEED_SERVICES, not user input, so this is about
+ *  correctness (an apostrophe in a description would break the statement) rather than
+ *  injection. Migration statements cannot be parameterised — the runner executes them as
+ *  plain text — so the escaping has to happen here. */
+function lit(s: string): string {
+  return `'${s.replace(/'/g, "''")}'`;
+}
 
 /** Arbitrary but FIXED key. Postgres advisory locks are global per-database and keyed only by
  *  this number, so it must never change and must not collide with another subsystem's lock. */

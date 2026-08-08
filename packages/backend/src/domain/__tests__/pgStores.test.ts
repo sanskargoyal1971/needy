@@ -1,8 +1,7 @@
-import { beforeAll, describe, expect, it } from "vitest";
-import { newDb } from "pg-mem";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Task } from "@needy/shared";
-import type { DbPool } from "../../db.js";
-import { runMigrations, seedHelperProfiles } from "../../db.js";
+import { seedHelperProfiles } from "../../db.js";
+import { PgHarness } from "../../test/pgHarness.js";
 import {
   createPgHelperProfileRepo,
   createPgMessageRepo,
@@ -15,11 +14,16 @@ import type {
 } from "../stores.js";
 
 /**
- * Runs the real durable schema + repository SQL against an in-memory Postgres (pg-mem), so
- * the mappings, ON CONFLICT seeding, BIGINT coercion, and migration idempotency are exercised
- * for real — not just typechecked.
+ * Runs the real repository SQL against a real Postgres with every migration applied.
+ *
+ * Previously this used pg-mem against `runMigrations` — the migration-1 baseline DDL — which
+ * meant it silently fell behind the moment a later migration added a column the repos write.
+ * Migration 4's `service_code` is exactly that case: the repo compiled, the test passed, and
+ * the INSERT would have failed in production. Running the real runner is what keeps this
+ * honest as the schema moves.
  */
 describe("postgres repositories", () => {
+  const harness = new PgHarness();
   let tasks: TaskRepository;
   let messages: MessageRepository;
   let helpers: HelperProfileRepository;
@@ -32,18 +36,13 @@ describe("postgres repositories", () => {
     state: "searching",
     origin: { lat: 12.9716, lng: 77.5946 },
     title: "Pick up medicine",
-    description: "test", price: 100, createdAt: 1_700_000_000_000,
+    description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: 1_700_000_000_000,
     updatedAt: 1_700_000_000_000,
   };
 
   beforeAll(async () => {
-    const mem = newDb();
-    const pool = new (mem.adapters.createPg().Pool)() as unknown as DbPool;
-
-    // Real Postgres makes runMigrations idempotent via CREATE ... IF NOT EXISTS. pg-mem can't
-    // model a repeated CREATE INDEX IF NOT EXISTS, so we run the DDL once here; idempotency of
-    // the seed (ON CONFLICT) is proven by the double-seed below.
-    await runMigrations(pool);
+    await harness.connect();
+    const pool = await harness.freshDb("stores");
 
     await seedHelperProfiles(pool, {
       "helper-priya": {
@@ -68,6 +67,10 @@ describe("postgres repositories", () => {
     tasks = createPgTaskRepo(pool);
     messages = createPgMessageRepo(pool);
     helpers = createPgHelperProfileRepo(pool);
+  });
+
+  afterAll(async () => {
+    await harness.dropAll();
   });
 
   it("creates and reads a task with numeric (not string) timestamps and coords", async () => {

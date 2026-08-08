@@ -1,6 +1,8 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createInMemoryServiceCatalog } from "../../services/catalog.js";
+import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
 import { Redis } from "ioredis";
 import { Server as IOServer } from "socket.io";
 import { io as ioClient, type Socket as ClientSocket } from "socket.io-client";
@@ -136,13 +138,15 @@ describe("/matching offer-expiry claim under a real clock (C19)", () => {
       state: "searching",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, createdAt: now(),
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: now(),
       updatedAt: now(),
     });
 
   const seedUser = (id: string, role: Role, kycStatus: User["kycStatus"]) =>
     users.create(
       makeUser({
+        dateOfBirth: "1985-06-15",
+        gender: "male",
         id,
         phone: `+9199991${id.length}${id.slice(-2)}`,
         displayName: id,
@@ -199,6 +203,8 @@ describe("/matching offer-expiry claim under a real clock (C19)", () => {
       helpers: createInMemoryHelperProfileRepo({}),
       sos: createInMemorySosRepo(),
       users,
+      services: createInMemoryServiceCatalog(),
+      exceptions: createInMemoryExceptionRepo(),
       // REAL clock — the whole point of this file.
       now,
     };

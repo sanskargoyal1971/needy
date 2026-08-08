@@ -3,6 +3,8 @@ import RedisMock from "ioredis-mock";
 import request from "supertest";
 import type { Server } from "socket.io";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createInMemoryServiceCatalog } from "../../services/catalog.js";
+import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
 import { logger } from "../../logger.js";
 import type { Deps } from "../../domain/deps.js";
 import type { RedisClient, RedisClients } from "../../redis.js";
@@ -56,6 +58,8 @@ function makeDeps(redisClient: RedisClient, config: Deps["config"]): Deps {
     helpers: createInMemoryHelperProfileRepo({}),
     sos: createInMemorySosRepo(),
     users: createInMemoryUserRepo(),
+    services: createInMemoryServiceCatalog(),
+      exceptions: createInMemoryExceptionRepo(),
     now: () => NOW,
   };
 }

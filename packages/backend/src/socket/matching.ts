@@ -3,7 +3,9 @@ import {
   AVAILABILITY_TTL_MS,
   canActorTransition,
   canTransition,
+  isLiveDispatchable,
   NS,
+  pairingDecision,
   taskRoleOf,
   type LatLng,
   type MatchedHelper,
@@ -193,53 +195,15 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
           await client.zadd(keys.offerExpiryQueue(), expiresAt, taskId);
         }
 
-        const candidates = await findEligibleHelpers(deps, task);
-
-        // Nobody eligible: release the claim immediately rather than holding the task
-        // "searching with a live offer" for the full window. There is no audience to close, so
-        // there is nothing for the sweep to do, and a requester whose first sweep found zero
-        // helpers should be able to try again as soon as someone comes online — the rate limit
-        // above is what bounds that, not an artificial cooldown.
-        if (candidates.length === 0) {
-          await client.zrem(keys.offerExpiryQueue(), taskId);
-        }
-
-        // Remember the audience so we can fan `offer-closed` out later AND so `accept` can
-        // verify the acceptor was actually offered this task.
-        if (candidates.length > 0) {
-          await client.sadd(
-            keys.offerAudience(taskId),
-            ...candidates.map((c) => c.helperId),
-          );
-          await client.pexpire(
-            keys.offerAudience(taskId),
-            deps.config.match.offerWindowMs + OFFER_AUDIENCE_GRACE_MS,
-          );
-        }
-
-        // Broadcast to EVERY eligible helper simultaneously — never sequential offers.
-        // These emits are synchronous (no awaits between them) so all helpers race fairly.
-        for (const c of candidates) {
-          const offer: MatchOffer = {
-            taskId: task.id,
-            category: task.category,
-            origin: task.origin,
-            title: task.title,
-            distanceMeters: c.distanceMeters,
-            expiresAt,
-          };
-          nsp.to(personalRoom(c.helperId)).emit("offer", offer);
-        }
-
-        // Tell the requester how many helpers we reached, with coarsened pins.
-        nsp.to(personalRoom(task.requesterId)).emit("helpers-nearby", {
-          taskId: task.id,
-          count: candidates.length,
-          approxPoints: candidates.map((c) => ({
-            lat: coarsen(c.point.lat),
-            lng: coarsen(c.point.lng),
-          })),
-        });
+        // Wave 0 — the innermost ring. `broadcastWave` handles the audience bookkeeping,
+        // the fan-out and the "nobody there" release; escalation reuses it unchanged.
+        await client.set(
+          keys.offerWave(taskId),
+          "0",
+          "PX",
+          deps.config.match.offerWindowMs * (deps.config.match.radiusWavesMeters.length + 1),
+        );
+        await broadcastWave(deps, nsp, task, 0, expiresAt);
 
         // Best-effort in-process timer purely for LATENCY: it closes the offer the instant
         // the window lapses instead of waiting up to OFFER_SWEEP_INTERVAL_MS. Correctness
@@ -336,6 +300,22 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
             if (offered !== 1)
               return { won: false as const, reason: "expired" as const };
 
+            // 3. The distance cap, re-checked at accept time rather than trusted from the
+            //    offer. The audience is cumulative across escalation waves and lives a little
+            //    past each window, so membership alone no longer implies "currently within
+            //    range" — and a helper who has driven away since being offered must not be
+            //    able to take a job they can no longer reach. 10 km is a hard ceiling: no
+            //    wave, and no amount of waiting, makes a further helper acceptable.
+            const distanceMeters = await helperDistanceTo(deps, helperId, task);
+            if (distanceMeters != null && distanceMeters > deps.config.match.radiusMeters) {
+              deps.logger.warn("matching accept refused — helper beyond the radius cap", {
+                taskId,
+                helperId,
+                distanceMeters,
+              });
+              return { won: false as const, reason: "expired" as const };
+            }
+
             const updated = await deps.tasks.update(taskId, {
               helperId,
               state: "matched",
@@ -393,6 +373,7 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
             .emit("offer-closed", { taskId, reason: "already-taken" });
         }
         await client.del(keys.offerAudience(taskId));
+        await client.del(keys.offerWave(taskId));
       } catch (err) {
         deps.logger.error("matching accept failed", {
           taskId,
@@ -617,6 +598,7 @@ type AdvanceOutcome =
 async function findEligibleHelpers(
   deps: Deps,
   task: Task,
+  radiusMeters: number,
 ): Promise<Candidate[]> {
   // ioredis returns a loosely-typed array; with WITHCOORD + WITHDIST each entry is
   // [member, distString, [lngString, latString]]. Parse defensively.
@@ -626,12 +608,19 @@ async function findEligibleHelpers(
     task.origin.lng,
     task.origin.lat,
     "BYRADIUS",
-    deps.config.match.radiusMeters,
+    // Never wider than the configured cap, whatever wave asked. Belt and braces against a
+    // caller computing a radius from an index that has drifted past the end of the array.
+    Math.min(radiusMeters, deps.config.match.radiusMeters),
     "m",
     "ASC",
     "WITHCOORD",
     "WITHDIST",
   );
+
+  // The requester's identity facts, read ONCE rather than per candidate. Needed for the
+  // eligibility matrix below; without a record we cannot evaluate the rule, and the rule
+  // fails closed, so an unknown requester matches nobody.
+  const requester = await deps.users.getById(task.requesterId);
 
   // Redis GEO members have no per-member TTL, so the companion freshness index is what
   // expresses availability decay (audit A1/B9). Intersecting here is what stops us offering
@@ -664,6 +653,23 @@ async function findEligibleHelpers(
     const user = await deps.users.getById(member);
     if (!isOfferableHelper(user)) continue;
 
+    // ── the service filter ────────────────────────────────────────────────
+    // Offering a hospital escort to someone who only signed up for grocery runs wastes the
+    // offer window on a helper who will decline. Hospital is mandatory for every helper, so
+    // the emergency path is never narrowed by this.
+    if (task.serviceCode && !(await deps.services.helperOffers(member, task.serviceCode))) {
+      continue;
+    }
+
+    // ── the eligibility matrix ────────────────────────────────────────────
+    // The safety rule, enforced where the offer is made rather than where it is accepted.
+    // Only an outright `allowed` pairing enters live dispatch: a `requires-exception`
+    // pairing is legal only as a scheduled booking once an admin has approved the pair, and
+    // that path does not come through here.
+    if (!isLiveDispatchable(pairingDecision(requester ?? EMPTY_PARTY, user ?? EMPTY_PARTY, deps.now()))) {
+      continue;
+    }
+
     const profile = await deps.helpers.get(member);
     eligible.push({
       helperId: member,
@@ -691,6 +697,11 @@ async function findEligibleHelpers(
  *
  * Fails closed on a missing record: an unknown account is not a verified helper.
  */
+/** Stand-in for a requester whose record could not be read. Both fields null, so
+ *  `pairingDecision` takes its fail-closed branch and denies rather than silently treating
+ *  the missing record as unrestricted. */
+const EMPTY_PARTY = { dateOfBirth: null, gender: null } as const;
+
 function isOfferableHelper(user: User | null): boolean {
   if (!user) return false;
   if (user.role === "admin") return true;
@@ -765,6 +776,40 @@ async function buildMatchedHelper(
  *
  *  Never throws: a missing GEOPOS (an unsupported command in a test double, a wiped index)
  *  must degrade the ETA to null, not lose a won match. */
+/**
+ * Great-circle distance in metres between a helper's current position and a task's origin,
+ * or null if the position is unknown.
+ *
+ * Asked via GEODIST against the same index the offer came from, so it answers with whatever
+ * Redis believes *now* rather than what it believed when the offer went out.
+ *
+ * Returns null — not Infinity — when the position is unavailable, and the caller treats null
+ * as "cannot judge, allow". That is the deliberate direction: the audience check has already
+ * established this helper was legitimately offered the task, and refusing a won match because
+ * a GEO read blipped would strand a requester who has been told help is coming. The cap is a
+ * guard against a stale audience, not the primary authorization.
+ */
+async function helperDistanceTo(
+  deps: Deps,
+  helperId: string,
+  task: Task,
+): Promise<number | null> {
+  try {
+    const point = await readAvailabilityPoint(deps, helperId);
+    if (!point) return null;
+    const R = 6_371_000;
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const dLat = toRad(task.origin.lat - point.lat);
+    const dLng = toRad(task.origin.lng - point.lng);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(point.lat)) * Math.cos(toRad(task.origin.lat)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+  } catch {
+    return null;
+  }
+}
+
 async function readAvailabilityPoint(
   deps: Deps,
   helperId: string,
@@ -920,24 +965,140 @@ async function closeCancelledOffer(
   }
 }
 
-/** Fired when the offer window lapses. If the task is still unmatched, close the offer for
- *  the whole audience and clear the set. No-op once a helper has won the match. */
+/**
+ * Offer a task to everyone eligible within wave `waveIndex`'s radius.
+ *
+ * Shared by the initial search and every escalation, so the two cannot drift — the audience
+ * bookkeeping, the simultaneous fan-out and the "nobody there" release are stated once.
+ *
+ * Re-emits to the WHOLE ring, including helpers already offered in a narrower wave, rather
+ * than only to the newly reachable ones. Their card would otherwise still be showing the
+ * previous wave's `expiresAt` and would look dead while the offer is in fact still live.
+ * Emitting the same `taskId` again is an update, not a duplicate.
+ *
+ * Returns how many helpers were reached, so the caller can decide whether to keep going.
+ */
+async function broadcastWave(
+  deps: Deps,
+  nsp: MatchingNamespace,
+  task: Task,
+  waveIndex: number,
+  expiresAt: number,
+): Promise<number> {
+  const { client } = deps.redis;
+  const waves = deps.config.match.radiusWavesMeters;
+  const radiusMeters = waves[Math.min(waveIndex, waves.length - 1)]!;
+
+  const candidates = await findEligibleHelpers(deps, task, radiusMeters);
+
+  if (candidates.length === 0) {
+    // Nothing to offer in this ring. The caller decides whether a wider one is available;
+    // it is NOT this function's job to release the claim, because on wave 0 an empty ring
+    // means "try the next ring", not "give up".
+    nsp.to(personalRoom(task.requesterId)).emit("helpers-nearby", {
+      taskId: task.id,
+      count: 0,
+      approxPoints: [],
+    });
+    return 0;
+  }
+
+  // Remember the audience so `offer-closed` can be fanned out later AND so `accept` can
+  // verify the acceptor was actually offered this task. Cumulative across waves: a helper
+  // offered at 1 km is still a legitimate acceptor once the search has widened.
+  await client.sadd(keys.offerAudience(task.id), ...candidates.map((c) => c.helperId));
+  await client.pexpire(
+    keys.offerAudience(task.id),
+    deps.config.match.offerWindowMs + OFFER_AUDIENCE_GRACE_MS,
+  );
+
+  // Broadcast to EVERY eligible helper simultaneously — never sequential offers. These
+  // emits are synchronous (no awaits between them) so all helpers race fairly.
+  for (const c of candidates) {
+    const offer: MatchOffer = {
+      taskId: task.id,
+      category: task.category,
+      origin: task.origin,
+      title: task.title,
+      distanceMeters: c.distanceMeters,
+      expiresAt,
+    };
+    nsp.to(personalRoom(c.helperId)).emit("offer", offer);
+  }
+
+  // Tell the requester how many helpers we reached, with coarsened pins.
+  nsp.to(personalRoom(task.requesterId)).emit("helpers-nearby", {
+    taskId: task.id,
+    count: candidates.length,
+    approxPoints: candidates.map((c) => ({
+      lat: coarsen(c.point.lat),
+      lng: coarsen(c.point.lng),
+    })),
+  });
+
+  return candidates.length;
+}
+
+/**
+ * Fired when an offer window lapses.
+ *
+ * Two outcomes, and choosing between them is the whole of the escalation logic:
+ *
+ *  - There is a wider ring left → widen and re-arm. The requester keeps waiting on a search
+ *    that is now looking further out; nobody is told the offer closed, because it hasn't.
+ *  - The outermost ring has lapsed → close for real, tell the audience, clear the state.
+ *
+ * The re-arm re-enters the durable schedule (ZADD), so escalation survives a restart exactly
+ * as the original expiry does. A no-longer-searching task takes the close path regardless,
+ * which is what stops a matched or cancelled task escalating forever.
+ */
 async function expireOffer(
   deps: Deps,
   nsp: MatchingNamespace,
   taskId: string,
 ): Promise<void> {
+  const { client } = deps.redis;
   try {
     const task = await deps.tasks.get(taskId);
-    if (task && task.helperId == null && task.state === "searching") {
-      const audience = await deps.redis.client.smembers(keys.offerAudience(taskId));
-      for (const helperId of audience) {
-        nsp
-          .to(personalRoom(helperId))
-          .emit("offer-closed", { taskId, reason: "expired" });
+    const stillSearching = Boolean(task && task.helperId == null && task.state === "searching");
+
+    if (task && stillSearching) {
+      const waves = deps.config.match.radiusWavesMeters;
+      const current = Number((await client.get(keys.offerWave(taskId))) ?? "0");
+      const next = (Number.isFinite(current) ? current : 0) + 1;
+
+      if (next < waves.length) {
+        const expiresAt = deps.now() + deps.config.match.offerWindowMs;
+        // Re-arm BEFORE broadcasting. If the process dies between the two, the sweep finds a
+        // scheduled entry and retries the wave; the other order would leave an offer out
+        // with nothing scheduled to close it.
+        await client.zadd(keys.offerExpiryQueue(), expiresAt, taskId);
+        await client.set(
+          keys.offerWave(taskId),
+          String(next),
+          "PX",
+          deps.config.match.offerWindowMs * (waves.length + 1),
+        );
+        const reached = await broadcastWave(deps, nsp, task, next, expiresAt);
+        deps.logger.info("matching search widened", {
+          taskId,
+          wave: next,
+          radiusMeters: waves[next],
+          reached,
+        });
+        return;
       }
     }
-    await deps.redis.client.del(keys.offerAudience(taskId));
+
+    // Outermost ring lapsed, or the task is no longer searching: close for real.
+    if (stillSearching) {
+      const audience = await client.smembers(keys.offerAudience(taskId));
+      for (const helperId of audience) {
+        nsp.to(personalRoom(helperId)).emit("offer-closed", { taskId, reason: "expired" });
+      }
+    }
+    await client.del(keys.offerAudience(taskId));
+    await client.del(keys.offerWave(taskId));
   } catch (err) {
     deps.logger.error("matching offer expiry failed", {
       taskId,
