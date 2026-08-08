@@ -62,6 +62,12 @@ import {
   type AuditLogger,
 } from "./audit/log.js";
 import { createStorageProvider } from "./services/storage.js";
+import { createVerificationRouter } from "./admin/verification.js";
+import {
+  createInMemoryAdminUserQueries,
+  createPgAdminUserQueries,
+  type AdminUserQueries,
+} from "./admin/verificationRepo.js";
 
 /** Composition root: build the Deps container, wire the HTTP + socket layers, and start.
  *  Everything above this file depends only on interfaces — this is the one place the
@@ -92,6 +98,7 @@ async function main(): Promise<void> {
   let documentRepo: KycDocumentRepository;
   let phoneBlockRepo: PhoneBlockRepository;
   let audit: AuditLogger;
+  let adminQueries: AdminUserQueries;
   if (config.databaseUrl) {
     pool = createPool(config.databaseUrl);
     // Versioned, advisory-locked migrations (see migrations.ts). Replaces re-executing the
@@ -112,6 +119,7 @@ async function main(): Promise<void> {
     documentRepo = createPgKycDocumentRepo(pool);
     phoneBlockRepo = createPgPhoneBlockRepo(pool);
     audit = createPgAuditLogger(pool, () => Date.now());
+    adminQueries = createPgAdminUserQueries(pool);
     logger.info("using postgres repositories");
   } else {
     repos = {
@@ -119,13 +127,17 @@ async function main(): Promise<void> {
       messages: createInMemoryMessageRepo(),
       helpers: createInMemoryHelperProfileRepo(helperSeed),
     };
-    userRepo = createInMemoryUserRepo();
+    const inMemoryUsers = createInMemoryUserRepo();
+    userRepo = inMemoryUsers;
     sessionRepo = createInMemorySessionRepo();
     sosRepo = createInMemorySosRepo();
     applicationRepo = createInMemoryApplicationRepo();
     documentRepo = createInMemoryKycDocumentRepo();
     phoneBlockRepo = createInMemoryPhoneBlockRepo();
     audit = createLoggingAuditLogger();
+    // The in-memory admin queries read straight out of the in-memory user repo, which is the
+    // only implementation that can enumerate — see the note on InMemoryUserRepository.
+    adminQueries = createInMemoryAdminUserQueries(() => inMemoryUsers.all());
     if (config.isProduction) {
       // Non-durable storage in production means tasks, chat history and SOS alerts vanish
       // on restart. That is a data-loss configuration, not a degraded mode.
@@ -212,6 +224,19 @@ async function main(): Promise<void> {
       documents: documentRepo,
       storage,
       audit,
+      now,
+    }),
+  );
+  app.use(
+    createVerificationRouter({
+      users: userRepo,
+      sessions: sessionRepo,
+      documents: documentRepo,
+      phoneBlocks: phoneBlockRepo,
+      queries: adminQueries,
+      storage,
+      audit,
+      pool,
       now,
     }),
   );

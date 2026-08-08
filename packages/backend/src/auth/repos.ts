@@ -19,10 +19,22 @@ export interface SessionRepository {
 
 // ── in-memory ────────────────────────────────────────────────────────────────
 
-export function createInMemoryUserRepo(): UserRepository {
+/** The in-memory repo additionally exposes `all()`.
+ *
+ *  Not on `UserRepository` itself: that interface is the request path's view, and a `list()`
+ *  there would be an open invitation to scan the users table from a route handler. The admin
+ *  surface needs enumeration and gets it through `AdminUserQueries`, whose in-memory
+ *  implementation is backed by this accessor. Keeping it off the shared interface is what
+ *  stops a full-table read becoming reachable from an ordinary endpoint. */
+export type InMemoryUserRepository = UserRepository & { all(): User[] };
+
+export function createInMemoryUserRepo(): InMemoryUserRepository {
   const byId = new Map<string, User>();
   const byPhone = new Map<string, string>();
   return {
+    all() {
+      return [...byId.values()];
+    },
     async getById(id) {
       return byId.get(id) ?? null;
     },
