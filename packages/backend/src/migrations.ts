@@ -104,6 +104,120 @@ export const MIGRATIONS: readonly Migration[] = [
          ('pending','approved','rejected'))`,
     ],
   },
+  {
+    id: 3,
+    name: "identity-kyc-documents-audit",
+    statements: [
+      // ── users: the identity facts the eligibility matrix and the review queue need ──────
+      //
+      // date_of_birth is a DATE, not a stored age: an age integer is wrong the day after it
+      // is written, and "was this person 18 when they signed up" is not the question the
+      // matrix asks — it asks how old they are *now*, at match time.
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth DATE`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_status TEXT NOT NULL DEFAULT 'draft'`,
+      // Home area. Coarse by design — this is "which part of town do you live in", used to
+      // seed the map, NOT a live position. Live positions belong in Redis with a TTL.
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS area_label TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS area_lat DOUBLE PRECISION`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS area_lng DOUBLE PRECISION`,
+      // Rejection / suspension. Kept on the user row (not only in the audit log) because
+      // every request has to check it, and that check must not be a join.
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS rejection_reason TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_at BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS reviewed_by TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS reviewed_at BIGINT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS submitted_at BIGINT`,
+      // The review queue's only query: pending packets, oldest first. Partial, because the
+      // approved rows are the overwhelming majority and are never selected by it.
+      `CREATE INDEX IF NOT EXISTS idx_users_review_queue ON users (submitted_at)
+         WHERE onboarding_status = 'under_review'`,
+
+      // Existing accounts predate this pipeline. Leaving them at the 'draft' default would
+      // lock out every user the moment the gate ships, so they are graded by what they have:
+      // an already-verified helper keeps their access, everyone else re-verifies.
+      `UPDATE users SET onboarding_status = 'approved'
+         WHERE onboarding_status = 'draft' AND (role = 'admin' OR kyc_status = 'verified')`,
+      `UPDATE users SET onboarding_status = 'identity'
+         WHERE onboarding_status = 'draft'`,
+
+      // ── phone_blocks ────────────────────────────────────────────────────────────────────
+      //
+      // A rejected number must not be able to re-register. The number is stored as an HMAC,
+      // never plaintext: this table is a list of people refused by the platform, which is
+      // exactly the sort of thing that must not become a readable directory in a dump.
+      // HMAC rather than a bare hash so a stolen table cannot be brute-forced offline —
+      // the E.164 keyspace for one country is small enough to enumerate in minutes.
+      `CREATE TABLE IF NOT EXISTS phone_blocks (
+         phone_hmac  TEXT PRIMARY KEY,
+         reason      TEXT NOT NULL,
+         blocked_by  TEXT,
+         blocked_at  BIGINT NOT NULL
+       )`,
+
+      // ── kyc_documents ───────────────────────────────────────────────────────────────────
+      //
+      // Only a storage KEY, never a URL: a URL in a database row outlives the signature that
+      // was supposed to time-limit it, and tends to get logged. Access is always a fresh,
+      // short-lived, admin-authenticated signature minted at read time.
+      `CREATE TABLE IF NOT EXISTS kyc_documents (
+         id           TEXT PRIMARY KEY,
+         user_id      TEXT NOT NULL,
+         kind         TEXT NOT NULL,
+         storage_key  TEXT NOT NULL,
+         content_type TEXT NOT NULL,
+         size_bytes   INTEGER NOT NULL,
+         sha256       TEXT NOT NULL,
+         created_at   BIGINT NOT NULL
+       )`,
+      // One current document per kind per user. A re-upload REPLACES (the wizard lets people
+      // retake a blurry selfie), so the uniqueness is what makes that an UPSERT rather than
+      // an ever-growing pile a reviewer has to pick the newest from.
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_kyc_docs_user_kind ON kyc_documents (user_id, kind)`,
+
+      // ── audit_log ───────────────────────────────────────────────────────────────────────
+      //
+      // Append-only, per AGENTS.md: every SOS trigger, KYC review action and admin override.
+      // Viewing a document is itself an audited act — "who looked at this person's Aadhaar,
+      // and when" is a question this table must be able to answer.
+      `CREATE TABLE IF NOT EXISTS audit_log (
+         id           BIGSERIAL PRIMARY KEY,
+         actor_id     TEXT,
+         actor_role   TEXT,
+         action       TEXT NOT NULL,
+         subject_type TEXT,
+         subject_id   TEXT,
+         metadata     JSONB NOT NULL DEFAULT '{}'::jsonb,
+         ip           TEXT,
+         at           BIGINT NOT NULL
+       )`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log (at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_subject ON audit_log (subject_type, subject_id, at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log (actor_id, at DESC)`,
+    ],
+    tolerant: [
+      `ALTER TABLE users ADD CONSTRAINT chk_users_onboarding_status CHECK (onboarding_status IN
+         ('draft','identity','documents','under_review','approved','rejected'))`,
+      `ALTER TABLE users ADD CONSTRAINT chk_users_gender CHECK (gender IS NULL OR gender IN
+         ('male','female','other'))`,
+      `ALTER TABLE kyc_documents ADD CONSTRAINT fk_kyc_docs_user
+         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE`,
+      `ALTER TABLE kyc_documents ADD CONSTRAINT chk_kyc_docs_kind CHECK (kind IN
+         ('gov_id','selfie','video_testimony'))`,
+
+      // Append-only enforced by the DATABASE, not by convention. A log the application can
+      // rewrite is not evidence of anything: the first thing a compromised admin session or a
+      // careless "clean up the test rows" script does is UPDATE or DELETE. Postgres has no
+      // per-table immutability flag, so this is a rule that rewrites the offending statement
+      // into nothing and raises.
+      //
+      // Tolerant because the app's DB role may lack rule-creation rights on a managed
+      // instance; the log still works, it just loses the hard guarantee, and the operator
+      // gets a warning saying so rather than a service that refuses to boot.
+      `CREATE RULE audit_log_no_update AS ON UPDATE TO audit_log DO INSTEAD NOTHING`,
+      `CREATE RULE audit_log_no_delete AS ON DELETE TO audit_log DO INSTEAD NOTHING`,
+    ],
+  },
 ];
 
 /** Arbitrary but FIXED key. Postgres advisory locks are global per-database and keyed only by

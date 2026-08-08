@@ -16,7 +16,7 @@ import {
 import { config, type Config } from "../../config.js";
 import { signAccessToken } from "../../auth/jwt.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
-import type { Role, User } from "../../auth/types.js";
+import { makeUser, type Role, type User } from "../../auth/types.js";
 import type { Deps } from "../../domain/deps.js";
 import { keys } from "../../domain/keys.js";
 import { upsertHelperGeo } from "../../domain/location-store.js";
@@ -141,16 +141,15 @@ describe("/matching offer-expiry claim under a real clock (C19)", () => {
     });
 
   const seedUser = (id: string, role: Role, kycStatus: User["kycStatus"]) =>
-    users.create({
-      id,
-      phone: `+9199991${id.length}${id.slice(-2)}`,
-      email: null,
-      displayName: id,
-      role,
-      kycStatus,
-      createdAt: 0,
-      updatedAt: 0,
-    });
+    users.create(
+      makeUser({
+        id,
+        phone: `+9199991${id.length}${id.slice(-2)}`,
+        displayName: id,
+        role,
+        kycStatus,
+      }),
+    );
 
   /** Re-list the helper: `accept` de-lists a winner, and availability freshness is scored
    *  against the real clock here, so each new search needs a current publish. */

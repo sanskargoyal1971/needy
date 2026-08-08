@@ -44,6 +44,23 @@ import {
   createPgSessionRepo,
   createPgUserRepo,
 } from "./auth/repos.js";
+import {
+  createInMemoryPhoneBlockRepo,
+  createPgPhoneBlockRepo,
+  type PhoneBlockRepository,
+} from "./auth/phoneBlocks.js";
+import { createOnboardingRouter } from "./onboarding/router.js";
+import {
+  createInMemoryKycDocumentRepo,
+  createPgKycDocumentRepo,
+  type KycDocumentRepository,
+} from "./onboarding/repos.js";
+import {
+  createLoggingAuditLogger,
+  createPgAuditLogger,
+  type AuditLogger,
+} from "./audit/log.js";
+import { createStorageProvider } from "./services/storage.js";
 
 /** Composition root: build the Deps container, wire the HTTP + socket layers, and start.
  *  Everything above this file depends only on interfaces — this is the one place the
@@ -71,6 +88,9 @@ async function main(): Promise<void> {
   let sessionRepo;
   let sosRepo;
   let applicationRepo: HelperApplicationRepository;
+  let documentRepo: KycDocumentRepository;
+  let phoneBlockRepo: PhoneBlockRepository;
+  let audit: AuditLogger;
   if (config.databaseUrl) {
     pool = createPool(config.databaseUrl);
     // Versioned, advisory-locked migrations (see migrations.ts). Replaces re-executing the
@@ -88,6 +108,9 @@ async function main(): Promise<void> {
     sessionRepo = createPgSessionRepo(pool);
     sosRepo = createPgSosRepo(pool);
     applicationRepo = createPgApplicationRepo(pool);
+    documentRepo = createPgKycDocumentRepo(pool);
+    phoneBlockRepo = createPgPhoneBlockRepo(pool);
+    audit = createPgAuditLogger(pool, () => Date.now());
     logger.info("using postgres repositories");
   } else {
     repos = {
@@ -99,6 +122,9 @@ async function main(): Promise<void> {
     sessionRepo = createInMemorySessionRepo();
     sosRepo = createInMemorySosRepo();
     applicationRepo = createInMemoryApplicationRepo();
+    documentRepo = createInMemoryKycDocumentRepo();
+    phoneBlockRepo = createInMemoryPhoneBlockRepo();
+    audit = createLoggingAuditLogger();
     if (config.isProduction) {
       // Non-durable storage in production means tasks, chat history and SOS alerts vanish
       // on restart. That is a data-loss configuration, not a degraded mode.
@@ -115,7 +141,14 @@ async function main(): Promise<void> {
   const smsProvider = createSmsProvider();
   const kycProvider = createKycProvider();
   const otpService = new OtpService(redis.client, smsProvider, config.auth.otp);
-  const authService = new AuthService({ users: userRepo, sessions: sessionRepo, now });
+  const authService = new AuthService({
+    users: userRepo,
+    sessions: sessionRepo,
+    phoneBlocks: phoneBlockRepo,
+    now,
+  });
+  // Refuses to construct in production unless S3 is configured — see createStorageProvider.
+  const storage = createStorageProvider(now);
 
   const deps: Deps = {
     io: undefined as unknown as IOServer, // set below once the server exists
@@ -167,7 +200,17 @@ async function main(): Promise<void> {
       otp: otpService,
       kyc: kycProvider,
       users: userRepo,
+      documents: documentRepo,
       redis: redis.client,
+      now,
+    }),
+  );
+  app.use(
+    createOnboardingRouter({
+      users: userRepo,
+      documents: documentRepo,
+      storage,
+      audit,
       now,
     }),
   );

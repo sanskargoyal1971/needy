@@ -82,7 +82,38 @@ interface UserRow {
   kyc_status: string;
   created_at: number | string;
   updated_at: number | string;
+  onboarding_status: string | null;
+  /** `pg` hands back a JS Date for a DATE column. Normalised to `YYYY-MM-DD` below. */
+  date_of_birth: Date | string | null;
+  gender: string | null;
+  area_label: string | null;
+  area_lat: number | string | null;
+  area_lng: number | string | null;
+  rejection_reason: string | null;
+  blocked_at: number | string | null;
+  reviewed_by: string | null;
+  reviewed_at: number | string | null;
+  submitted_at: number | string | null;
 }
+
+const numOrNull = (v: number | string | null | undefined): number | null =>
+  v == null ? null : Number(v);
+
+/**
+ * A DATE column arrives as a JS `Date` at local midnight. `toISOString()` on that shifts the
+ * calendar day backwards for anyone east of UTC — a user born on the 1st reads as the 31st of
+ * the previous month, which changes their age band on exactly the boundary the matrix cares
+ * about. Formatting from the local getters keeps the day the database stored.
+ */
+function toIsoDate(v: Date | string | null): string | null {
+  if (v == null) return null;
+  if (typeof v === "string") return v.slice(0, 10);
+  const y = v.getFullYear();
+  const m = String(v.getMonth() + 1).padStart(2, "0");
+  const d = String(v.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function rowToUser(r: UserRow): User {
   return {
     id: r.id,
@@ -93,6 +124,19 @@ function rowToUser(r: UserRow): User {
     kycStatus: r.kyc_status as User["kycStatus"],
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
+    // `?? "draft"` covers a row read through a connection that predates migration 3 in tests
+    // that stub the pool; on a migrated database the column is NOT NULL with a default.
+    onboardingStatus: (r.onboarding_status ?? "draft") as User["onboardingStatus"],
+    dateOfBirth: toIsoDate(r.date_of_birth ?? null),
+    gender: (r.gender ?? null) as User["gender"],
+    areaLabel: r.area_label ?? null,
+    areaLat: numOrNull(r.area_lat),
+    areaLng: numOrNull(r.area_lng),
+    rejectionReason: r.rejection_reason ?? null,
+    blockedAt: numOrNull(r.blocked_at),
+    reviewedBy: r.reviewed_by ?? null,
+    reviewedAt: numOrNull(r.reviewed_at),
+    submittedAt: numOrNull(r.submitted_at),
   };
 }
 
@@ -108,9 +152,16 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
     },
     async create(user) {
       await pool.query(
-        `INSERT INTO users (id, phone, email, display_name, role, kyc_status, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [user.id, user.phone, user.email, user.displayName, user.role, user.kycStatus, user.createdAt, user.updatedAt],
+        `INSERT INTO users (id, phone, email, display_name, role, kyc_status, created_at, updated_at,
+                            onboarding_status, date_of_birth, gender, area_label, area_lat, area_lng,
+                            rejection_reason, blocked_at, reviewed_by, reviewed_at, submitted_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+        [
+          user.id, user.phone, user.email, user.displayName, user.role, user.kycStatus,
+          user.createdAt, user.updatedAt, user.onboardingStatus, user.dateOfBirth, user.gender,
+          user.areaLabel, user.areaLat, user.areaLng, user.rejectionReason, user.blockedAt,
+          user.reviewedBy, user.reviewedAt, user.submittedAt,
+        ],
       );
       return user;
     },
@@ -119,8 +170,17 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
       if (!existing) throw new Error(`user not found: ${id}`);
       const next: User = { ...existing, ...patch, id: existing.id };
       await pool.query(
-        `UPDATE users SET phone=$2, email=$3, display_name=$4, role=$5, kyc_status=$6, updated_at=$7 WHERE id=$1`,
-        [next.id, next.phone, next.email, next.displayName, next.role, next.kycStatus, next.updatedAt],
+        `UPDATE users SET phone=$2, email=$3, display_name=$4, role=$5, kyc_status=$6, updated_at=$7,
+                          onboarding_status=$8, date_of_birth=$9, gender=$10, area_label=$11,
+                          area_lat=$12, area_lng=$13, rejection_reason=$14, blocked_at=$15,
+                          reviewed_by=$16, reviewed_at=$17, submitted_at=$18
+         WHERE id=$1`,
+        [
+          next.id, next.phone, next.email, next.displayName, next.role, next.kycStatus,
+          next.updatedAt, next.onboardingStatus, next.dateOfBirth, next.gender, next.areaLabel,
+          next.areaLat, next.areaLng, next.rejectionReason, next.blockedAt, next.reviewedBy,
+          next.reviewedAt, next.submittedAt,
+        ],
       );
       return next;
     },

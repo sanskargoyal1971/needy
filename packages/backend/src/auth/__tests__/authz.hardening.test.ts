@@ -13,6 +13,8 @@ import {
 } from "../../domain/stores.js";
 import { createInMemorySosRepo } from "../../domain/sosStore.js";
 import { createInMemorySessionRepo, createInMemoryUserRepo } from "../repos.js";
+import { createInMemoryKycDocumentRepo } from "../../onboarding/repos.js";
+import { createInMemoryPhoneBlockRepo } from "../phoneBlocks.js";
 import { AuthService } from "../service.js";
 import { OtpService } from "../otp.js";
 import {
@@ -259,6 +261,8 @@ describe("audit A5 — KYC callback authenticity", () => {
     redis = new RedisMock() as unknown as RedisClient;
     users = createInMemoryUserRepo();
     const sessions = createInMemorySessionRepo();
+    const documents = createInMemoryKycDocumentRepo();
+    const phoneBlocks = createInMemoryPhoneBlockRepo();
     const now = () => NOW;
 
     app = express();
@@ -267,7 +271,7 @@ describe("audit A5 — KYC callback authenticity", () => {
     app.use(express.json());
     app.use(
       createAuthRouter({
-        auth: new AuthService({ users, sessions, now }),
+        auth: new AuthService({ users, sessions, phoneBlocks, now }),
         otp: new OtpService(
           redis,
           new ConsoleSmsProvider(),
@@ -276,6 +280,7 @@ describe("audit A5 — KYC callback authenticity", () => {
         ),
         kyc: new SandboxKycProvider(),
         users,
+        documents,
         redis,
         now,
       }),

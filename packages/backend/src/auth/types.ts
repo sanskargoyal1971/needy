@@ -1,3 +1,5 @@
+import type { Gender, OnboardingStatus } from "@needy/shared";
+
 /** Roles are enforced at the API layer (not just the UI). "both" = a user who is both a
  *  requester and an active helper; "admin" gates the trust & safety surfaces (Stage B). */
 export type Role = "requester" | "helper" | "both" | "admin";
@@ -19,6 +21,64 @@ export interface User {
   kycStatus: KycStatus;
   createdAt: number;
   updatedAt: number;
+
+  // ── onboarding / identity (migration 3) ────────────────────────────────────
+  /** Manual-review funnel position. Distinct from `kycStatus`, which reflects the external
+   *  provider seam; this is the gate that actually decides whether a user may transact. */
+  onboardingStatus: OnboardingStatus;
+  /** ISO `YYYY-MM-DD`. Stored as a date rather than an age because the eligibility matrix
+   *  asks how old someone is *now*, and a stored age is wrong the day after it is written. */
+  dateOfBirth: string | null;
+  gender: Gender | null;
+  /** Coarse home area — seeds the map. Never a live position; those live in Redis with a TTL. */
+  areaLabel: string | null;
+  areaLat: number | null;
+  areaLng: number | null;
+  /** Set with `onboardingStatus === "rejected"`; shown on the terminal hold screen. */
+  rejectionReason: string | null;
+  blockedAt: number | null;
+  /** Admin who decided the packet, and when. */
+  reviewedBy: string | null;
+  reviewedAt: number | null;
+  /** When the packet entered the queue — the queue's sort key. */
+  submittedAt: number | null;
+}
+
+/**
+ * Build a `User` from the few fields a caller actually cares about, defaulting the rest.
+ *
+ * Exists because migration 3 took `User` from 8 fields to 19, and without this every call
+ * site — the login path plus a dozen test fixtures — would spell out eleven nulls. That is
+ * not just verbose: it means the next field added has to be pasted into all of them, and the
+ * one that gets missed becomes `undefined` at runtime while typechecking fine everywhere it
+ * was remembered.
+ *
+ * The defaults are the *safe* ones. `onboardingStatus: "identity"` in particular: a user
+ * built without an explicit status is un-onboarded and cannot transact, so a forgotten field
+ * fails closed rather than granting access.
+ */
+export function makeUser(seed: Pick<User, "id" | "phone"> & Partial<User>): User {
+  const now = seed.createdAt ?? 0;
+  return {
+    email: null,
+    displayName: `User ${seed.phone.slice(-4)}`,
+    role: "requester",
+    kycStatus: "unverified",
+    createdAt: now,
+    updatedAt: now,
+    onboardingStatus: "identity",
+    dateOfBirth: null,
+    gender: null,
+    areaLabel: null,
+    areaLat: null,
+    areaLng: null,
+    rejectionReason: null,
+    blockedAt: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    submittedAt: null,
+    ...seed,
+  };
 }
 
 export interface Session {

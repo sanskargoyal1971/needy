@@ -1,35 +1,43 @@
-import { beforeAll, describe, expect, it } from "vitest";
-import { newDb } from "pg-mem";
-import type { DbPool } from "../../db.js";
-import { runMigrations } from "../../db.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPgSessionRepo, createPgUserRepo } from "../repos.js";
 import type { SessionRepository, UserRepository } from "../repos.js";
+import { makeUser } from "../types.js";
+import { PgHarness } from "../../test/pgHarness.js";
 
-/** Runs the real users/sessions SQL against pg-mem so the Postgres identity repos have an
- *  exercised read path (no write-only tables), matching the in-memory coverage in auth.test. */
+/** Exercises the Postgres identity repos against a real database with every migration
+ *  applied, so the tables have a read path and not just a write one.
+ *
+ *  Previously this ran on pg-mem against `runMigrations` (the migration-1 baseline DDL), which
+ *  meant it silently fell behind the moment migration 3 added columns the repo writes: the
+ *  repo compiled, the test passed, and the INSERT would have failed in production. Running
+ *  the real runner is what keeps this test honest as the schema moves.
+ */
 describe("postgres auth repositories", () => {
+  const harness = new PgHarness();
   let users: UserRepository;
   let sessions: SessionRepository;
 
   beforeAll(async () => {
-    const mem = newDb();
-    const pool = new (mem.adapters.createPg().Pool)() as unknown as DbPool;
-    await runMigrations(pool);
+    await harness.connect();
+    const pool = await harness.freshDb("auth_repos");
     users = createPgUserRepo(pool);
     sessions = createPgSessionRepo(pool);
   });
 
+  afterAll(async () => {
+    await harness.dropAll();
+  });
+
   it("creates, reads (by id + phone) and updates a user", async () => {
-    await users.create({
-      id: "u1",
-      phone: "+919876543210",
-      email: null,
-      displayName: "User 3210",
-      role: "requester",
-      kycStatus: "unverified",
-      createdAt: 1_700_000_000_000,
-      updatedAt: 1_700_000_000_000,
-    });
+    await users.create(
+      makeUser({
+        id: "u1",
+        phone: "+919876543210",
+        displayName: "User 3210",
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_000_000,
+      }),
+    );
     expect((await users.getById("u1"))?.phone).toBe("+919876543210");
     expect((await users.getByPhone("+919876543210"))?.id).toBe("u1");
 

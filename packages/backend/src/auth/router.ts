@@ -1,14 +1,16 @@
 import express, { Router, type Request, type Response } from "express";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import type { DocumentKind } from "@needy/shared";
 import { config } from "../config.js";
 import { keys } from "../domain/keys.js";
 import type { RedisClient } from "../redis.js";
 import { logger } from "../logger.js";
 import { asyncRoute } from "../http/asyncRoute.js";
-import { AuthService } from "./service.js";
+import { AuthService, PhoneBlockedError } from "./service.js";
 import type { OtpService } from "./otp.js";
 import { KYC_SIGNATURE_HEADER, verifyKycSignature, type KycProvider } from "./providers.js";
+import type { KycDocumentRepository } from "../onboarding/repos.js";
 import type { UserRepository } from "./repos.js";
 import type { User } from "./types.js";
 import { clearAuthCookies, parseCookies, REFRESH_COOKIE, setAuthCookies } from "./cookies.js";
@@ -26,12 +28,23 @@ export interface AuthRouterDeps {
   otp: OtpService;
   kyc: KycProvider;
   users: UserRepository;
+  documents: KycDocumentRepository;
   redis: RedisClient;
   now: () => number;
 }
 
-/** Strip internal fields before returning a user to the client. */
-function publicUser(u: User) {
+/**
+ * Strip internal fields before returning a user to the client.
+ *
+ * Assembled by hand rather than spreading the row and deleting: a spread means every column
+ * added later is exposed by default, and the columns added later here are `reviewedBy`,
+ * `reviewedAt` and `blockedAt` — reviewer-side facts that are staff's business, not the
+ * subject's. An allowlist fails safe; a denylist fails open.
+ *
+ * `documents` is passed in rather than read here because most callers already hold the list
+ * and the ones that don't (login, refresh) genuinely have nothing to show yet.
+ */
+function publicUser(u: User, documents: DocumentKind[] = []) {
   return {
     id: u.id,
     phone: u.phone,
@@ -39,6 +52,12 @@ function publicUser(u: User) {
     displayName: u.displayName,
     role: u.role,
     kycStatus: u.kycStatus,
+    onboardingStatus: u.onboardingStatus,
+    dateOfBirth: u.dateOfBirth,
+    gender: u.gender,
+    areaLabel: u.areaLabel,
+    rejectionReason: u.rejectionReason,
+    documents,
   };
 }
 
@@ -197,6 +216,13 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         setAuthCookies(res, issued.accessToken, issued.refreshToken);
         res.json({ user: publicUser(issued.user) });
       } catch (err) {
+        // A blocked number is a decision, not a failure: answer 403 with a distinct code so
+        // the client shows the terminal screen instead of "something went wrong, try again".
+        if (err instanceof PhoneBlockedError) {
+          logger.warn("login refused — phone is blocked");
+          res.status(403).json({ error: "phone-blocked" });
+          return;
+        }
         logger.error("otp verify failed", { err: String(err) });
         res.status(500).json({ error: "login-failed" });
       }
@@ -253,7 +279,10 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         res.status(404).json({ error: "user-not-found" });
         return;
       }
-      res.json({ user: publicUser(user) });
+      // Documents come back with the session so the wizard can resume on a new device from
+      // server truth rather than from whatever step localStorage last remembered.
+      const docs = await deps.documents.listForUser(user.id);
+      res.json({ user: publicUser(user, docs.map((d) => d.kind)) });
     }),
   );
 

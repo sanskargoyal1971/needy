@@ -5,6 +5,8 @@ import request from "supertest";
 import { config } from "../../config.js";
 import type { RedisClient } from "../../redis.js";
 import { createInMemorySessionRepo, createInMemoryUserRepo } from "../repos.js";
+import { createInMemoryKycDocumentRepo } from "../../onboarding/repos.js";
+import { createInMemoryPhoneBlockRepo } from "../phoneBlocks.js";
 import { AuthService } from "../service.js";
 import { OtpService } from "../otp.js";
 import {
@@ -50,6 +52,8 @@ describe("Stage A — auth", () => {
     redis = new RedisMock() as unknown as RedisClient;
     const users = createInMemoryUserRepo();
     const sessions = createInMemorySessionRepo();
+    const documents = createInMemoryKycDocumentRepo();
+    const phoneBlocks = createInMemoryPhoneBlockRepo();
     const now = () => NOW;
     app = express();
     // The raw-body capture is scoped to the KYC callback path only and mounted BEFORE the
@@ -59,7 +63,7 @@ describe("Stage A — auth", () => {
     app.use(express.json());
     app.use(
       createAuthRouter({
-        auth: new AuthService({ users, sessions, now }),
+        auth: new AuthService({ users, sessions, phoneBlocks, now }),
         otp: new OtpService(
           redis,
           new ConsoleSmsProvider(),
@@ -68,6 +72,7 @@ describe("Stage A — auth", () => {
         ),
         kyc: new SandboxKycProvider(),
         users,
+        documents,
         redis,
         now,
       }),

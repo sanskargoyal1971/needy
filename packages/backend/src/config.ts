@@ -51,6 +51,30 @@ export const config = {
     apiKey: process.env.DIRECTIONS_API_KEY ?? "",
   },
   /**
+   * Private object storage for KYC documents (gov ID, selfie, video testimony).
+   *
+   * `local` is a development adapter writing to a gitignored directory. `createStorageProvider`
+   * refuses to start a production process on it — KYC video on a container filesystem is lost
+   * on restart and unencrypted at rest, and both of those are worth failing loudly over rather
+   * than discovering during an incident.
+   */
+  storage: {
+    driver: (process.env.STORAGE_DRIVER ?? "local") as "local" | "s3",
+    /** Relative to the process CWD. Must stay outside any statically-served path. */
+    localRoot: process.env.STORAGE_LOCAL_ROOT ?? "private-uploads",
+    /** Origin the local adapter builds signed URLs against — this server's own public URL. */
+    publicBase: process.env.PUBLIC_BASE_URL ?? `http://localhost:${num("PORT", 4000)}`,
+    bucket: process.env.S3_BUCKET ?? "",
+    region: process.env.S3_REGION ?? "ap-south-1",
+    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "",
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "",
+    /** Override for S3-compatible stores (MinIO, R2). Empty = real AWS. */
+    endpoint: process.env.S3_ENDPOINT ?? "",
+    /** How long an admin's document view link stays valid. Deliberately short: the link is
+     *  minted on demand when a reviewer opens a packet, so it never needs to outlive that. */
+    signedUrlTtlSeconds: num("STORAGE_SIGNED_URL_TTL_SECONDS", 120),
+  },
+  /**
    * Express `trust proxy` setting, off by default.
    *
    * This governs whether `req.ip` comes from `X-Forwarded-For`, which the per-IP OTP limiter

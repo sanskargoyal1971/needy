@@ -26,6 +26,7 @@ import { upsertHelperGeo } from "../../domain/location-store.js";
 import { writePresence } from "../../domain/presence-store.js";
 import { createInMemorySosRepo } from "../../domain/sosStore.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
+import { makeUser } from "../../auth/types.js";
 import { authMiddleware } from "../auth.js";
 import { registerMatching } from "../matching.js";
 
@@ -252,16 +253,17 @@ describe("/matching double-accept race (§2.4)", () => {
         activity: "idle",
         lastActiveAt: FIXED_NOW,
       });
-      await users.create({
-        id: helperId,
-        phone: `+9199990${helperId.slice(-1)}`,
-        email: null,
-        displayName: helperId,
-        role: "helper",
-        kycStatus: "verified",
-        createdAt: FIXED_NOW,
-        updatedAt: FIXED_NOW,
-      });
+      await users.create(
+        makeUser({
+          id: helperId,
+          phone: `+9199990${helperId.slice(-1)}`,
+          displayName: helperId,
+          role: "helper",
+          kycStatus: "verified",
+          createdAt: FIXED_NOW,
+          updatedAt: FIXED_NOW,
+        }),
+      );
     }
 
     // ── Minimal io server that wires the real registrar (no index.ts bootstrap). ──

@@ -19,7 +19,7 @@ import {
 import { config, type Config } from "../../config.js";
 import { signAccessToken } from "../../auth/jwt.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
-import type { Role, User } from "../../auth/types.js";
+import { makeUser, type Role, type User } from "../../auth/types.js";
 import type { Deps } from "../../domain/deps.js";
 import { keys } from "../../domain/keys.js";
 import { setTaskLocation, upsertHelperGeo } from "../../domain/location-store.js";
@@ -253,16 +253,17 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
   };
 
   const seedUser = (id: string, role: Role, kycStatus: User["kycStatus"]) =>
-    users.create({
-      id,
-      phone: `+9199990${id.length}${id.slice(-2)}`,
-      email: null,
-      displayName: id,
-      role,
-      kycStatus,
-      createdAt: FIXED_NOW,
-      updatedAt: FIXED_NOW,
-    });
+    users.create(
+      makeUser({
+        id,
+        phone: `+9199990${id.length}${id.slice(-2)}`,
+        displayName: id,
+        role,
+        kycStatus,
+        createdAt: FIXED_NOW,
+        updatedAt: FIXED_NOW,
+      }),
+    );
 
   beforeAll(async () => {
     process.on("unhandledRejection", (r) => rejections.push(r));
