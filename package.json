@@ -6,8 +6,7 @@
   "workspaces": [
     "packages/shared",
     "packages/backend",
-    "packages/frontend",
-    "packages/landing"
+    "packages/web"
   ],
   "scripts": {
     "infra:up": "docker compose up -d",
@@ -15,9 +14,8 @@
     "build:shared": "npm run build --workspace @needy/shared",
     "build": "npm run build --workspaces --if-present",
     "dev:backend": "npm run dev --workspace @needy/backend",
-    "dev:frontend": "npm run dev --workspace @needy/frontend",
-    "dev:landing": "npm run dev --workspace @needy/landing",
-    "dev": "npm run build:shared && concurrently -n backend,frontend,landing -c blue,magenta,green \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:landing\"",
+    "dev:web": "npm run dev --workspace @needy/web",
+    "dev": "npm run build:shared && concurrently -n backend,web -c blue,magenta \"npm run dev:backend\" \"npm run dev:web\"",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

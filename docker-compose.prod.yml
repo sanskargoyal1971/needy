@@ -48,24 +48,23 @@ services:
       redis:
         condition: service_healthy
 
-  landing:
+  # The single Next.js app: marketing, signup/KYC, requester, helper and admin.
+  # NEXT_PUBLIC_* are inlined by `next build`, so the API origin is a BUILD arg — setting it
+  # as a runtime `environment:` entry would have no effect on the compiled bundle.
+  web:
     build:
       context: .
-      dockerfile: packages/landing/Dockerfile
+      dockerfile: packages/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
     restart: always
     environment:
       - NODE_ENV=production
       - PORT=3000
     ports:
       - "80:3000"
-
-  frontend:
-    build:
-      context: .
-      dockerfile: packages/frontend/Dockerfile
-    restart: always
-    ports:
-      - "3000:80"
+    depends_on:
+      - backend
 
 volumes:
   redis-data:

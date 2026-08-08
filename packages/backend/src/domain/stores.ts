@@ -108,8 +108,11 @@ export function createInMemoryHelperProfileRepo(
     async get(helperId) {
       return profiles.get(helperId) ?? null;
     },
-    async addEarnings(helperId, amount) {
-      // In-memory doesn't store earnings on the basic profile seed right now
+    async addEarnings(_helperId, _amount) {
+      // Intentionally a no-op. The in-memory store backs tests and the no-Postgres dev boot,
+      // where the seeded profile has no earnings ledger to credit; the Postgres store in
+      // pgStores.ts is the one that actually persists. Named with `_` so the unused-args rule
+      // records this as deliberate rather than an unfinished implementation.
     },
   };
 }

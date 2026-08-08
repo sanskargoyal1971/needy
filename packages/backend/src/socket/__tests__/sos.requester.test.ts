@@ -203,7 +203,9 @@ describe("requester SOS reaches a real server (frontend audit: the button called
     // the same broadcast path rather than a special case.
     for (const s of await io.of(NS.sos).fetchSockets()) {
       if ((s.data as { user: { sub: string } }).user.sub === "operator-1") {
-        await s.join(SOS_OPERATOR_ROOM);
+        // Not awaited: RemoteSocket#join returns void for a single-node adapter, and awaiting
+        // a non-thenable is the lint rule's way of flagging a mistaken assumption about the API.
+        s.join(SOS_OPERATOR_ROOM);
       }
     }
   });

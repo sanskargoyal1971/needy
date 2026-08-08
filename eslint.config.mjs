@@ -17,7 +17,29 @@ import globals from "globals";
  *     was the reason several expiry paths had no coverage.
  */
 export default tseslint.config(
-  { ignores: ["**/dist/**", "**/coverage/**", "**/node_modules/**", "**/*.tsbuildinfo"] },
+  {
+    ignores: [
+      "**/dist/**",
+      "**/coverage/**",
+      "**/node_modules/**",
+      "**/*.tsbuildinfo",
+      // Next's build output. `.next/` contains generated + minified JS and its own type
+      // shims; linting it produced thousands of errors about code nobody wrote.
+      "**/.next/**",
+      "**/next-env.d.ts",
+      // Claude workflow scripts run in a sandbox that injects agent()/phase()/pipeline() as
+      // globals. They are not part of the app build and cannot be linted as ordinary ESM.
+      ".claude/workflows/**",
+    ],
+  },
+
+  // Config files at a package root are Node ESM, not browser code. Without this they are
+  // linted with the default (browser-less, Node-less) globals and `URL`/`process` read as
+  // undefined.
+  {
+    files: ["**/*.config.{mjs,js,ts}", "**/postcss.config.{mjs,js}"],
+    languageOptions: { globals: { ...globals.node, ...globals.es2022 } },
+  },
 
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -68,9 +90,9 @@ export default tseslint.config(
     },
   },
 
-  // ── Frontend: browser globals, JSX, no type-aware rules (much slower, less payoff here).
+  // ── Web: browser globals, JSX, no type-aware rules (much slower, less payoff here).
   {
-    files: ["packages/frontend/src/**/*.{ts,tsx}"],
+    files: ["packages/web/src/**/*.{ts,tsx}"],
     languageOptions: {
       parserOptions: { ecmaFeatures: { jsx: true } },
       globals: { ...globals.browser, ...globals.es2022 },
