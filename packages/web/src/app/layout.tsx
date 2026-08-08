@@ -3,6 +3,7 @@ import { Inter, Merriweather } from "next/font/google";
 import "./globals.css";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
+import { AuthProvider } from "@/auth/AuthProvider";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -28,11 +29,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} ${merriweather.variable} font-sans antialiased bg-background text-foreground min-h-screen flex flex-col`}>
-        <Header />
-        <main className="flex-grow">
-          {children}
-        </main>
-        <Footer />
+        {/* Wraps everything, including the Header, so the nav can reflect the session. The
+            provider is a client component; the layout itself stays a server component, so
+            marketing pages are still statically rendered. */}
+        <AuthProvider>
+          <Header />
+          <main className="flex-grow">{children}</main>
+          <Footer />
+        </AuthProvider>
       </body>
     </html>
   );

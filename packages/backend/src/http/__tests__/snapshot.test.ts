@@ -17,6 +17,7 @@ import { createInMemorySosRepo } from "../../domain/sosStore.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { setTaskLocation } from "../../domain/location-store.js";
 import { createHttpRouter } from "../router.js";
+import { makeUser } from "../../auth/types.js";
 
 /** §2.1 — the reconnect SNAPSHOT endpoint is the authoritative post-drop truth. This test
  *  drives it end-to-end over HTTP: mint a token, open a task, promote it to a matched +
@@ -36,6 +37,11 @@ let redis: RedisClients;
 let deps: Deps;
 
 /** Seed a helper profile so the reveal card (MatchedHelper) can be populated on match. */
+/** POST /tasks is behind `requireOnboarded`, which reads the user row rather than the JWT so
+ *  a reviewer's decision takes effect immediately rather than at token expiry. The dev token
+ *  alone is therefore no longer sufficient — the account has to exist and be approved. */
+const users = createInMemoryUserRepo();
+
 const helpers = createInMemoryHelperProfileRepo({
   [HELPER_ID]: {
     id: HELPER_ID,
@@ -46,7 +52,16 @@ const helpers = createInMemoryHelperProfileRepo({
   },
 });
 
-beforeAll(() => {
+beforeAll(async () => {
+  await users.create(
+    makeUser({
+      id: "requester-1",
+      phone: "+919000000900",
+      displayName: "Alex",
+      onboardingStatus: "approved",
+    }),
+  );
+
   const client = new RedisMock();
   redis = {
     client,
@@ -65,7 +80,7 @@ beforeAll(() => {
     // Unused by /snapshot, but the container is a single shape and a partial one would only
     // typecheck by casting — which is how a missing dependency stays invisible until runtime.
     sos: createInMemorySosRepo(),
-    users: createInMemoryUserRepo(),
+    users,
     now: () => NOW,
   };
 

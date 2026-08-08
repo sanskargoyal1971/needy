@@ -15,6 +15,7 @@ import { getTaskLocation } from "../domain/location-store.js";
 import { readPresence } from "../domain/presence-store.js";
 import { signAccessToken, type AuthClaims } from "../auth/jwt.js";
 import { readAccessClaims } from "../auth/middleware.js";
+import { requireOnboarded } from "../auth/onboardingGate.js";
 import { computeEta } from "../services/eta.js";
 import { asyncRoute } from "./asyncRoute.js";
 
@@ -185,6 +186,13 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
       return;
     }
     req.userId = claims.sub;
+    // Also publish the full claims under `user`, which is the shape the shared middleware in
+    // auth/middleware.ts sets and therefore what everything downstream of it reads. This
+    // router predates that module and had its own narrower convention; chaining a shared
+    // guard like `requireOnboarded` after this one silently saw no principal and failed
+    // closed with a 401, which reads exactly like an expired token and is a genuinely
+    // confusing way to debug. Setting both keeps the two conventions from diverging again.
+    (req as AuthedRequest & { user?: typeof claims }).user = claims;
     next();
   };
 
@@ -218,6 +226,10 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
   router.post(
     "/tasks",
     requireAuth,
+    // Creating a task is transacting, and an unapproved account may not. Placed BEFORE body
+    // validation deliberately: an unapproved caller should be told they are not approved, not
+    // handed a field-by-field critique of a request that was never going to be accepted.
+    requireOnboarded({ users: deps.users }),
     asyncRoute(async (req: AuthedRequest, res: Response) => {
       const requesterId = req.userId!;
       const parsed = createTaskSchema.safeParse(req.body ?? {});

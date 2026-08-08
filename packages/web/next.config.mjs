@@ -2,9 +2,13 @@
 const nextConfig = {
   output: "standalone",
 
-  // The monorepo root is two levels up; without this Next infers the workspace root from the
-  // nearest lockfile and traces the wrong files into the standalone bundle.
-  outputFileTracingRoot: new URL("../../", import.meta.url).pathname,
+  experimental: {
+    // The monorepo root is two levels up; without this Next infers the workspace root from
+    // the nearest lockfile and traces the wrong files into the standalone bundle. Lives under
+    // `experimental` in Next 14 — top-level is the Next 15 spelling and is silently ignored
+    // here (it warns as an unrecognized key rather than failing).
+    outputFileTracingRoot: new URL("../../", import.meta.url).pathname,
+  },
 
   eslint: {
     // Linting is owned by the root flat config (`npm run lint`), which already covers

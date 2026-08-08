@@ -10,6 +10,7 @@ import { config } from "./config.js";
 import { logger } from "./logger.js";
 import { createRedisClients } from "./redis.js";
 import { authMiddleware } from "./socket/auth.js";
+import { createSocketOnboardingGate } from "./socket/onboardingGate.js";
 import { registerPresence } from "./socket/presence.js";
 import { registerTracking } from "./socket/tracking.js";
 import { registerMatching } from "./socket/matching.js";
@@ -239,9 +240,16 @@ async function main(): Promise<void> {
   // Redis adapter so presence/matching/tracking broadcasts fan out across instances.
   io.adapter(createAdapter(redis.pub, redis.sub));
 
-  // Authenticate every namespace handshake with the same short-lived JWT as REST (§2.1).
+  // Authenticate every namespace handshake with the same short-lived JWT as REST (§2.1),
+  // then require an approved account before any of them will carry traffic.
+  //
+  // The gate has to be here and not only on POST /tasks: accepting an offer, chatting and
+  // publishing a location all travel over Socket.io, so gating the REST route alone would
+  // leave an unapproved helper able to accept work by connecting to /matching directly.
+  const socketOnboardingGate = createSocketOnboardingGate(userRepo);
   for (const ns of Object.values(NS)) {
     io.of(ns).use(authMiddleware);
+    io.of(ns).use(socketOnboardingGate);
   }
 
   // Wire each concern onto its namespace. Order is irrelevant — they never touch each other.
