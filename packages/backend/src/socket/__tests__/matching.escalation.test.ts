@@ -5,6 +5,7 @@ import { Redis } from "ioredis";
 import { Server as IOServer } from "socket.io";
 import { io as ioClient, type Socket as ClientSocket } from "socket.io-client";
 import {
+  makeTask,
   NS,
   type LatLng,
   type MatchingClientEvents,
@@ -269,45 +270,45 @@ describe("matching: radius escalation, eligibility and service filters", () => {
   }, 20_000);
 
   it("closes the offer for real once the outermost ring lapses", async () => {
-    await publish(NEAR, eastOf(0.4));
-    const s = await openSockets([REQUESTER + "-b", NEAR + "-b"]);
-    await adult(REQUESTER + "-b");
-    await adult(NEAR + "-b");
-    await publish(NEAR + "-b", eastOf(0.4));
+    // Its own requester/helper pair, published fresh: this case walks the whole ladder and
+    // must not depend on what an earlier case left in the geo index.
+    const R = "esc-close-req";
+    const H = "esc-close-helper";
+    await adult(R);
+    await adult(H);
+    await services.setHelperServices(H, [], clock);
+    await publish(H, eastOf(0.4));
 
+    const s = await openSockets([R, H]);
     const closed: { taskId: string; reason: string }[] = [];
-    s[NEAR + "-b"]!.on("offer-closed", (p) => closed.push(p as { taskId: string; reason: string }));
+    s[H]!.on("offer-closed", (p) => closed.push(p as { taskId: string; reason: string }));
 
     const taskId = "esc-task-close";
-    await tasks.create({
-      id: taskId,
-      requesterId: REQUESTER + "-b",
-      helperId: null,
-      category: "errand",
-      state: "searching",
-      origin: ORIGIN,
-      title: "x",
-      description: "t",
-      price: 149,
-      serviceCode: null,
-      scheduledFor: null,
-      serviceBrief: null,
-      handoffOtpHash: null,
-      handoffOtpExpiresAt: null,
-      handoffVerifiedAt: null,
-      createdAt: clock,
-      updatedAt: clock,
-    });
-    await new Promise<void>((r) =>
-      s[REQUESTER + "-b"]!.emit("request-help", { taskId }, () => r()),
+    await tasks.create(
+      makeTask({
+        id: taskId,
+        requesterId: R,
+        category: "errand",
+        state: "searching",
+        origin: ORIGIN,
+        title: "x",
+        createdAt: clock,
+        updatedAt: clock,
+      }),
     );
+    await new Promise<void>((r) => s[R]!.emit("request-help", { taskId }, () => r()));
 
-    // Walk past every wave. Only after the last one should a closure arrive — a requester
-    // whose search is still widening must not be told it ended.
-    for (let i = 0; i < 3; i++) {
+    // Walk past every wave. Poll rather than sleeping a fixed amount: the sweep runs on a
+    // real-time interval while the offer window is measured on the injected clock, so a fixed
+    // sleep is a race that fails on a loaded machine and proves nothing when it passes.
+    const deadline = Date.now() + 12_000;
+    while (closed.length === 0 && Date.now() < deadline) {
       clock += OFFER_WINDOW_MS + 50;
-      await sleep(1_300);
+      await sleep(250);
     }
+
+    // Exactly one closure, and only after the outermost ring — a requester whose search is
+    // still widening must never be told it ended.
     expect(closed.filter((c) => c.taskId === taskId)).toHaveLength(1);
     expect(closed[0]?.reason).toBe("expired");
   }, 25_000);

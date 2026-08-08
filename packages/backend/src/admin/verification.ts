@@ -18,6 +18,7 @@ import { asyncRoute } from "../http/asyncRoute.js";
 import { logger } from "../logger.js";
 import type { KycDocumentRepository } from "../onboarding/repos.js";
 import { verifyLocalSignature, type StorageProvider } from "../services/storage.js";
+import type { ServiceCatalog } from "../services/catalog.js";
 import type { AdminUserQueries } from "./verificationRepo.js";
 
 /** ── Admin verification surface ────────────────────────────────────────────
@@ -41,6 +42,8 @@ export interface VerificationRouterDeps {
   documents: KycDocumentRepository;
   phoneBlocks: PhoneBlockRepository;
   queries: AdminUserQueries;
+  /** Used on approval to enrol a new helper in the mandatory services. */
+  services: ServiceCatalog;
   storage: StorageProvider;
   audit: AuditLogger;
   pool: DbPool | null;
@@ -235,6 +238,26 @@ export function createVerificationRouter(deps: VerificationRouterDeps): Router {
           metadata: { role: updated.role, note: body.reason ?? null },
           ip: ip(req),
         });
+
+        // ── enrol a new helper in the mandatory services ────────────────────
+        //
+        // Migration 4 backfilled the helpers that already existed, but nothing enrolled the
+        // ones approved AFTER it ran — so every helper onboarded from here on would have had
+        // an empty service list and been filtered out of every offer, including the hospital
+        // pool the whole platform treats as the emergency path. Found by walking the flow end
+        // to end and finding three freshly-approved helpers enrolled in nothing.
+        //
+        // `setHelperServices([])` is the right call rather than an explicit list: it unions in
+        // MANDATORY_SERVICE_CODES itself, so this stays correct if the mandatory set changes.
+        // Their optional services are theirs to pick afterwards.
+        if (updated.role === "helper" || updated.role === "both") {
+          await deps.services.setHelperServices(updated.id, [], now).catch((err: unknown) =>
+            logger.error("helper not enrolled in mandatory services on approval", {
+              userId: updated.id,
+              err: String(err),
+            }),
+          );
+        }
 
         // A helper needs a row in `helpers` for the matching reveal card to have anything to
         // render. Best-effort: a missing profile row degrades the reveal, it does not

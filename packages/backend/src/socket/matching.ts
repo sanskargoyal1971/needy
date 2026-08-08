@@ -101,6 +101,24 @@ const OFFER_SWEEP_INTERVAL_MS = 1_000;
  */
 const OFFER_AUDIENCE_GRACE_MS = OFFER_SWEEP_INTERVAL_MS * 3;
 
+/**
+ * Lifetime of the wave marker.
+ *
+ * It must comfortably outlive the ENTIRE escalation ladder, not one window. If it expires
+ * mid-search the next lapse reads "no wave recorded", treats that as wave 0, and escalates to
+ * wave 1 again — so a long-running search ping-pongs between the two innermost rings and never
+ * reaches the 10 km cap. Nothing errors; the requester simply never sees the wider search.
+ *
+ * It IS refreshed at every escalation, so this is really a bound on the gap between two
+ * lapses, but sizing it to the whole ladder plus the audience grace costs nothing (the key is
+ * a single integer, and both `accept` and the final close delete it explicitly) and removes
+ * the failure mode rather than making it merely unlikely.
+ */
+function waveKeyTtlMs(deps: Deps): number {
+  const waves = deps.config.match.radiusWavesMeters.length;
+  return deps.config.match.offerWindowMs * (waves + 2) + OFFER_AUDIENCE_GRACE_MS;
+}
+
 /** Rate limits (audit C20 — only chat was bounded before, so `request-help` and `accept`
  *  were both unlimited). Sized so a real human never notices: a requester who retries a
  *  search a few times in a row is normal, a client looping `request-help` is not. */
@@ -201,7 +219,7 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
           keys.offerWave(taskId),
           "0",
           "PX",
-          deps.config.match.offerWindowMs * (deps.config.match.radiusWavesMeters.length + 1),
+          waveKeyTtlMs(deps),
         );
         await broadcastWave(deps, nsp, task, 0, expiresAt);
 
@@ -1077,7 +1095,7 @@ async function expireOffer(
           keys.offerWave(taskId),
           String(next),
           "PX",
-          deps.config.match.offerWindowMs * (waves.length + 1),
+          waveKeyTtlMs(deps),
         );
         const reached = await broadcastWave(deps, nsp, task, next, expiresAt);
         deps.logger.info("matching search widened", {

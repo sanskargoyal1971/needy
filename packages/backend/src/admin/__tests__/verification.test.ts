@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { HOSPITAL_SERVICE_CODE } from "@needy/shared";
 import { signAccessToken } from "../../auth/jwt.js";
 import {
   createInMemoryPhoneBlockRepo,
@@ -25,6 +26,10 @@ import {
 import { LocalDiskStorage } from "../../services/storage.js";
 import { createVerificationRouter } from "../verification.js";
 import { createInMemoryAdminUserQueries } from "../verificationRepo.js";
+import {
+  createInMemoryServiceCatalog,
+  type ServiceCatalog,
+} from "../../services/catalog.js";
 
 const NOW = Date.UTC(2026, 7, 9);
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(60)]);
@@ -37,6 +42,7 @@ describe("admin verification surface", () => {
   let phoneBlocks: PhoneBlockRepository;
   let storage: LocalDiskStorage;
   let storageRoot: string;
+  let services: ServiceCatalog;
   /** Captured rather than written: the assertions are about WHICH events were recorded, and
    *  the in-memory logger would otherwise swallow them into the app log. */
   let recorded: AuditEntry[];
@@ -89,6 +95,7 @@ describe("admin verification surface", () => {
     documents = createInMemoryKycDocumentRepo();
     phoneBlocks = createInMemoryPhoneBlockRepo();
     storage = new LocalDiskStorage(storageRoot, "http://test.local", () => NOW);
+    services = createInMemoryServiceCatalog();
     recorded = [];
 
     const base = createLoggingAuditLogger();
@@ -112,6 +119,7 @@ describe("admin verification surface", () => {
         documents,
         phoneBlocks,
         queries: createInMemoryAdminUserQueries(() => users.all()),
+        services,
         storage,
         audit,
         pool: null,
@@ -259,6 +267,34 @@ describe("admin verification surface", () => {
       expect((await users.getById("u1"))?.role).toBe("both");
     });
 
+    /** REGRESSION. Migration 4 backfilled the helpers that already existed, but nothing
+     *  enrolled the ones approved afterwards — so every helper onboarded from here on had an
+     *  empty service list and was filtered out of every offer, INCLUDING the hospital pool the
+     *  platform treats as its emergency path. Found by walking the flow end to end and finding
+     *  three freshly-approved helpers enrolled in nothing. */
+    it("enrols a newly approved helper in the mandatory services", async () => {
+      await seedApplicant("u1", "+919000000001");
+      expect(await services.forHelper("u1")).toEqual([]);
+
+      await asAdmin(
+        request(app)
+          .post("/admin/verifications/u1/decision")
+          .send({ decision: "approve", role: "both" }),
+      );
+
+      expect(await services.helperOffers("u1", HOSPITAL_SERVICE_CODE)).toBe(true);
+    });
+
+    it("does not enrol someone approved as a requester only", async () => {
+      await seedApplicant("u2", "+919000000002");
+      await asAdmin(
+        request(app)
+          .post("/admin/verifications/u2/decision")
+          .send({ decision: "approve", role: "requester" }),
+      );
+      expect(await services.forHelper("u2")).toEqual([]);
+    });
+
     /** No admin may mint another admin through the review flow. */
     it("refuses to grant the admin role", async () => {
       await seedApplicant("u1", "+919000000001");
@@ -283,6 +319,7 @@ describe("admin verification surface", () => {
           documents,
           phoneBlocks,
           queries: createInMemoryAdminUserQueries(() => users.all()),
+        services,
           storage,
           audit: createLoggingAuditLogger(),
           pool: null,
@@ -470,6 +507,7 @@ describe("admin verification surface", () => {
           documents,
           phoneBlocks,
           queries: createInMemoryAdminUserQueries(() => users.all()),
+        services,
           storage,
           audit: createLoggingAuditLogger(),
           pool: null,

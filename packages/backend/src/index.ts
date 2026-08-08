@@ -254,6 +254,7 @@ async function main(): Promise<void> {
       documents: documentRepo,
       phoneBlocks: phoneBlockRepo,
       queries: adminQueries,
+      services: serviceCatalog,
       storage,
       audit,
       pool,
