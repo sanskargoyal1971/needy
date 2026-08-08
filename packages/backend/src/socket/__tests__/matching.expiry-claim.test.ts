@@ -138,7 +138,7 @@ describe("/matching offer-expiry claim under a real clock (C19)", () => {
       state: "searching",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: now(),
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: now(),
       updatedAt: now(),
     });
 

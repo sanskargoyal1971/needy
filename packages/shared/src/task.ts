@@ -59,6 +59,17 @@ export interface Task {
    */
   scheduledFor: number | null;
 
+  /** What the helper says they will and will not do, posted at the door and shown verbatim
+   *  to the requester before they consent. */
+  serviceBrief: string | null;
+  /** SHA-256 of the live handoff code. Never the code itself: the requester reads it aloud
+   *  and the helper types it, so a plaintext column would let anyone with database access
+   *  complete a handoff they were not present for. */
+  handoffOtpHash: string | null;
+  handoffOtpExpiresAt: number | null;
+  /** When the two-sided doorstep confirmation actually completed. */
+  handoffVerifiedAt: number | null;
+
   createdAt: number;
   updatedAt: number;
 }
@@ -83,6 +94,10 @@ export function makeTask(
     price: CATEGORY_PRICING[seed.category],
     serviceCode: null,
     scheduledFor: null,
+    serviceBrief: null,
+    handoffOtpHash: null,
+    handoffOtpExpiresAt: null,
+    handoffVerifiedAt: null,
     createdAt: 0,
     updatedAt: 0,
     ...seed,

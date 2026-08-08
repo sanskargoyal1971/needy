@@ -156,6 +156,10 @@ describe("matching: radius escalation, eligibility and service filters", () => {
       price: 149,
       serviceCode,
       scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
       createdAt: clock,
       updatedAt: clock,
     });
@@ -287,6 +291,10 @@ describe("matching: radius escalation, eligibility and service filters", () => {
       price: 149,
       serviceCode: null,
       scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
       createdAt: clock,
       updatedAt: clock,
     });
@@ -397,6 +405,10 @@ describe("matching: radius escalation, eligibility and service filters", () => {
       price: 149,
       serviceCode: "hospital",
       scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
       createdAt: clock,
       updatedAt: clock,
     });

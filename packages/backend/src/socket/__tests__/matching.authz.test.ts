@@ -211,7 +211,7 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
       state: "searching",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: FIXED_NOW,
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
       ...over,
     });
@@ -566,7 +566,10 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
   });
 
   it("refuses a helper's attempt to advance to `completed`, and lets the requester do it", async () => {
-    expect((await advance(helperOk, T_ROLES, "in-progress")).ok).toBe(true);
+    // `in-progress` is reachable only through the handoff now, so this suite puts the task
+    // there directly rather than asserting an edge that no longer exists.
+    expect((await advance(helperOk, T_ROLES, "in-progress")).ok).toBe(false);
+    await tasks.update(T_ROLES, { state: "in-progress", updatedAt: clock });
 
     // The single most important edge in the matrix: a helper must not be able to close the
     // tracked / chattable / SOS-capable window on the vulnerable party's behalf.

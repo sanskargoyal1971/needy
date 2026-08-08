@@ -24,7 +24,13 @@ export type TaskRole = "requester" | "helper";
  * - `en-route`    — physical-progress claims belong to the person moving. Only the
  *                   helper can assert they have set off.
  * - `arrived`     — likewise: only the helper can claim to be at the door.
- * - `in-progress` — the helper starts the work.
+ * - `in-progress` — NOBODY, via this route. Work starts only through the handoff: the helper
+ *                   sends a brief of what they will and will not do, the requester reads it
+ *                   and shares a one-time code, and the helper enters it. That is a two-sided
+ *                   confirmation at the doorstep, and it is the moment a stranger is let in —
+ *                   precisely the edge that must not be one party's unilateral declaration.
+ *                   Leaving it advanceable here would make the whole handoff skippable with a
+ *                   single socket frame.
  * - `completed`   — the REQUESTER confirms. A helper must not be able to close a task
  *                   (and with it the tracked, chattable, SOS-capable window) on their
  *                   own say-so; that is the one edge where the vulnerable party holds
@@ -40,7 +46,8 @@ export const TRANSITION_ACTORS: Record<TaskState, readonly TaskRole[]> = {
   verifying: ["requester", "helper"],
   "en-route": ["helper"],
   arrived: ["helper"],
-  "in-progress": ["helper"],
+  // Empty by design — see the note above. The handoff endpoint is the only writer.
+  "in-progress": [],
   completed: ["requester"],
   cancelled: ["requester", "helper"],
 };

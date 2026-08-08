@@ -28,6 +28,10 @@ interface TaskRow {
   price: number | string;
   service_code: string | null;
   scheduled_for: number | string | null;
+  service_brief: string | null;
+  handoff_otp_hash: string | null;
+  handoff_otp_expires_at: number | string | null;
+  handoff_verified_at: number | string | null;
   created_at: number | string;
   updated_at: number | string;
 }
@@ -45,6 +49,11 @@ function rowToTask(r: TaskRow): Task {
     price: Number(r.price),
     serviceCode: r.service_code ?? null,
     scheduledFor: r.scheduled_for == null ? null : Number(r.scheduled_for),
+    serviceBrief: r.service_brief ?? null,
+    handoffOtpHash: r.handoff_otp_hash ?? null,
+    handoffOtpExpiresAt:
+      r.handoff_otp_expires_at == null ? null : Number(r.handoff_otp_expires_at),
+    handoffVerifiedAt: r.handoff_verified_at == null ? null : Number(r.handoff_verified_at),
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
   };
@@ -117,6 +126,12 @@ export function createPgTaskRepo(pool: DbPool): TaskRepository {
       if (patch.price !== undefined) put("price", patch.price);
       if (patch.serviceCode !== undefined) put("service_code", patch.serviceCode);
       if (patch.scheduledFor !== undefined) put("scheduled_for", patch.scheduledFor);
+      if (patch.serviceBrief !== undefined) put("service_brief", patch.serviceBrief);
+      if (patch.handoffOtpHash !== undefined) put("handoff_otp_hash", patch.handoffOtpHash);
+      if (patch.handoffOtpExpiresAt !== undefined)
+        put("handoff_otp_expires_at", patch.handoffOtpExpiresAt);
+      if (patch.handoffVerifiedAt !== undefined)
+        put("handoff_verified_at", patch.handoffVerifiedAt);
       // Always stamp updatedAt so a caller that forgets can't leave a stale timestamp; an
       // explicit value in the patch still wins (callers pass deps.now() for test determinism).
       put("updated_at", patch.updatedAt ?? Date.now());

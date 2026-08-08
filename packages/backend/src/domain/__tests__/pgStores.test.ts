@@ -36,7 +36,7 @@ describe("postgres repositories", () => {
     state: "searching",
     origin: { lat: 12.9716, lng: 77.5946 },
     title: "Pick up medicine",
-    description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: 1_700_000_000_000,
+    description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: 1_700_000_000_000,
     updatedAt: 1_700_000_000_000,
   };
 

@@ -329,6 +329,10 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
           price,
           serviceCode: serviceCode ?? null,
           scheduledFor: scheduledFor ?? null,
+          serviceBrief: null,
+          handoffOtpHash: null,
+          handoffOtpExpiresAt: null,
+          handoffVerifiedAt: null,
           createdAt: now,
           updatedAt: now,
         };

@@ -163,7 +163,7 @@ describe("/chat participant authorization (audit A3)", () => {
       state: "in-progress",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: FIXED_NOW,
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
 
@@ -178,7 +178,7 @@ describe("/chat participant authorization (audit A3)", () => {
       state: "in-progress",
       origin: ORIGIN,
       title: "Someone else's task",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: FIXED_NOW,
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
     await messages.append({
@@ -493,7 +493,7 @@ describe("/chat participant authorization (audit A3)", () => {
       state: "cancelled",
       origin: ORIGIN,
       title: "Called off",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: FIXED_NOW,
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
 

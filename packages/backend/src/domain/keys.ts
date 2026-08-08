@@ -29,6 +29,9 @@ export const keys = {
    *  rather than in process memory for the same reason the expiry schedule is: a restart
    *  mid-search must still escalate rather than stranding the requester at 1km forever. */
   offerWave: (taskId: string) => `match:wave:${taskId}`,
+  /** Failed handoff-code attempts for a task. Short-lived, so it lives in Redis rather than
+   *  as a column on the hot tasks table. */
+  handoffAttempts: (taskId: string) => `handoff:attempts:${taskId}`,
   /** Dedup key mapping a chat clientMsgId → committed messageId, so a resend after a
    *  reconnect reconciles instead of double-posting (audit: clientMsgId was ignored). */
   chatDedup: (taskId: string, clientMsgId: string) =>

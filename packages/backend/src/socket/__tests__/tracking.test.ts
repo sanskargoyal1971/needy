@@ -139,7 +139,7 @@ describe("/tracking location guards (§2.3)", () => {
       state: "en-route",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: FIXED_NOW,
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
 

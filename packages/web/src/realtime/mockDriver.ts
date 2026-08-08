@@ -1,4 +1,4 @@
-import { canTransition } from "@needy/shared";
+import { canTransition, makeTask } from "@needy/shared";
 import type {
   ChatMessage,
   LatLng,
@@ -73,7 +73,10 @@ export class MockNeedyClient implements NeedyDriver {
   }
 
   private makeTask(state: Task["state"], helperId: string | null = null): Task {
-    return {
+    // Built through the shared factory so a field added to `Task` cannot be silently missed
+    // here — this driver scripts the whole lifecycle for the demo, and a missing field shows
+    // up as `undefined` in a UI that looks otherwise fine.
+    return makeTask({
       id: this.taskId,
       requesterId: this.userId,
       helperId,
@@ -81,9 +84,10 @@ export class MockNeedyClient implements NeedyDriver {
       state,
       origin: ORIGIN,
       title: "Pick up medicine from the pharmacy",
-      description: "test", price: 100, createdAt: 0,
-      updatedAt: 0,
-    };
+      description: "test",
+      price: 100,
+      serviceCode: "groceries",
+    });
   }
 
   /** Kick off the scripted lifecycle. Called by the demo when the requester asks for help. */

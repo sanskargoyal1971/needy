@@ -86,7 +86,7 @@ describe("/matching advance-task lifecycle guard", () => {
       state: "matched",
       origin: { lat: 12.9716, lng: 77.5946 },
       title: "Pick up medicine",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, createdAt: 1_700_000_000_000,
+      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: 1_700_000_000_000,
       updatedAt: 1_700_000_000_000,
     });
 
@@ -153,13 +153,15 @@ describe("/matching advance-task lifecycle guard", () => {
     // a requester declaring the helper `en-route`/`arrived`/`in-progress`. Each step is now
     // driven by the actor the matrix names for it; the lifecycle path and every assertion
     // below are unchanged. Role coverage itself lives in matching.authz.test.ts.
-    const path: TaskState[] = ["verifying", "en-route", "arrived", "in-progress", "completed"];
+    // `in-progress` is absent from this walk on purpose. It is no longer advanceable by
+    // anyone: work starts only through the doorstep handoff (brief -> code -> entry), which
+    // is a two-sided confirmation and has its own suite. Leaving it here would assert that
+    // the handoff is skippable with one socket frame — the exact thing that must not be true.
+    const path: TaskState[] = ["verifying", "en-route", "arrived"];
     const actorFor: Record<string, AppClient> = {
       verifying: requester, //   either party may open verification
       "en-route": helper, //     physical-progress claims belong to the person moving
       arrived: helper,
-      "in-progress": helper, //  the helper starts the work
-      completed: requester, //   the requester confirms — the one edge they hold alone
     };
     for (const to of path) {
       const ack = await advance(actorFor[to]!, to);
@@ -167,9 +169,22 @@ describe("/matching advance-task lifecycle guard", () => {
       if (ack.ok) expect(ack.task.state).toBe(to);
     }
 
-    // Give the broadcasts a tick to arrive.
+    // And prove the closure directly: neither party can declare work started.
+    for (const actor of [helper, requester]) {
+      const refused = await advance(actor, "in-progress");
+      expect(refused.ok).toBe(false);
+    }
+
+    // Move to in-progress the only way there is, so `completed` (requester-only) is reachable.
+    await tasks.update(TASK_ID, { state: "in-progress", updatedAt: 1_700_000_050_000 });
+    const closed = await advance(requester, "completed");
+    expect(closed.ok).toBe(true);
+
+    // Give the broadcasts a tick to arrive. The out-of-band `in-progress` write above is a
+    // repository call, not an advance, so it broadcasts nothing — hence `completed` follows
+    // `arrived` directly in what the requester's socket saw.
     await new Promise((r) => setTimeout(r, 50));
-    expect(seen).toEqual(path);
+    expect(seen).toEqual([...path, "completed"]);
 
     const finalTask = await tasks.get(TASK_ID);
     expect(finalTask?.state).toBe("completed");

@@ -17,6 +17,7 @@ import { registerMatching } from "./socket/matching.js";
 import { registerChat } from "./socket/chat.js";
 import { registerSos } from "./socket/sos.js";
 import { createHttpRouter } from "./http/router.js";
+import { createHandoffRouter } from "./http/handoff.js";
 import type { Deps } from "./domain/deps.js";
 import {
   createInMemoryHelperProfileRepo,
@@ -270,6 +271,7 @@ async function main(): Promise<void> {
   );
   // Pass the pool so GET /health actually probes Postgres. `pool` is null in in-memory mode,
   // which the router reports as "not-configured" rather than treating as a failure.
+  app.use(createHandoffRouter(deps));
   app.use(createHttpRouter(deps, pool ? { db: pool } : {}));
 
   const httpServer = createServer(app);
