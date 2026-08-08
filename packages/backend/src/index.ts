@@ -52,6 +52,7 @@ import {
   type PhoneBlockRepository,
 } from "./auth/phoneBlocks.js";
 import { createOnboardingRouter } from "./onboarding/router.js";
+import { createExceptionRouter } from "./onboarding/exceptionRouter.js";
 import {
   createInMemoryKycDocumentRepo,
   createPgKycDocumentRepo,
@@ -271,6 +272,15 @@ async function main(): Promise<void> {
   );
   // Pass the pool so GET /health actually probes Postgres. `pool` is null in in-memory mode,
   // which the router reports as "not-configured" rather than treating as a failure.
+  app.use(
+    createExceptionRouter({
+      users: userRepo,
+      exceptions: exceptionRepo,
+      storage,
+      audit,
+      now,
+    }),
+  );
   app.use(createHandoffRouter(deps));
   app.use(createHttpRouter(deps, pool ? { db: pool } : {}));
 
