@@ -5,7 +5,7 @@
  */
 
 import type { AbuseRollup, AbuseSignal, SosAlert } from "@needy/shared";
-import { API_BASE as API } from "./apiConfig";
+import { csrfFetch } from "./csrf";
 import { AuthError, type DocumentKind, type Gender, type OnboardingStatus, type Role } from "./authClient";
 
 export interface QueueEntry {
@@ -87,9 +87,8 @@ export interface AuditRow {
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API}${path}`, {
+    res = await csrfFetch(path, {
       ...init,
-      credentials: "include",
       headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
     });
   } catch {

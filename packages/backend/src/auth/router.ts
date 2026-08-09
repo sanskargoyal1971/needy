@@ -15,6 +15,7 @@ import type { KycDocumentRepository } from "../onboarding/repos.js";
 import type { UserRepository } from "./repos.js";
 import type { User } from "./types.js";
 import { clearAuthCookies, parseCookies, REFRESH_COOKIE, setAuthCookies } from "./cookies.js";
+import { issueCsrfToken } from "./csrf.js";
 import { requireAuth, requireRole, type AuthedRequest } from "./middleware.js";
 import {
   otpRequestSchema,
@@ -285,6 +286,22 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
       clearAuthCookies(res);
       res.json({ ok: true });
     }),
+  );
+
+  // ── CSRF token ─────────────────────────────────────────────────────────────
+  //
+  // Deliberately NOT behind `requireAuth`. The token has to be obtainable before the request
+  // that establishes a session — `POST /auth/otp/verify` is itself a mutating request, and
+  // requiring a session to get the token needed to create one is a loop with no entry.
+  //
+  // Handing a token to an unauthenticated caller costs nothing: it is worthless on its own.
+  // It only ever authorises a request that ALSO carries the matching cookie, and a cross-site
+  // attacker can neither read this response body (CORS) nor set the header.
+  router.get(
+    "/auth/csrf",
+    (_req: Request, res: Response) => {
+      res.json({ token: issueCsrfToken(res) });
+    },
   );
 
   // ── who am I ───────────────────────────────────────────────────────────────

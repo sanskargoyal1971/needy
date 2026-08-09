@@ -38,6 +38,7 @@ import { createInMemoryApplicationRepo, createPgApplicationRepo, type HelperAppl
 import { createPool, seedHelperProfiles, type DbPool } from "./db.js";
 import { migrate } from "./migrations.js";
 import { createAuthRouter, KYC_CALLBACK_PATH, kycRawBodyParser } from "./auth/router.js";
+import { csrfProtection } from "./auth/csrf.js";
 import { AuthService } from "./auth/service.js";
 import { OtpService } from "./auth/otp.js";
 import {
@@ -210,10 +211,39 @@ async function main(): Promise<void> {
 
   // ── HTTP ───────────────────────────────────────────────────────────────────
   const app = express();
-  // Security headers. CSP is left off here because this API serves JSON only and the SPA is
-  // served separately by Vite/CDN — a CSP declared on the API would give false assurance
-  // while the document's own policy is what actually governs the browser.
-  app.use(helmet({ contentSecurityPolicy: false }));
+  // ── security headers ──────────────────────────────────────────────────────
+  //
+  // This used to be `contentSecurityPolicy: false`, with a comment arguing that a CSP on a
+  // JSON API gives false assurance because the DOCUMENT's policy is what governs the browser.
+  // That argument was right, and the document now has one (packages/web/src/middleware.ts).
+  // With that in place, a policy here is worth setting for a different reason: it describes
+  // what this origin legitimately serves, which is JSON and nothing else.
+  //
+  // `default-src 'none'` is therefore not a compromise policy — it is literally accurate. If a
+  // response from this origin is ever rendered as a document (a reflected error page, a
+  // content-type confusion, an attacker who gets bytes echoed back), nothing in it may load or
+  // execute anything at all.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        useDefaults: false,
+        directives: {
+          "default-src": ["'none'"],
+          "frame-ancestors": ["'none'"],
+          "base-uri": ["'none'"],
+          "form-action": ["'none'"],
+        },
+      },
+      // Browsers ignore HSTS over plain HTTP, so this is harmless in local development and
+      // load-bearing in production. `includeSubDomains` because the cookies are host-scoped
+      // and a sibling subdomain served over HTTP could set one.
+      hsts: { maxAge: 15_552_000, includeSubDomains: true },
+      // KYC documents are served from this origin to the admin console; `same-site` lets that
+      // work while refusing to let an unrelated site embed anything from here.
+      crossOriginResourcePolicy: { policy: "same-site" },
+      referrerPolicy: { policy: "no-referrer" },
+    }),
+  );
   // credentials:true so the browser sends/stores the httpOnly auth cookies cross-origin.
   app.use(cors({ origin: config.corsOrigin, credentials: true }));
 
@@ -239,6 +269,13 @@ async function main(): Promise<void> {
   // Bound the body size: unbounded JSON parsing is a trivial memory-exhaustion vector, and
   // no endpoint here legitimately needs more than a few KB.
   app.use(express.json({ limit: "64kb" }));
+
+  // CSRF, app-wide and BEFORE every router — a protection mounted per-router is one a new
+  // router can be added without. The KYC callback is the single exemption: it authenticates
+  // by HMAC over raw bytes, carries no cookie, and arrives from an origin we neither control
+  // nor can enumerate. See auth/csrf.ts for why the token travels in a response body rather
+  // than being read out of the cookie.
+  app.use(csrfProtection({ exemptPaths: [KYC_CALLBACK_PATH] }));
   app.use(
     createAuthRouter({
       auth: authService,

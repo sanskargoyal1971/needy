@@ -9,7 +9,7 @@
  *  forcing a JSON content-type onto a FormData body breaks the boundary header.
  */
 
-import { API_BASE as API } from "./apiConfig";
+import { clearCsrfToken, csrfFetch } from "./csrf";
 
 export type Role = "requester" | "helper" | "both" | "admin";
 export type KycStatus = "unverified" | "pending" | "verified" | "rejected";
@@ -61,9 +61,10 @@ export class AuthError extends Error {
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API}${path}`, {
+    // Through `csrfFetch`, which attaches the token on mutating verbs and transparently
+    // refreshes it once if the server says it is stale. Read-only calls pass straight through.
+    res = await csrfFetch(path, {
       ...init,
-      credentials: "include",
       headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
     });
   } catch {
@@ -88,7 +89,9 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 async function upload<T>(path: string, form: FormData): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API}${path}`, { method: "POST", credentials: "include", body: form });
+    // Also through `csrfFetch`. A header rides on a multipart body perfectly well — it is the
+    // content-type that must be left to the browser, not the whole header set.
+    res = await csrfFetch(path, { method: "POST", body: form });
   } catch {
     throw new AuthError(0, "network-unreachable", "cannot reach the server");
   }
@@ -123,7 +126,13 @@ export const authClient = {
   /** Rotate the session. The refresh token is a cookie, so there is no argument to pass. */
   refresh: () => call<{ user: PublicUser }>("/auth/refresh", { method: "POST" }),
 
-  logout: () => call<{ ok: true }>("/auth/logout", { method: "POST" }),
+  logout: async () => {
+    const res = await call<{ ok: true }>("/auth/logout", { method: "POST" });
+    // The next session gets a new token; keeping this one cached would mean the first action
+    // after signing back in fails once and silently retries for no reason.
+    clearCsrfToken();
+    return res;
+  },
 
   // ── onboarding ────────────────────────────────────────────────────────────
 
