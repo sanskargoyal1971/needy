@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -42,14 +42,28 @@ const KIND_LABEL: Record<SosKind, string> = {
   other: "Other",
 };
 
-/** Waiting time, escalating in colour. Past a minute this is no longer a queue entry. */
+/**
+ * Waiting time, escalating in colour. Past a minute this is no longer a queue entry.
+ *
+ * It TICKS. The first version read `Date.now()` during render and therefore froze at whatever
+ * the clock said when the alert arrived — a console whose headline number is "12s" for the
+ * next four minutes, which is worse than showing nothing because it actively reassures. The
+ * whole argument for this number being the headline is that it should get uncomfortable to
+ * look at, and a frozen one never does.
+ */
 function Waiting({ since }: { since: number }) {
-  const seconds = Math.round((Date.now() - since) / 1000);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const seconds = Math.round((now - since) / 1000);
   const tone =
     seconds > 300 ? "text-red-700" : seconds > 60 ? "text-orange-600" : "text-gray-700";
   return (
     <span className={`font-semibold tabular-nums ${tone}`} title={absoluteTime(since)}>
-      {seconds < 60 ? `${seconds}s` : relativeTime(since)}
+      {seconds < 60 ? `${seconds}s` : relativeTime(since, now)}
     </span>
   );
 }

@@ -16,7 +16,7 @@ import { CSRF_COOKIE, csrfProtection, issueCsrfToken } from "../csrf.js";
  *  checks nothing.
  */
 
-const GOOD_ORIGIN = config.corsOrigin.split(",")[0]!.trim();
+const GOOD_ORIGIN = config.corsOrigins[0]!;
 const KYC_PATH = "/auth/kyc/callback";
 
 function app() {

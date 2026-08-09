@@ -77,14 +77,14 @@ function tokensMatch(a: string | undefined, b: string | undefined): boolean {
   return timingSafeEqual(ab, bb);
 }
 
-/** The set of origins allowed to make mutating requests. `config.corsOrigin` is already the
- *  allowlist the CORS layer uses; this reuses it rather than introducing a second list that
- *  could drift from it. */
-function allowedOrigins(): string[] {
-  return config.corsOrigin
-    .split(",")
-    .map((o) => o.trim())
-    .filter(Boolean);
+/** The set of origins allowed to make mutating requests.
+ *
+ *  Read straight off `config.corsOrigins`, which is the SAME array handed to the CORS layer.
+ *  Parsing the env var a second time here is how the two lists end up disagreeing — and the
+ *  direction they would disagree in is the dangerous one, since a CSRF check that trusts an
+ *  origin CORS does not is a check with a hole in it. */
+function allowedOrigins(): readonly string[] {
+  return config.corsOrigins;
 }
 
 /** Normalise a URL to its origin, or null if it is not parseable. `Referer` is a full URL;

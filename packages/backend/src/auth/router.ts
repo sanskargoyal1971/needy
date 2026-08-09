@@ -218,7 +218,18 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         }
         const issued = await deps.auth.loginWithPhone(phone, ua(req));
         setAuthCookies(res, issued.accessToken, issued.refreshToken);
-        res.json({ user: publicUser(issued.user) });
+        // Rotate the CSRF token as part of establishing the session, and return it so the
+        // client has it without a second round trip.
+        //
+        // This closes a cookie-fixation gap in the double-submit scheme. `GET /auth/csrf` is
+        // necessarily unauthenticated (the request that creates a session is itself a mutating
+        // request, so requiring a session to get the token needed to make one is a loop with no
+        // entry), which means a hostile page can force a victim's browser to accept a token the
+        // attacker chose. Minting a new one HERE means the token bound to an authenticated
+        // session is always one the server generated after authentication and the attacker has
+        // never seen. The Origin check and the custom-header requirement both already stopped
+        // the attack; this stops it at the token layer too, so no single check carries it alone.
+        res.json({ user: publicUser(issued.user), csrfToken: issueCsrfToken(res) });
       } catch (err) {
         // A blocked number is a decision, not a failure: answer 403 with a distinct code so
         // the client shows the terminal screen instead of "something went wrong, try again".

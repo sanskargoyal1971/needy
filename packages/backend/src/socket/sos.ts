@@ -52,6 +52,9 @@ export const SOS_OPERATOR_ROOM = "sos:operators";
  *  alarm channel into a flood, so the burst is large and the refill quick. */
 const SOS_LIMIT = { capacity: 10, ratePerSec: 0.5 };
 
+/** A console subscribes once per connection; a reconnect loop is the only legitimate repeat. */
+const WATCH_LIMIT = { capacity: 5, ratePerSec: 0.2 };
+
 /** How many alerts from one account within `SOS_REPEAT_WINDOW_MS` before the pattern is worth
  *  a human's attention. Set above the rate limiter's burst so the signal means "a sustained
  *  pattern", not "someone pressed the button twice while frightened".
@@ -272,6 +275,25 @@ export const registerSos: NamespaceRegistrar = (deps) => {
     socket.on("watch", async (rawAck) => {
       const ack = optionalAck(rawAck);
       try {
+        // Bounded because this handler is not free: it costs a user lookup plus a query over
+        // the open-alert index, and the authorization check comes AFTER, so an unauthorised
+        // socket could otherwise drive both by looping the event. A console subscribes once
+        // per connection, so a burst of five is invisible to it.
+        const allowed = await consumeToken(
+          deps.redis.client,
+          keys.bucket("sos-watch", userId),
+          WATCH_LIMIT,
+          deps.now(),
+        );
+        if (!allowed) {
+          emitSocketError(socket as unknown as Socket, {
+            event: "watch",
+            code: "RATE_LIMITED",
+            message: "too many subscribe attempts",
+          });
+          return ack({ ok: false, error: "rate-limited" });
+        }
+
         if (!(await isOperator(deps, userId))) {
           emitSocketError(socket as unknown as Socket, {
             event: "watch",

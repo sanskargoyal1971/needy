@@ -245,7 +245,7 @@ async function main(): Promise<void> {
     }),
   );
   // credentials:true so the browser sends/stores the httpOnly auth cookies cross-origin.
-  app.use(cors({ origin: config.corsOrigin, credentials: true }));
+  app.use(cors({ origin: config.corsOrigins, credentials: true }));
 
   // Behind a proxy or load balancer, `req.ip` is the proxy's address unless Express is told to
   // trust the forwarding headers — which would collapse the per-IP OTP limiter into a single
@@ -344,7 +344,7 @@ async function main(): Promise<void> {
 
   // ── Socket.io ────────────────────────────────────────────────────────────
   const io = new IOServer(httpServer, {
-    cors: { origin: config.corsOrigin },
+    cors: { origin: config.corsOrigins },
   });
   deps.io = io;
 

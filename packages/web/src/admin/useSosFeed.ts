@@ -52,6 +52,8 @@ export function useSosFeed(): SosFeed {
   const [status, setStatus] = useState<FeedStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<OperatorSocket | null>(null);
+  /** The in-flight enrichment fetch, if any — see `refresh`. */
+  const refreshRef = useRef<Promise<void> | null>(null);
 
   /** Merge by id, keeping the richer copy.
    *
@@ -84,14 +86,28 @@ export function useSosFeed(): SosFeed {
     });
   }, []);
 
+  /**
+   * Re-read the enriched queue, coalescing concurrent callers into one request.
+   *
+   * The naive version fired one fetch per `sos-raised`, which is exactly backwards: the case
+   * that produces a burst of alerts is a real incident, so the console would hammer the API
+   * hardest at the moment it most needs to be responsive. Anything asking for a refresh while
+   * one is in flight joins that one instead — every caller wants the same thing, which is
+   * "the current queue", and one round trip provides it for all of them.
+   */
   const refresh = useCallback(async () => {
-    try {
-      const { alerts: open } = await adminClient.sosQueue("open");
-      open.forEach(upsert);
-      setError(null);
-    } catch {
-      setError("Could not load the alert queue.");
-    }
+    refreshRef.current ??= (async () => {
+      try {
+        const { alerts: open } = await adminClient.sosQueue("open");
+        open.forEach(upsert);
+        setError(null);
+      } catch {
+        setError("Could not load the alert queue.");
+      } finally {
+        refreshRef.current = null;
+      }
+    })();
+    return refreshRef.current;
   }, [upsert]);
 
   useEffect(() => {

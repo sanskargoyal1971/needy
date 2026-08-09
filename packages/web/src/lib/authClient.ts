@@ -9,7 +9,7 @@
  *  forcing a JSON content-type onto a FormData body breaks the boundary header.
  */
 
-import { clearCsrfToken, csrfFetch } from "./csrf";
+import { adoptCsrfToken, clearCsrfToken, csrfFetch } from "./csrf";
 
 export type Role = "requester" | "helper" | "both" | "admin";
 export type KycStatus = "unverified" | "pending" | "verified" | "rejected";
@@ -115,11 +115,16 @@ export const authClient = {
       body: JSON.stringify({ phone }),
     }),
 
-  verifyOtp: (phone: string, code: string) =>
-    call<{ user: PublicUser }>("/auth/otp/verify", {
+  verifyOtp: async (phone: string, code: string) => {
+    const res = await call<{ user: PublicUser; csrfToken?: string }>("/auth/otp/verify", {
       method: "POST",
       body: JSON.stringify({ phone, code }),
-    }),
+    });
+    // The server rotates the token as part of establishing the session; adopting it here
+    // means the first action after signing in does not have to fail once and retry.
+    adoptCsrfToken(res.csrfToken);
+    return res;
+  },
 
   me: () => call<{ user: PublicUser }>("/auth/me"),
 

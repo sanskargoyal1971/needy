@@ -55,7 +55,28 @@ function requireSecret(name: string, value: string | undefined, devFallback: str
 
 export const config = {
   port: num("PORT", 4000),
-  corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
+  /**
+   * Browser origins allowed to call this API — a LIST, and the single source of truth for
+   * both the CORS layer and the CSRF origin check.
+   *
+   * Two things were wrong here and CSRF turned the second into a hard failure:
+   *
+   *  - The default was `http://localhost:5173`, the port of the Vite app that was
+   *    consolidated into Next months ago. `.env.example` has said 3000 since that move, so
+   *    anyone running from the example was fine and anyone running without a `.env` — which
+   *    the in-memory dev path explicitly supports — silently had every cross-origin read
+   *    refused. Survivable while it only affected CORS; with the CSRF origin check in front
+   *    of every mutation it becomes "nothing works and the error says bad-origin".
+   *  - It was a bare string passed straight to `cors({ origin })`, which treats a
+   *    comma-separated value as ONE literal origin that can never match. So a deployment with
+   *    two front ends (an apex and a www, say) would have looked configured and matched
+   *    neither. Parsing to an array here means `cors` gets the array form it understands and
+   *    the CSRF check reads the same list, so the two cannot drift.
+   */
+  corsOrigins: (process.env.CORS_ORIGIN ?? "http://localhost:3000")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean),
   jwtSecret: requireSecret("JWT_SECRET", process.env.JWT_SECRET, DEV_JWT_SECRET),
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
   databaseUrl: process.env.DATABASE_URL ?? "",

@@ -39,6 +39,15 @@ export function clearCsrfToken(): void {
   token = null;
 }
 
+/** Adopt the token the server rotated at login.
+ *
+ *  Logging in mints a fresh token — the one minted before authentication may have been forced
+ *  on this browser by a hostile page. Taking it from the login response rather than letting
+ *  the next mutation discover the mismatch and retry saves that wasted round trip. */
+export function adoptCsrfToken(next: string | undefined): void {
+  if (typeof next === "string" && next.length > 0) token = next;
+}
+
 const MUTATING = /^(POST|PUT|PATCH|DELETE)$/i;
 
 /**
