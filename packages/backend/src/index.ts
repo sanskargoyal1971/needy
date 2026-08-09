@@ -18,6 +18,7 @@ import { registerChat } from "./socket/chat.js";
 import { registerSos } from "./socket/sos.js";
 import { createHttpRouter } from "./http/router.js";
 import { createHandoffRouter } from "./http/handoff.js";
+import { createServicesRouter } from "./http/services.js";
 import type { Deps } from "./domain/deps.js";
 import {
   createInMemoryHelperProfileRepo,
@@ -337,6 +338,7 @@ async function main(): Promise<void> {
   // since neither can be reached before the server is listening.
   app.use(createSosAdminRouter(deps));
   app.use(createAbuseRouter(deps));
+  app.use(createServicesRouter(deps));
   app.use(createHandoffRouter(deps));
   app.use(createHttpRouter(deps, pool ? { db: pool } : {}));
 
