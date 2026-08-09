@@ -269,6 +269,21 @@ export interface TaskSnapshot {
   eta: { etaSeconds: number; distanceMeters: number } | null;
   messages: ChatMessage[];
   presence: Presence | null;
+  /**
+   * The live alarm on this task, if one has been raised by either party.
+   *
+   * Part of the snapshot because the snapshot is what a client rebuilds itself from after a
+   * drop or a reload, and an alarm is the one thing that must survive that. Without it,
+   * someone who raised an alarm and then reloaded — or whose phone dropped the socket, which
+   * is not unlikely in the situations this button exists for — came back to an un-pressed
+   * alarm button, with nothing on screen saying an alarm was ever raised. They would
+   * reasonably conclude it had not been, and the other party's warning that their companion
+   * is in trouble would silently disappear too.
+   *
+   * `SosRepository.activeForTask` was written for this and its own comment says so; nothing
+   * ever called it.
+   */
+  sos: SosAlert | null;
 }
 
 export interface SessionSnapshot {

@@ -571,6 +571,9 @@ export class RealHelperClient implements HelperDriver {
           task: mine.task,
           messages: mine.messages,
           eta: mine.eta,
+          // See the requester client: `sos-raised` fires once and is not replayed, so an
+          // alarm raised before this client (re)connected exists only in the snapshot.
+          sos: mine.sos,
         });
         this.joinTaskRooms(mine.task.id);
       } else if (
@@ -580,7 +583,7 @@ export class RealHelperClient implements HelperDriver {
       ) {
         // Nothing newer intervened, so the snapshot's silence is real: the task is gone (e.g.
         // cancelled while we were offline) and must come off the screen.
-        this.patch({ task: null, messages: [], eta: null });
+        this.patch({ task: null, messages: [], eta: null, sos: null });
       }
     } catch {
       // Leave state as-is and retry on the next reconnect. A failed HTTP call is not evidence a

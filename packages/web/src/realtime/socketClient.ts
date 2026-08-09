@@ -367,6 +367,10 @@ export class RealNeedyClient implements NeedyDriver {
           eta: entry.eta,
           messages: entry.messages,
           presence: entry.presence,
+          // Restored, not left to a live event that will never come: `sos-raised` fires once,
+          // at the moment of the alarm, so a client that reloaded afterwards would otherwise
+          // show an un-pressed alarm button over a live emergency.
+          sos: entry.sos,
         });
         if (entry.helper) this.subscribePresence(entry.helper.id);
       }

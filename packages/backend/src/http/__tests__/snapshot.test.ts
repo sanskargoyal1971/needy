@@ -6,7 +6,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
 import { safetyDeps } from "../../test/safetyDeps.js";
-import { makeTask, type LocationUpdate, type SessionSnapshot } from "@needy/shared";
+import {
+  makeSosAlert,
+  makeTask,
+  type LocationUpdate,
+  type SessionSnapshot,
+} from "@needy/shared";
 import { config } from "../../config.js";
 import { logger } from "../../logger.js";
 import type { Deps } from "../../domain/deps.js";
@@ -171,6 +176,59 @@ describe("GET /snapshot (§2.1 reconnect)", () => {
     // Messages is always an array (empty here — no chat yet).
     expect(Array.isArray(snap.messages)).toBe(true);
     expect(snap.messages).toHaveLength(0);
+
+    // No alarm on this task, and the field is present and null rather than absent.
+    expect(snap.sos).toBeNull();
+  });
+
+  /**
+   * A live alarm must survive a reload.
+   *
+   * `sos-raised` fires once, at the moment of the alarm. A client that reloaded — or whose
+   * phone dropped the socket, which is not unlikely in the situations this button exists for —
+   * rebuilt itself from the snapshot, and the snapshot did not carry the alert. So the screen
+   * came back showing an un-pressed alarm button over a live emergency, and the other party's
+   * warning that their companion was in trouble disappeared with it.
+   *
+   * `SosRepository.activeForTask` was written for exactly this and its own comment said so;
+   * nothing called it until now.
+   */
+  it("carries a live alarm so a reloading client does not lose it", async () => {
+    const token: string = (
+      await request(app)
+        .post("/dev/token")
+        .send({ userId: "requester-1", role: "requester", displayName: "Alex" })
+    ).body.token;
+
+    const task = await deps.tasks.create(
+      makeTask({
+        id: "alarm-task",
+        requesterId: "requester-1",
+        helperId: HELPER_ID,
+        category: "errand",
+        state: "in-progress",
+        origin: { lat: 12.9611, lng: 77.6387 },
+        title: "Alarm raised mid-task",
+      }),
+    );
+    const alert = await deps.sos.create(
+      makeSosAlert({
+        id: "alarm-1",
+        taskId: task.id,
+        raisedBy: "requester-1",
+        kind: "unsafe",
+        createdAt: NOW,
+      }),
+    );
+
+    const res = await request(app).get("/snapshot").set("Authorization", `Bearer ${token}`);
+    const found = (res.body as SessionSnapshot).activeTasks.find((t) => t.task.id === task.id);
+    expect(found?.sos).not.toBeNull();
+    expect(found!.sos!.id).toBe(alert.id);
+    // Carries who raised it, which is what lets each screen tell "my alarm" from "theirs" —
+    // the other party may not withdraw one, so it must not be offered to them.
+    expect(found!.sos!.raisedBy).toBe("requester-1");
+    expect(found!.sos!.status).toBe("raised");
   });
 
   /**

@@ -36,11 +36,23 @@ type Phase = "idle" | "choosing" | "sending" | "sent" | "failed";
 
 export function SosButton({
   alert,
+  userId,
   onRaise,
   onCancel,
 }: {
   /** The live alert from the server, or null. Never local state — see the file note. */
   alert: SosAlert | null;
+  /**
+   * The viewer's own id, so this component can tell "my alarm" from "theirs".
+   *
+   * Not cosmetic. Without it the screen told the OTHER party "your alarm has been recorded"
+   * and offered them "this was a mistake — stand it down" for an alarm they had not raised.
+   * The server refuses that cancel (only the raiser may withdraw one, which is right: a helper
+   * who is the reason for the alarm must not be able to switch it off), so the button was a
+   * control that could only ever fail — on the one screen where a control that does nothing is
+   * least acceptable.
+   */
+  userId: string;
   onRaise: (kind: SosKind) => Promise<SosAlert | null>;
   onCancel: (alertId: string) => Promise<boolean>;
 }) {
@@ -50,7 +62,9 @@ export function SosButton({
   // raised by the other party: a helper's alert appears on the requester's screen without
   // this component ever having been touched.
   if (alert && alert.status !== "cancelled") {
-    return <AlertLive alert={alert} onCancel={onCancel} />;
+    return (
+      <AlertLive alert={alert} mine={alert.raisedBy === userId} onCancel={onCancel} />
+    );
   }
 
   async function raise(kind: SosKind) {
@@ -153,13 +167,47 @@ export function SosButton({
  *  is actually set by a human taking ownership in the console. */
 function AlertLive({
   alert,
+  mine,
   onCancel,
 }: {
   alert: SosAlert;
+  /** Whether the viewer is the one who raised it. Decides both what this claims and what it
+   *  offers — see the note on `SosButton`'s `userId`. */
+  mine: boolean;
   onCancel: (alertId: string) => Promise<boolean>;
 }) {
   const [standing, setStanding] = useState(false);
   const owned = alert.acknowledgedBy != null;
+
+  // The other party's alarm. They are told, because they are in the situation and a silent
+  // alarm beside them would be worse — but it is not theirs to describe or to withdraw.
+  if (!mine) {
+    return (
+      <div
+        role="status"
+        className="rounded-2xl border-2 border-red-300 bg-red-50 p-4"
+      >
+        <p className="flex items-center gap-2 font-display font-bold text-gray-900">
+          <AlertTriangle size={18} className="text-red-700" aria-hidden />
+          The other person has raised an alarm
+        </p>
+        <p className="mt-1 text-sm text-gray-700">
+          {owned
+            ? "Our safety team has it and is looking at it now. Stay where you are unless you are in danger."
+            : "Our safety team has been notified. Stay where you are unless you are in danger."}
+        </p>
+        {SUPPORT_PHONE && (
+          <a
+            href={`tel:${SUPPORT_PHONE}`}
+            className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
+          >
+            <Phone size={14} aria-hidden />
+            Call us
+          </a>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div

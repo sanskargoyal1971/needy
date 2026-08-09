@@ -455,6 +455,12 @@ async function buildTaskSnapshot(deps: Deps, task: Task, callerId: string): Prom
 
   const messages = await deps.messages.list(task.id);
 
+  // The live alarm, if any. Oldest first so a task that somehow carries two surfaces the one
+  // that has been waiting longest rather than whichever the store happened to return first.
+  const alarms = await deps.sos.activeForTask(task.id);
+  const sos =
+    [...alarms].sort((a, b) => a.createdAt - b.createdAt)[0] ?? null;
+
   // Presence is only surfaced to the requester, showing the matched helper's status.
   const presence =
     callerId === task.requesterId && task.helperId
@@ -472,5 +478,6 @@ async function buildTaskSnapshot(deps: Deps, task: Task, callerId: string): Prom
     eta: eta ? { etaSeconds: eta.etaSeconds, distanceMeters: eta.distanceMeters } : null,
     messages,
     presence,
+    sos,
   };
 }

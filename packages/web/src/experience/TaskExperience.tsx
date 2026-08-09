@@ -154,7 +154,12 @@ export function TaskExperience({ taskId }: { taskId: string }) {
       {/* The alarm sits below the stage rather than floating over it: a control that overlaps
           the map is a control someone hits while pinching to zoom. */}
       {hasCompanion && (
-        <SosButton alert={state.sos} onRaise={onRaise} onCancel={onCancelSos} />
+        <SosButton
+          alert={state.sos}
+          userId={state.userId}
+          onRaise={onRaise}
+          onCancel={onCancelSos}
+        />
       )}
 
       {/* Cancelling is offered while a search is still open — before anyone has committed to

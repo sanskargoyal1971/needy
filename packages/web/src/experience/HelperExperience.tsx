@@ -116,7 +116,12 @@ export function HelperExperience() {
 
           {/* The helper gets the same alarm as the requester, and for the same reason: a
               helper alone in a stranger's home can be the one who is not safe. */}
-          <SosButton alert={state.sos} onRaise={onRaise} onCancel={onCancelSos} />
+          <SosButton
+            alert={state.sos}
+            userId={state.userId}
+            onRaise={onRaise}
+            onCancel={onCancelSos}
+          />
         </>
       ) : (
         <>
