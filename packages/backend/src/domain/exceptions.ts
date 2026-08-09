@@ -39,6 +39,18 @@ export interface ExceptionRepository {
   isApproved(requesterId: string, helperId: string, now: number): Promise<boolean>;
   create(e: BookingException): Promise<BookingException>;
   update(id: string, patch: Partial<BookingException>): Promise<BookingException>;
+  /**
+   * Every live exception this user is a party to, on EITHER side, newest first.
+   *
+   * Without this the flow could not complete. An exception needs both testimonies, and the
+   * helper is not the one who opened it — they have no id to look up and `findForPair` is
+   * keyed on the ordered pair from the requester's side, so a helper calling it learns
+   * nothing. There was no route by which the second person could ever be told that a request
+   * was waiting on them, which meant every exception sat in `awaiting_videos` until it
+   * expired. The gate worked perfectly and nothing could get through it.
+   */
+  forParticipant(userId: string, limit: number): Promise<BookingException[]>;
+
   /** Admin queue: submitted packets, oldest first. */
   queue(limit: number): Promise<BookingException[]>;
 }
@@ -134,6 +146,17 @@ export function createPgExceptionRepo(pool: DbPool): ExceptionRepository {
       );
       return next;
     },
+    async forParticipant(userId, limit) {
+      const { rows } = await pool.query<Row>(
+        `SELECT * FROM booking_exceptions
+          WHERE (requester_id = $1 OR helper_id = $1)
+            AND status IN ('awaiting_videos','under_review','approved')
+          ORDER BY created_at DESC
+          LIMIT $2`,
+        [userId, limit],
+      );
+      return rows.map(toException);
+    },
     async queue(limit) {
       const { rows } = await pool.query<Row>(
         `SELECT * FROM booking_exceptions
@@ -181,6 +204,12 @@ export function createInMemoryExceptionRepo(): ExceptionRepository {
       const next = { ...existing, ...patch, id: existing.id };
       byId.set(id, next);
       return next;
+    },
+    async forParticipant(userId, limit) {
+      return [...byId.values()]
+        .filter((e) => (e.requesterId === userId || e.helperId === userId) && live(e))
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, limit);
     },
     async queue(limit) {
       return [...byId.values()]

@@ -151,9 +151,24 @@ export default function RequesterHome() {
                     {relativeTime(t.updatedAt)}
                   </p>
                 </div>
-                <span className="shrink-0 text-sm text-gray-500">
-                  {t.price > 0 ? `₹${t.price}` : "Free"}
-                </span>
+                <div className="flex shrink-0 items-center gap-3">
+                  {/* Asking for the same person again is the ONLY way a requester names a
+                      specific helper, and therefore the only route into the pairing review —
+                      an open request is matched by the server and never refused for a pairing
+                      reason. Offered only on a completed task: repeating a cancelled one is
+                      asking again of someone who did not turn up. */}
+                  {t.state === "completed" && t.helperId && (
+                    <Link
+                      href={paths.newRequest + `?helperId=${encodeURIComponent(t.helperId)}`}
+                      className="text-sm font-medium text-primary hover:underline"
+                    >
+                      Ask again
+                    </Link>
+                  )}
+                  <span className="text-sm text-gray-500">
+                    {t.price > 0 ? `₹${t.price}` : "Free"}
+                  </span>
+                </div>
               </li>
             ))}
           </ul>

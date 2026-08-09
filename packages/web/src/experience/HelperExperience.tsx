@@ -1,11 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback } from "react";
-import { CircleSlash, Loader2, MapPinOff, Settings2, WifiOff } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  CircleSlash,
+  Loader2,
+  MapPinOff,
+  Settings2,
+  ShieldAlert,
+  WifiOff,
+} from "lucide-react";
 import { isTerminal, type TaskState } from "@needy/shared";
 import { useHelperDriver, useHelperExperience } from "@/realtime";
 import { paths } from "@/lib/paths";
+import { taskClient, type ParticipantException } from "@/lib/taskClient";
 import { Chat } from "./Chat";
 import { HelperTask } from "./HelperTask";
 import { OfferCard } from "./OfferCard";
@@ -149,6 +157,12 @@ export function HelperExperience() {
             </p>
           )}
 
+          {/* A review waiting on this helper's testimony, surfaced where they will actually
+              see it. Nothing else tells them: they did not open the request, so without this
+              the pairing sits in `awaiting_videos` until it expires and both people are left
+              thinking the other never bothered. */}
+          <PendingReviews />
+
           <Link
             href={paths.helperServices}
             className="flex items-center justify-center gap-2 text-sm font-medium text-primary hover:underline"
@@ -159,6 +173,50 @@ export function HelperExperience() {
         </>
       )}
     </div>
+  );
+}
+
+/** The prompt for a pairing review that cannot proceed without this helper.
+ *
+ *  Only rendered when this helper's own testimony is the thing outstanding. A review that is
+ *  already with the safety team needs nothing from them, and a banner about it would be a
+ *  notification that cannot be acted on — which is how people learn to ignore banners. */
+function PendingReviews() {
+  const [waiting, setWaiting] = useState<ParticipantException[]>([]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { exceptions } = await taskClient.myExceptions();
+        setWaiting(
+          exceptions.filter((e) => e.status === "awaiting_videos" && !e.helperVideoSubmitted),
+        );
+      } catch {
+        // Silent: this is a prompt, not the screen's job. A helper whose availability toggle
+        // works must not be shown an error because a secondary fetch failed.
+      }
+    })();
+  }, []);
+
+  if (waiting.length === 0) return null;
+
+  return (
+    <Link
+      href={paths.helperReviews}
+      className="flex items-start gap-3 rounded-2xl border-2 border-amber-200 bg-amber-50 p-4 transition-colors hover:border-amber-300"
+    >
+      <ShieldAlert size={18} className="mt-0.5 shrink-0 text-amber-700" aria-hidden />
+      <span className="text-sm text-amber-900">
+        <span className="block font-semibold">
+          {waiting.length === 1
+            ? `${waiting[0].otherName} has asked to be paired with you`
+            : `${waiting.length} people have asked to be paired with you`}
+        </span>
+        <span className="mt-0.5 block">
+          It needs a short video from you before our team can look at it.
+        </span>
+      </span>
+    </Link>
   );
 }
 

@@ -28,10 +28,17 @@ export const paths = {
   requesterHome: "/app",
   newRequest: "/app/request",
   task: (id: string) => `/app/task/${id}`,
+  /** Pairing reviews. `helperId` is what turns the list into "open one for this person". */
+  exceptions: (helperId?: string) =>
+    helperId ? `/app/exceptions?helperId=${encodeURIComponent(helperId)}` : "/app/exceptions",
 
   // ── helper ────────────────────────────────────────────────────────────────
   helperHome: "/helper",
   helperServices: "/helper/services",
+  /** The helper's view of the same reviews. A separate path because it lives under the helper
+   *  shell — the requester's route would mount the requester's driver for someone who is not
+   *  making a request. */
+  helperReviews: "/helper/reviews",
 
   // ── admin ─────────────────────────────────────────────────────────────────
   /** Deliberately NOT linked from any public navigation. */

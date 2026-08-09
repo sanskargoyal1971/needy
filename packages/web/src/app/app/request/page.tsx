@@ -1,10 +1,12 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, ShieldAlert } from "lucide-react";
 import {
   CATEGORY_PRICING,
+  EXCEPTION_REVIEW_SLA_MS,
   HOSPITAL_SERVICE_CODE,
   type ServiceDefinition,
   type TaskCategory,
@@ -39,8 +41,32 @@ const CATEGORY_FOR_SERVICE: Record<string, TaskCategory> = {
   "social-service": "social-service",
 };
 
-export default function NewRequest() {
+export default function NewRequestPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <Loader2 className="animate-spin text-primary" aria-label="Loading" />
+        </div>
+      }
+    >
+      <NewRequest />
+    </Suspense>
+  );
+}
+
+function NewRequest() {
   const router = useRouter();
+  /**
+   * Booking one specific person, rather than opening a search.
+   *
+   * This is the only way `exception-required` can ever be reached — the eligibility matrix is
+   * applied per candidate INSIDE matching for an open request, so an open request is never
+   * refused for a pairing reason. Until this parameter existed the refusal branch below was
+   * unreachable, and with it the whole exception flow: the wizard had no entrance.
+   */
+  const namedHelper = useSearchParams().get("helperId");
+  const [scheduledFor, setScheduledFor] = useState("");
   const [services, setServices] = useState<ServiceDefinition[] | null>(null);
   const [code, setCode] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -81,6 +107,11 @@ export default function NewRequest() {
         title: title.trim(),
         description: description.trim(),
         serviceCode: code,
+        ...(namedHelper ? { helperId: namedHelper } : {}),
+        // `datetime-local` has no zone, so it parses in the browser's — which is the one the
+        // person picking a time is actually in. Sent as epoch ms so the server never has to
+        // guess whose afternoon "3pm" meant.
+        ...(scheduledFor ? { scheduledFor: new Date(scheduledFor).getTime() } : {}),
       });
       // Straight to the live screen. The SEARCH is opened there over the socket, not here —
       // the task exists durably first, so a refresh mid-search resumes rather than losing it.
@@ -88,7 +119,20 @@ export default function NewRequest() {
     } catch (err) {
       if (err instanceof AuthError) {
         if (err.code === "pairing-denied" || err.code === "exception-required") {
-          setRefusal({ code: err.code });
+          setRefusal({ code: err.code, helperId: namedHelper ?? undefined });
+        } else if (err.code === "schedule-required") {
+          setError(
+            "This booking has to be arranged for a set time rather than asked for on the spot. Pick a day and time below.",
+          );
+        } else if (err.code === "invalid-schedule") {
+          // The server's own minimum lead time, echoed back rather than hard-coded here, so
+          // the two cannot drift apart.
+          const lead = err.details?.minimumLeadMs;
+          const hours =
+            typeof lead === "number" ? Math.round(lead / (60 * 60 * 1000)) : 24;
+          setError(
+            `That time doesn't work. A booking like this needs at least ${hours} hours' notice.`,
+          );
         } else if (err.code === "too-many-requests") {
           setError("You've opened several requests very quickly. Please wait a moment.");
         } else if (err.code === "not-approved") {
@@ -101,9 +145,17 @@ export default function NewRequest() {
       }
       setSubmitting(false);
     }
-  }, [category, code, description, origin, router, title]);
+  }, [category, code, description, namedHelper, origin, router, scheduledFor, title]);
 
-  const ready = Boolean(code && origin && title.trim().length > 0 && description.trim().length > 0);
+  // A named booking is not submittable without a time: the server refuses one outright, and
+  // letting the button look ready would spend a tap to learn that.
+  const ready = Boolean(
+    code &&
+      origin &&
+      title.trim().length > 0 &&
+      description.trim().length > 0 &&
+      (!namedHelper || scheduledFor),
+  );
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
@@ -201,8 +253,29 @@ export default function NewRequest() {
           />
         </Field>
 
+        {/* ── when, for a booking with a named person ─────────────────────── */}
+        {namedHelper && (
+          <Field
+            label="When would you like them to come?"
+            hint={`A booking with a specific person is arranged in advance rather than dispatched
+                   now, so it needs at least ${MIN_LEAD_HOURS} hours' notice.`}
+            htmlFor="scheduledFor"
+          >
+            <TextInput
+              id="scheduledFor"
+              type="datetime-local"
+              value={scheduledFor}
+              // The same floor the server enforces, so the picker cannot offer a time that
+              // will be refused. `min` is advisory in some browsers, which is why the server
+              // still checks and this screen still renders that refusal.
+              min={minBookingLocal()}
+              onChange={(e) => setScheduledFor(e.target.value)}
+            />
+          </Field>
+        )}
+
         <FormError>{error}</FormError>
-        {refusal && <PairingRefusal code={refusal.code} />}
+        {refusal && <PairingRefusal code={refusal.code} helperId={refusal.helperId} />}
 
         <div className="rounded-2xl bg-white p-4 ring-1 ring-inset ring-gray-100">
           <div className="flex items-center justify-between">
@@ -233,7 +306,21 @@ export default function NewRequest() {
  *  This is the most delicate copy in the product. The rule exists to protect both parties, and
  *  the person reading it has done nothing wrong — so it names the rule, does not imply anything
  *  about them, and gives the route that exists. Vagueness here reads as suspicion. */
-function PairingRefusal({ code }: { code: string }) {
+/** The server's review SLA, in hours, for copy. Derived rather than written down twice. */
+const MIN_LEAD_HOURS = Math.round(EXCEPTION_REVIEW_SLA_MS / (60 * 60 * 1000));
+
+/** The earliest bookable slot, formatted for `datetime-local` (which wants local wall-clock,
+ *  not an ISO instant — `toISOString()` here would silently offer a UTC time as if it were the
+ *  user's). */
+function minBookingLocal(): string {
+  const earliest = new Date(Date.now() + EXCEPTION_REVIEW_SLA_MS);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${earliest.getFullYear()}-${pad(earliest.getMonth() + 1)}-${pad(
+    earliest.getDate(),
+  )}T${pad(earliest.getHours())}:${pad(earliest.getMinutes())}`;
+}
+
+function PairingRefusal({ code, helperId }: { code: string; helperId?: string }) {
   return (
     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
       <div className="flex items-start gap-3">
@@ -251,6 +338,17 @@ function PairingRefusal({ code }: { code: string }) {
                 If you both want to go ahead, you can each record a short video saying so and a
                 member of our team will review it within one working day.
               </p>
+              {/* The route out, not just the rule. A refusal that names a remedy and then
+                  doesn't offer it is worse than one that says nothing — the person now knows
+                  something is possible and has to go hunting for it. */}
+              {helperId && (
+                <Link
+                  href={paths.exceptions(helperId)}
+                  className="mt-3 inline-block rounded-xl bg-amber-800 px-4 py-2.5 font-semibold text-white transition-colors hover:bg-amber-900"
+                >
+                  Start that review
+                </Link>
+              )}
             </>
           ) : (
             <>

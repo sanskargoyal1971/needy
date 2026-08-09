@@ -275,6 +275,40 @@ export function createExceptionRouter(deps: ExceptionRouterDeps): Router {
     }),
   );
 
+  // ── everything waiting on me ───────────────────────────────────────────────
+  //
+  // The route that made the flow completable. An exception needs both testimonies, and the
+  // HELPER did not open it: they have no id to look up, and `/exceptions/for/:helperId` reads
+  // the ordered pair from the requester's side, so a helper calling it learns nothing. There
+  // was no way to tell the second person that anything was waiting on them, so every request
+  // sat in `awaiting_videos` until it expired.
+  router.get(
+    "/me/exceptions",
+    requireAuth,
+    asyncRoute(async (req: AuthedRequest, res: Response) => {
+      const userId = req.user!.sub;
+      const mine = await deps.exceptions.forParticipant(userId, 20);
+      const withNames = await Promise.all(
+        mine.map(async (e) => {
+          // The OTHER party's display name only. A pairing under review is precisely the
+          // situation in which the two people are not yet cleared to know more about each
+          // other, so this carries no phone number, no age and no gender — just enough for
+          // "Priya has asked to be paired with you" to be a sentence about a person.
+          const otherId = e.requesterId === userId ? e.helperId : e.requesterId;
+          const other = await deps.users.getById(otherId);
+          return {
+            ...participantView(e),
+            /** Which side the CALLER is on, so a client never has to compare ids to find out
+             *  whose testimony is outstanding. */
+            myRole: e.requesterId === userId ? ("requester" as const) : ("helper" as const),
+            otherName: other?.displayName ?? "someone",
+          };
+        }),
+      );
+      res.json({ exceptions: withNames });
+    }),
+  );
+
   // ── admin: the queue ───────────────────────────────────────────────────────
   router.get(
     "/admin/exceptions",

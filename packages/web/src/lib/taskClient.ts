@@ -99,6 +99,15 @@ export interface ExceptionView {
   reviewDueBy: number | null;
 }
 
+/** An exception as either party sees it, with the caller's own side resolved server-side so
+ *  no client has to compare ids to work out whose testimony is outstanding. */
+export interface ParticipantException extends ExceptionView {
+  myRole: "requester" | "helper";
+  /** The other party's display name — and nothing else about them. A pairing under review is
+   *  exactly the case where the two are not yet cleared to know more about each other. */
+  otherName: string;
+}
+
 export const taskClient = {
   // ── tasks ─────────────────────────────────────────────────────────────────
 
@@ -174,6 +183,16 @@ export const taskClient = {
 
   /** Where does my request to be paired with this specific helper stand? Null means none has
    *  ever been opened, which is different from one having been refused. */
+  /**
+   * Every live exception I am a party to, on either side.
+   *
+   * The helper's only way in. They did not open the request, so they hold no id, and
+   * `exceptionFor` is keyed on the pair from the requester's side — this is what lets the
+   * second person be told that a testimony is waiting on them.
+   */
+  myExceptions: () =>
+    call<{ exceptions: ParticipantException[] }>("/me/exceptions"),
+
   exceptionFor: (helperId: string) =>
     call<{ exception: ExceptionView | null }>(
       `/exceptions/for/${encodeURIComponent(helperId)}`,

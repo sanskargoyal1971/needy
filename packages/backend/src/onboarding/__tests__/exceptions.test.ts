@@ -166,6 +166,49 @@ describe("booking exceptions", () => {
     expect(afterSecond.body.exception.reviewDueBy).toBe(NOW + EXCEPTION_REVIEW_SLA_MS);
   });
 
+  /**
+   * The route that made the flow completable at all.
+   *
+   * An exception needs BOTH testimonies, and the helper is not the one who opened it: they
+   * hold no id, and `/exceptions/for/:helperId` reads the ordered pair from the requester's
+   * side, so a helper calling it learns nothing. There was no route by which the second person
+   * could be told anything was waiting on them, so every request sat in `awaiting_videos`
+   * until it expired — a gate that worked perfectly and that nothing could ever get through.
+   */
+  it("tells BOTH parties about a request, with the caller's own side resolved", async () => {
+    const { body } = await open();
+    const id = body.exception.id as string;
+
+    const forHelper = await as(request(app).get("/me/exceptions"), YOUNG_F);
+    expect(forHelper.status).toBe(200);
+    expect(forHelper.body.exceptions).toHaveLength(1);
+    expect(forHelper.body.exceptions[0]).toMatchObject({
+      id,
+      // Resolved server-side so a client never compares ids to find out whose turn it is.
+      myRole: "helper",
+      otherName: YOUNG_M,
+      helperVideoSubmitted: false,
+    });
+
+    const forRequester = await as(request(app).get("/me/exceptions"), YOUNG_M);
+    expect(forRequester.body.exceptions[0]).toMatchObject({ id, myRole: "requester" });
+
+    // A pairing under review is exactly the case where the two are not yet cleared to know
+    // more about each other, so the row carries a name and nothing else about them.
+    const row = forHelper.body.exceptions[0] as Record<string, unknown>;
+    expect(row).not.toHaveProperty("requesterVideoKey");
+    expect(row).not.toHaveProperty("helperVideoKey");
+    expect(row).not.toHaveProperty("otherPhone");
+    expect(row).not.toHaveProperty("otherDob");
+  });
+
+  it("keeps a stranger's request out of `/me/exceptions`", async () => {
+    await open();
+    const stranger = await as(request(app).get("/me/exceptions"), ADULT);
+    expect(stranger.status).toBe(200);
+    expect(stranger.body.exceptions).toEqual([]);
+  });
+
   it("rejects a still image where a video is required", async () => {
     const { body } = await open();
     const res = await upload(body.exception.id, YOUNG_M, JPEG);
