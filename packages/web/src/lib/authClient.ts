@@ -47,6 +47,9 @@ export interface PublicUser {
   rejectionReason: string | null;
   /** Which of the three required documents the server has on file. Drives wizard resume. */
   documents: DocumentKind[];
+  /** When a password was last set, or null if this account has none. The FACT, never the
+   *  credential — the hash is not on the user object at any layer. */
+  passwordSetAt?: number | null;
 }
 
 /** A failed request carrying the server's machine-readable reason, so callers can branch
@@ -97,6 +100,10 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
       res.status,
       typeof body.error === "string" ? body.error : `http-${res.status}`,
       typeof body.reason === "string" ? body.reason : undefined,
+      // Carried through so a caller can branch on the specific refusal — the password screen
+      // needs `problem` to say WHICH rule was broken, and each of those is something the
+      // person can actually act on.
+      body,
     );
   }
   return body as T;
@@ -143,6 +150,51 @@ export const authClient = {
     adoptCsrfToken(res.csrfToken);
     return res;
   },
+
+  // ── password sign-in ──────────────────────────────────────────────────────
+
+  /**
+   * Sign in with a password.
+   *
+   * Resolves one of two shapes. An ordinary account gets a session and a user. An ADMIN gets
+   * `mfaRequired` and a pending token instead — staff still owe the one-time code, because the
+   * console sees every live emergency and a password alone is a weaker gate than the code this
+   * platform already had. The caller must handle both; treating a successful response as "I am
+   * signed in" would leave an admin looking at a logged-out app.
+   */
+  passwordLogin: async (phone: string, password: string) => {
+    const res = await call<
+      | { user: PublicUser; csrfToken?: string; mfaRequired?: undefined }
+      | { mfaRequired: true; pendingToken: string; expiresInMs: number }
+    >("/auth/password/login", {
+      method: "POST",
+      body: JSON.stringify({ phone, password }),
+    });
+    if (!("mfaRequired" in res) || !res.mfaRequired) adoptCsrfToken(res.csrfToken);
+    return res;
+  },
+
+  /** The admin's second factor. `pendingToken` comes from `passwordLogin` and is what proves
+   *  the password step happened — without it this would be a plain OTP login. */
+  passwordMfa: async (phone: string, code: string, pendingToken: string) => {
+    const res = await call<{ user: PublicUser; csrfToken?: string }>("/auth/password/mfa", {
+      method: "POST",
+      body: JSON.stringify({ phone, code, pendingToken }),
+    });
+    adoptCsrfToken(res.csrfToken);
+    return res;
+  },
+
+  /** Set or change my own password. `currentPassword` is required whenever one already
+   *  exists — the server refuses without it. */
+  setPassword: (newPassword: string, currentPassword?: string) =>
+    call<{ ok: true; passwordSetAt: number }>("/auth/me/password", {
+      method: "POST",
+      body: JSON.stringify({ newPassword, ...(currentPassword ? { currentPassword } : {}) }),
+    }),
+
+  /** Drop back to one-time codes only. */
+  removePassword: () => call<{ ok: true }>("/auth/me/password", { method: "DELETE" }),
 
   me: () => call<{ user: PublicUser }>("/auth/me"),
 

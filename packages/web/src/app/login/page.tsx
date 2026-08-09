@@ -10,10 +10,19 @@ import { homeFor, paths, safeReturnTo } from "@/lib/paths";
 import { AuthCard, Button, Field, FormError, SandboxNote, TextInput } from "@/components/ui";
 import { normalisePhone, phoneError } from "@/lib/phone";
 
-/** Two panes on one route: ask for the number, then ask for the code. A separate `/login/otp`
- *  route would lose the phone number on refresh and let someone deep-link to a code prompt for
- *  a number no code was ever sent to. */
-type Stage = { name: "phone" } | { name: "code"; phone: string };
+/** Panes on one route: ask for the number, then for a code or a password. Separate routes
+ *  would lose the phone number on refresh and let someone deep-link to a code prompt for a
+ *  number no code was ever sent to.
+ *
+ *  `mfa` is the admin's second step: they have already entered a correct password and still owe
+ *  the one-time code. It carries the pending token from the password step, because that token
+ *  is the only thing distinguishing this from an ordinary code login — without it, anyone able
+ *  to receive the code could sign in as staff having never known the password. */
+type Stage =
+  | { name: "phone" }
+  | { name: "code"; phone: string }
+  | { name: "password"; phone: string }
+  | { name: "mfa"; phone: string; pendingToken: string };
 
 function LoginForm() {
   const router = useRouter();
@@ -23,6 +32,7 @@ function LoginForm() {
   const [stage, setStage] = useState<Stage>({ name: "phone" });
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,6 +58,66 @@ function LoginForm() {
     }
   }
 
+  /** Land wherever this person belongs. Onboarding outranks role — `homeFor` owns that — and
+   *  a `?next=` is honoured only when it is a local path (open-redirect guard). */
+  function land(user: Parameters<typeof setUser>[0]) {
+    setUser(user);
+    const fallback = homeFor(user!.role, user!.onboardingStatus);
+    router.replace(safeReturnTo(params.get("next"), fallback));
+  }
+
+  async function signInWithPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (stage.name !== "password") return;
+    setFieldError(null);
+    setFormError(null);
+    setBusy(true);
+    try {
+      const res = await authClient.passwordLogin(stage.phone, password);
+      // An admin is NOT signed in yet, however successful this looks. Sending them onward here
+      // would drop them into a logged-out app.
+      if ("mfaRequired" in res && res.mfaRequired) {
+        setStage({ name: "mfa", phone: stage.phone, pendingToken: res.pendingToken });
+        setPassword("");
+        setBusy(false);
+        return;
+      }
+      land(res.user);
+    } catch (err) {
+      if (err instanceof AuthError && err.status === 401) {
+        // Deliberately vague, matching the server: it does not say whether the number is known
+        // or whether that account even uses a password, and neither may this.
+        setFieldError("That didn't work. Check your password, or sign in with a code instead.");
+      } else {
+        setFormError(describe(err));
+      }
+      setBusy(false);
+    }
+  }
+
+  async function verifyMfa(e: React.FormEvent) {
+    e.preventDefault();
+    if (stage.name !== "mfa") return;
+    setFieldError(null);
+    setFormError(null);
+    setBusy(true);
+    try {
+      const { user } = await authClient.passwordMfa(stage.phone, code, stage.pendingToken);
+      land(user);
+    } catch (err) {
+      if (err instanceof AuthError && err.code === "mfa-expired") {
+        setStage({ name: "password", phone: stage.phone });
+        setCode("");
+        setFormError("That took too long. Please enter your password again.");
+      } else if (err instanceof AuthError && err.status === 401) {
+        setFieldError("That code isn't right. Check it and try again.");
+      } else {
+        setFormError(describe(err));
+      }
+      setBusy(false);
+    }
+  }
+
   async function verify(e: React.FormEvent) {
     e.preventDefault();
     if (stage.name !== "code") return;
@@ -56,12 +126,7 @@ function LoginForm() {
     setBusy(true);
     try {
       const { user } = await authClient.verifyOtp(stage.phone, code);
-      setUser(user);
-      // Where the user belongs depends on how far through onboarding they are, not only on
-      // their role — an unapproved admin is still an unapproved user. `homeFor` owns that
-      // ordering. A `?next=` is honoured only if it is a local path (open-redirect guard).
-      const fallback = homeFor(user.role, user.onboardingStatus);
-      router.replace(safeReturnTo(params.get("next"), fallback));
+      land(user);
     } catch (err) {
       if (err instanceof AuthError && err.status === 401) {
         setFieldError("That code isn't right. Check it and try again.");
@@ -95,9 +160,29 @@ function LoginForm() {
           <Button type="submit" loading={busy}>
             Get OTP
           </Button>
+          {/* A code is still the primary route and stays the big button: it needs nothing
+              remembered, which for this audience is the kinder default. The password is for
+              the person who cannot receive an SMS right now — a lost handset, a number that
+              has moved on, an operator on a laptop at 3am. */}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              const problem = phoneError(phone);
+              if (problem) {
+                setFieldError(problem);
+                return;
+              }
+              setFieldError(null);
+              setFormError(null);
+              setStage({ name: "password", phone: normalisePhone(phone) });
+            }}
+          >
+            Use my password instead
+          </Button>
           <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
             <ShieldCheck size={16} className="text-primary" aria-hidden />
-            <span>Secure, passwordless login</span>
+            <span>A code by text, or your password</span>
           </div>
         </form>
         <p className="text-center text-sm text-gray-600">
@@ -106,6 +191,91 @@ function LoginForm() {
             Sign up
           </Link>
         </p>
+      </AuthCard>
+    );
+  }
+
+  if (stage.name === "password") {
+    return (
+      <AuthCard title="Enter your password" subtitle={stage.phone}>
+        <form className="space-y-5" onSubmit={signInWithPassword}>
+          <FormError>{formError}</FormError>
+          <Field label="Password" error={fieldError} htmlFor="password">
+            <TextInput
+              id="password"
+              name="password"
+              type="password"
+              // Lets a password manager fill and, more importantly, OFFER TO SAVE it. Without
+              // it the browser treats this as an anonymous field and never prompts.
+              autoComplete="current-password"
+              required
+              autoFocus
+              value={password}
+              invalid={Boolean(fieldError)}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </Field>
+          <Button type="submit" loading={busy}>
+            Sign in
+          </Button>
+          {/* The way back for someone who has forgotten it. There is no reset email in this
+              product, so the one-time code IS the reset route — and it is the honest one,
+              because the phone is already the verified identity behind the account. */}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setPassword("");
+              setFieldError(null);
+              setFormError(null);
+              setStage({ name: "phone" });
+            }}
+          >
+            I&apos;ve forgotten it — send me a code
+          </Button>
+        </form>
+      </AuthCard>
+    );
+  }
+
+  if (stage.name === "mfa") {
+    return (
+      <AuthCard
+        title="One more step"
+        subtitle="Staff accounts also need a code. We've sent one to your phone."
+      >
+        <form className="space-y-5" onSubmit={verifyMfa}>
+          <FormError>{formError}</FormError>
+          <Field label="Verification code" error={fieldError} htmlFor="mfa-code">
+            <TextInput
+              id="mfa-code"
+              name="code"
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={8}
+              required
+              autoFocus
+              placeholder="123456"
+              value={code}
+              invalid={Boolean(fieldError)}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+            />
+          </Field>
+          <Button type="submit" loading={busy}>
+            Sign in
+          </Button>
+          {/* Says why, rather than making an operator wonder whether something went wrong.
+              This account can see every live emergency; a password alone is not enough. */}
+          <p className="text-center text-xs text-gray-500">
+            Your password was accepted. Because this account can see people&apos;s emergencies,
+            it needs both.
+          </p>
+          <SandboxNote>
+            SMS delivery uses the console adapter unless Twilio credentials are configured. In
+            development the code is printed in the backend logs.
+          </SandboxNote>
+        </form>
       </AuthCard>
     );
   }

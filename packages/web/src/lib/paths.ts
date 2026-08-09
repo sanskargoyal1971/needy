@@ -23,6 +23,9 @@ export const paths = {
   onboarding: "/signup/verify",
   /** Where a submitted-but-unreviewed user lands, and where a rejected user is trapped. */
   hold: "/hold",
+  /** Set, change or remove a password. Reachable from the header — a screen with no link is
+   *  a screen that does not exist. */
+  security: "/account/security",
 
   // ── requester ─────────────────────────────────────────────────────────────
   requesterHome: "/app",

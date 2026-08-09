@@ -43,6 +43,15 @@ export function Header() {
               >
                 {state.user.displayName}
               </Link>
+              {/* The only route to the password screen. Without a link it would exist and be
+                  unreachable — the same shape of gap that left the exception wizard with no
+                  entrance until someone walked the flow. */}
+              <Link
+                href={paths.security}
+                className="hidden text-sm font-medium text-gray-600 transition-colors hover:text-primary sm:block"
+              >
+                Sign-in
+              </Link>
               <button
                 type="button"
                 onClick={() => void logout()}
