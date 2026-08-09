@@ -133,6 +133,38 @@ function nextError(socket: AppClient, ms = 3_000): Promise<SocketErrorPayload> {
   });
 }
 
+/**
+ * Resolve with the first `error` payload matching `match`, ignoring any others.
+ *
+ * Needed wherever ONE burst can legitimately produce more than one kind of refusal, and the
+ * order between them is a race rather than a property. The `mark-read` flood is exactly that:
+ * the frames that pass the limiter are refused NOT_AUTHORIZED (their ids are absent) and the
+ * frames that don't are refused RATE_LIMITED — both correct, and which lands first depends on
+ * timing, because the first path emits only after 200 sequential repository reads while the
+ * second emits after a single token check. `nextError` asserted on whichever won, so the test
+ * failed roughly one run in five on a loaded machine while nothing was wrong.
+ */
+function errorMatching(
+  socket: AppClient,
+  match: (payload: SocketErrorPayload) => boolean,
+  ms = 3_000,
+): Promise<SocketErrorPayload> {
+  return new Promise((resolve, reject) => {
+    const onError = (raw: unknown): void => {
+      const payload = raw as SocketErrorPayload;
+      if (!match(payload)) return;
+      clearTimeout(timer);
+      socket.off("error", onError);
+      resolve(payload);
+    };
+    const timer = setTimeout(() => {
+      socket.off("error", onError);
+      reject(new Error("timed out waiting for a matching error event"));
+    }, ms);
+    socket.on("error", onError);
+  });
+}
+
 const tick = (ms = 120): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -476,11 +508,13 @@ describe("/chat participant authorization (audit A3)", () => {
     // Unbounded before: one frame carries up to 200 ids and each costs a `messages.get`, so an
     // authorized participant could drive unlimited repository load by replaying one frame.
     const ids = Array.from({ length: 200 }, (_, i) => `probe-absent-${i}`);
-    const errored = nextError(requester);
+    // Waits for the RATE_LIMITED refusal specifically. The same burst also produces
+    // NOT_AUTHORIZED from the frames that got through the limiter — see `errorMatching`.
+    const errored = errorMatching(requester, (e) => e.code === "RATE_LIMITED");
     for (let i = 0; i < 20; i += 1) {
       requester.emit("mark-read", { taskId: TASK_ID, messageIds: ids });
     }
-    expect((await errored).code).toBe("RATE_LIMITED");
+    expect((await errored).event).toBe("mark-read");
     // Drain the rest of the burst's refusals so the next test starts clean.
     await tick(400);
   });
