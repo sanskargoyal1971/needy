@@ -105,7 +105,9 @@ export function TaskExperience({ taskId }: { taskId: string }) {
         </div>
       )}
 
-      {task.state === "searching" && <SearchingStage helpersNearby={state.helpersNearby} />}
+      {task.state === "searching" && (
+        <SearchingStage origin={task.origin} helpersNearby={state.helpersNearby} />
+      )}
       {task.state === "matched" && <MatchedStage helper={helper} />}
       {task.state === "verifying" && <VerifyingStage helper={helper} />}
       {task.state === "en-route" && (

@@ -10,7 +10,7 @@ import {
   Video,
 } from "lucide-react";
 import type { MatchedHelper, PublicTask } from "@needy/shared";
-import { RadarSweep, SoftScaleReveal } from "@/motion";
+import { RadarSweep, SoftScaleReveal, type RadarBlip } from "@/motion";
 import { LiveMap } from "@/lib/LiveMap";
 import { SandboxNote } from "@/components/ui";
 import { taskClient } from "@/lib/taskClient";
@@ -30,15 +30,56 @@ import type { EtaView, LatLng, LocationUpdate } from "@/realtime";
 
 // ── Stage 1: searching ───────────────────────────────────────────────────────
 
+/**
+ * Place the server's coarsened pins on the radar.
+ *
+ * `helpers-nearby` carries `approxPoints` — real helper positions, deliberately rounded down
+ * to a coarse grid before they leave the server so a requester cannot use the search to locate
+ * anyone. The first version of this stage threw them away and rendered a bare count, which
+ * makes the radar decoration: rings expanding over nothing, next to a number. The whole claim
+ * this screen makes is that there are real people around you, and these points are the only
+ * evidence of it the protocol provides.
+ *
+ * Placement is by true BEARING, with the spread normalised to the furthest helper in the set.
+ * The radar therefore shows direction and relative spread honestly and makes no claim about
+ * distance — which is why it carries no scale, no rings labelled in metres and no "1.2 km"
+ * against a blip. Normalising to a fixed radius instead would put every helper in a dense
+ * neighbourhood on top of the centre dot, which reads as "nobody is there".
+ */
+function blipsFrom(origin: LatLng, points: LatLng[]): RadarBlip[] {
+  // Longitude degrees shrink with latitude; without this the bearing is wrong by a factor of
+  // cos(lat) — about 0.97 in Bengaluru, but the correction is one term and the error grows.
+  const scaleLng = Math.cos((origin.lat * Math.PI) / 180);
+  const raw = points.map((p) => ({
+    x: (p.lng - origin.lng) * scaleLng,
+    y: -(p.lat - origin.lat), // screen y grows downward; north must point up
+  }));
+  const furthest = Math.max(...raw.map((r) => Math.hypot(r.x, r.y)), Number.EPSILON);
+  return raw.map((r, i) => ({
+    id: `${i}`,
+    x: r.x / furthest,
+    y: r.y / furthest,
+    // Staggered so they arrive as a handful of people rather than a single flash.
+    delay: i * 0.12,
+  }));
+}
+
 export function SearchingStage({
+  origin,
   helpersNearby,
 }: {
+  origin: LatLng;
   helpersNearby: { count: number; approxPoints: LatLng[] };
 }) {
+  const blips =
+    helpersNearby.approxPoints.length > 0
+      ? blipsFrom(origin, helpersNearby.approxPoints)
+      : [];
+
   return (
     <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center">
       <div className="mx-auto mb-6 flex justify-center">
-        <RadarSweep size={180} />
+        <RadarSweep size={180} blips={blips} />
       </div>
       <h2 className="font-display text-2xl font-bold text-gray-900">
         Looking for someone nearby
