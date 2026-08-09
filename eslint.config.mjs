@@ -41,6 +41,13 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node, ...globals.es2022 } },
   },
 
+  // Manual dev tooling: plain Node ESM scripts run by hand against a local stack. Same reason
+  // as the config files above — without Node globals, `process` and `fetch` read as undefined.
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: { globals: { ...globals.node, ...globals.es2022 } },
+  },
+
   js.configs.recommended,
   ...tseslint.configs.recommended,
 
