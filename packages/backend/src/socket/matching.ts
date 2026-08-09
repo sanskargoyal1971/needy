@@ -186,6 +186,28 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
         if (task.requesterId !== requesterId)
           return ack({ ok: false, error: "not-requester" });
 
+        // ── an assigned booking is NOT a search ──────────────────────────────
+        //
+        // A task created with a `helperId` is a booking for one specific person — which, in
+        // practice, means a restricted pairing that a human approved after watching two video
+        // testimonies. Broadcasting it would offer that booking to every eligible helper
+        // within the ring and hand it to whoever tapped first, replacing the one person the
+        // exception was granted for. The approval is per ordered pair; a stranger who wins the
+        // race is not covered by it.
+        //
+        // `POST /tasks` already carried a comment claiming that assigning the helper "is what
+        // stops the search fanning it out to strangers" — and nothing here enforced it. The
+        // task went out to the neighbourhood like any other.
+        if (task.helperId != null) {
+          emitSocketError(socket, {
+            event: "request-help",
+            code: "NOT_AUTHORIZED",
+            message: "this booking is already assigned to a specific helper",
+            taskId,
+          });
+          return ack({ ok: false, error: "task-already-assigned" });
+        }
+
         // ── IDEMPOTENCY (audit C19) ──────────────────────────────────────────
         // A second `request-help` for a task that already has a LIVE offer must not
         // re-broadcast to every helper again. Before this, a duplicate call re-offered the

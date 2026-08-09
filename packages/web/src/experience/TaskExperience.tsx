@@ -10,6 +10,7 @@ import { Chat } from "./Chat";
 import { SosButton } from "./SosButton";
 import {
   ArrivedStage,
+  BookedStage,
   CancelledStage,
   CompletedStage,
   EnRouteStage,
@@ -56,6 +57,11 @@ export function TaskExperience({ taskId }: { taskId: string }) {
    */
   useEffect(() => {
     if (!task || task.state !== "searching") return;
+    // A booking made for one specific person is not a search and must never be broadcast: the
+    // exception that unlocked it was granted for that ordered pair, so handing the task to
+    // whoever accepts first would place it with someone the approval does not cover. The
+    // server refuses this too — this is the client not asking for something it knows is wrong.
+    if (task.helperId != null) return;
     if (searchOpenedRef.current === task.id) return;
     searchOpenedRef.current = task.id;
     driver.requestHelp();
@@ -105,9 +111,13 @@ export function TaskExperience({ taskId }: { taskId: string }) {
         </div>
       )}
 
-      {task.state === "searching" && (
-        <SearchingStage origin={task.origin} helpersNearby={state.helpersNearby} />
-      )}
+      {task.state === "searching" &&
+        (task.helperId != null ? (
+          // Assigned already: held for one person, never broadcast. See BookedStage.
+          <BookedStage task={task} />
+        ) : (
+          <SearchingStage origin={task.origin} helpersNearby={state.helpersNearby} />
+        ))}
       {task.state === "matched" && <MatchedStage helper={helper} />}
       {task.state === "verifying" && <VerifyingStage helper={helper} />}
       {task.state === "en-route" && (

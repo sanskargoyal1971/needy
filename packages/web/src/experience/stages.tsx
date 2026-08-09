@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  CalendarClock,
   CheckCircle2,
   Copy,
   DoorOpen,
@@ -99,6 +100,51 @@ export function SearchingStage({
         You can close this page — we&apos;ll keep looking and it will be here when you come
         back.
       </p>
+    </div>
+  );
+}
+
+// ── Stage 1b: booked — a scheduled task with a named helper ──────────────────
+
+/**
+ * A booking that is already assigned, waiting for its time.
+ *
+ * Not the radar. This task will never be offered to anyone: it exists because a human approved
+ * this exact pairing after watching two video testimonies, and broadcasting it would hand the
+ * booking to whoever tapped first — someone the approval does not cover. Showing "looking for
+ * someone nearby" here would be describing the opposite of what is happening.
+ *
+ * The dispatch itself is NOT built, and this says so rather than implying a countdown is
+ * running somewhere. There is no scheduler: nothing wakes up at the appointed time and offers
+ * the task to the named helper. Per AGENTS.md a stub is called out rather than dressed up —
+ * and this one especially, because a screen that quietly implied someone was coming would send
+ * a person to wait by a door for nobody.
+ */
+export function BookedStage({ task }: { task: PublicTask }) {
+  return (
+    <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center">
+      <CalendarClock size={28} className="mx-auto mb-3 text-primary" aria-hidden />
+      <h2 className="font-display text-2xl font-bold text-gray-900">This booking is arranged</h2>
+      <p className="mt-2 text-gray-600">
+        {task.scheduledFor != null ? (
+          <>
+            It&apos;s set for{" "}
+            <span className="font-semibold text-gray-900">
+              {new Date(task.scheduledFor).toLocaleString()}
+            </span>
+            , with the person you asked for. Nobody else will be offered it.
+          </>
+        ) : (
+          <>It&apos;s held for the person you asked for. Nobody else will be offered it.</>
+        )}
+      </p>
+      <div className="mt-6">
+        <SandboxNote>
+          Automatic dispatch at the booked time is not built yet. This booking is recorded and
+          held for your helper, but nothing will notify them when the time comes — for now, a
+          member of our team has to set it going.
+        </SandboxNote>
+      </div>
     </div>
   );
 }

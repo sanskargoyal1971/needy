@@ -711,6 +711,39 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
   // in the process. Asserting on a task some earlier case had opened would make the result
   // depend on sweep timing rather than on behaviour.
 
+  /**
+   * A booking made for one named person must never be broadcast.
+   *
+   * The only way a task is created with a `helperId` is a restricted pairing that a human
+   * approved after watching two video testimonies — and that approval covers exactly one
+   * ordered pair. Fanning the task out would offer it to every eligible helper in the ring and
+   * hand it to whoever tapped first, who is not covered by anything.
+   *
+   * `POST /tasks` already claimed, in a comment, that assigning the helper "is what stops the
+   * search fanning it out to strangers". Nothing enforced it: the task went to the
+   * neighbourhood like any other. Found by walking the approved-exception flow in a browser
+   * and watching a pre-assigned booking render the radar.
+   */
+  it("refuses to broadcast a booking that is already assigned to a helper", async () => {
+    const assigned = "task-assigned-booking";
+    await seedTask(assigned, { helperId: HELPER_OK, scheduledFor: FIXED_NOW + 86_400_000 });
+    await republishHelperOk();
+    await resetRequestHelpLimit();
+
+    const before = offers[HELPER_OK]?.length ?? 0;
+    expect(await requestHelp(requester, assigned)).toEqual({
+      ok: false,
+      error: "task-already-assigned",
+    });
+    await settle();
+
+    // Nobody was offered anything — not even the assigned helper, who is reached at the booked
+    // time rather than by a race they might lose.
+    expect(offers[HELPER_OK]?.length ?? 0).toBe(before);
+    // And no durable expiry was claimed, so the sweep has nothing to close later either.
+    expect(await client.zscore(keys.offerExpiryQueue(), assigned)).toBeNull();
+  });
+
   it("records the offer expiry durably and does not re-broadcast on a duplicate request-help", async () => {
     await republishHelperOk();
     expect(await requestHelp(requester, T_DUPLICATE)).toEqual({ ok: true });
