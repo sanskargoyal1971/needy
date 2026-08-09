@@ -244,7 +244,7 @@ function AlertCard({
       {alert.acknowledgedBy && (
         <p className="mt-3 flex items-center gap-1.5 text-sm text-amber-800">
           <ShieldCheck size={14} aria-hidden />
-          Owned by {alert.acknowledgedBy}
+          Owned by {alert.acknowledgedByName ?? alert.acknowledgedBy}
           {alert.acknowledgedAt && <> · {relativeTime(alert.acknowledgedAt)}</>}
         </p>
       )}
@@ -253,7 +253,9 @@ function AlertCard({
           <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-600" aria-hidden />
           <span>
             {alert.resolutionNote}
-            {alert.resolvedBy && <span className="text-gray-400"> — {alert.resolvedBy}</span>}
+            {alert.resolvedBy && (
+              <span className="text-gray-400"> — {alert.resolvedByName ?? alert.resolvedBy}</span>
+            )}
           </span>
         </p>
       )}
@@ -281,24 +283,36 @@ function AlertCard({
                 className="block w-full rounded-xl border-0 p-3 text-sm text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-primary"
               />
               <div className="flex gap-2">
-                <Button onClick={resolve} loading={busy === "resolve"} disabled={!note.trim()}>
-                  Close this alert
-                </Button>
-                <Button variant="secondary" onClick={() => setResolving(false)}>
-                  Cancel
-                </Button>
+                <div className="w-44">
+                  <Button onClick={resolve} loading={busy === "resolve"} disabled={!note.trim()}>
+                    Close this alert
+                  </Button>
+                </div>
+                <div className="w-32">
+                  <Button variant="secondary" onClick={() => setResolving(false)}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
+              {/* Widths are constrained because `Button` is `w-full` by design (it was built
+                  for the signup wizard's single-action panes). Left bare, every action here
+                  spanned the whole card — and a full-width "Resolve" sitting under the
+                  primary action on a triage screen is a mis-click waiting to happen. */}
               {alert.status === "raised" && (
-                <Button onClick={acknowledge} loading={busy === "ack"}>
-                  I&apos;m on it
-                </Button>
+                <div className="w-44">
+                  <Button onClick={acknowledge} loading={busy === "ack"}>
+                    I&apos;m on it
+                  </Button>
+                </div>
               )}
-              <Button variant="secondary" onClick={() => setResolving(true)}>
-                Resolve
-              </Button>
+              <div className="w-32">
+                <Button variant="secondary" onClick={() => setResolving(true)}>
+                  Resolve
+                </Button>
+              </div>
             </div>
           )}
         </div>

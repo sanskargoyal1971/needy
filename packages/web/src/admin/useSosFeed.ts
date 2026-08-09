@@ -35,7 +35,15 @@ type OperatorSocket = Socket<SosServerEvents, SosClientEvents>;
 /** The socket's payload widened to the console's view type — `task`, `requester` and `helper`
  *  are absent until the REST enrichment lands. */
 function bare(alert: SosAlert): AlertView {
-  return { ...alert, task: null, requester: null, helper: null, raisedByRole: "unknown" };
+  return {
+    ...alert,
+    task: null,
+    requester: null,
+    helper: null,
+    raisedByRole: "unknown",
+    acknowledgedByName: null,
+    resolvedByName: null,
+  };
 }
 
 export interface SosFeed {
@@ -77,6 +85,8 @@ export function useSosFeed(): SosFeed {
               helper: incoming.helper ?? prev[at].helper,
               raisedByRole:
                 incoming.raisedByRole === "unknown" ? prev[at].raisedByRole : incoming.raisedByRole,
+              acknowledgedByName: incoming.acknowledgedByName ?? prev[at].acknowledgedByName,
+              resolvedByName: incoming.resolvedByName ?? prev[at].resolvedByName,
             };
       const next = at === -1 ? [...prev, merged] : prev.map((a, i) => (i === at ? merged : a));
       // Oldest first: the person waiting longest is the one to answer next. Closed alerts stay

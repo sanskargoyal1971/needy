@@ -120,7 +120,20 @@ describe("versioned migration runner", () => {
     try {
       await migrate(pool, silent);
       const { rows } = await pool.query<{ count: string }>(
-        `SELECT count(*) AS count FROM pg_locks WHERE locktype = 'advisory'`,
+        // Scoped to THIS database. `pg_locks` is a cluster-wide view: unscoped, this counted
+        // every advisory lock held anywhere on the server, including the one another test
+        // file's `migrate()` legitimately holds for the duration of its own run. Vitest runs
+        // those files in parallel against the same Postgres, so the assertion failed whenever
+        // two overlapped — a flake that says "the lock leaked" while pointing at a lock that
+        // is being used exactly as intended, in a different database.
+        //
+        // Each suite gets its own database from `PgHarness`, so filtering by
+        // `current_database()` restores the property the test is actually about: did OUR
+        // migration release OUR lock.
+        `SELECT count(*) AS count
+           FROM pg_locks
+          WHERE locktype = 'advisory'
+            AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
       );
       // A leaked lock would not fail any assertion above — it would silently block the NEXT
       // deploy for as long as the connection lived. That is the failure worth a test.

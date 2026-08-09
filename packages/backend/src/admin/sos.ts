@@ -48,6 +48,11 @@ interface AlertView extends SosAlert {
    *  ids to work out whether the person in danger is the one who asked for help or the one
    *  who came. */
   raisedByRole: "requester" | "helper" | "unknown";
+  /** Display names for the operators on the alert. The raw ids are still in `acknowledgedBy`
+   *  and `resolvedBy` — those are the audit-grade values — but "Owned by admin-seed" is not an
+   *  answer to the question a colleague is actually asking, which is who to go and talk to. */
+  acknowledgedByName: string | null;
+  resolvedByName: string | null;
 }
 
 interface PartyView {
@@ -82,9 +87,14 @@ export function createSosAdminRouter(deps: Deps): Router {
       ...new Set(
         alerts.flatMap((a) => {
           const task = tasks.get(a.taskId);
-          return [a.raisedBy, task?.requesterId, task?.helperId].filter(
-            (v): v is string => typeof v === "string",
-          );
+          return [
+            a.raisedBy,
+            task?.requesterId,
+            task?.helperId,
+            // The operators too — same batched lookup, so naming them costs nothing extra.
+            a.acknowledgedBy,
+            a.resolvedBy,
+          ].filter((v): v is string => typeof v === "string");
         }),
       ),
     ];
@@ -109,6 +119,12 @@ export function createSosAdminRouter(deps: Deps): Router {
           : null,
         requester: task ? (users.get(task.requesterId) ?? null) : null,
         helper: task?.helperId ? (users.get(task.helperId) ?? null) : null,
+        acknowledgedByName: alert.acknowledgedBy
+          ? (users.get(alert.acknowledgedBy)?.displayName ?? alert.acknowledgedBy)
+          : null,
+        resolvedByName: alert.resolvedBy
+          ? (users.get(alert.resolvedBy)?.displayName ?? alert.resolvedBy)
+          : null,
         raisedByRole:
           task == null
             ? "unknown"

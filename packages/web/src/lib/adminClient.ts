@@ -64,6 +64,9 @@ export interface AlertView extends SosAlert {
   requester: AlertParty | null;
   helper: AlertParty | null;
   raisedByRole: "requester" | "helper" | "unknown";
+  /** Display names for the operators. The raw ids remain on `acknowledgedBy`/`resolvedBy`. */
+  acknowledgedByName: string | null;
+  resolvedByName: string | null;
 }
 
 export interface AlertParty {
