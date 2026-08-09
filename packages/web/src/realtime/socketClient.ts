@@ -400,9 +400,11 @@ export class RealNeedyClient implements NeedyDriver {
 
   // ── namespace wiring ────────────────────────────────────────────────────────
   private wireMatching(): void {
-    this.matching.on("helpers-nearby", ({ taskId, count, approxPoints }) => {
+    this.matching.on("helpers-nearby", ({ taskId, count, approxPoints, restrictedNearby }) => {
       if (taskId !== this.taskId) return;
-      this.patch({ helpersNearby: { count, approxPoints } });
+      this.patch({
+        helpersNearby: { count, approxPoints, restrictedNearby: restrictedNearby ?? 0 },
+      });
     });
     this.matching.on("matched", ({ task, helper }) => {
       if (task.id !== this.taskId) return;

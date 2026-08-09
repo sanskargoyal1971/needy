@@ -12,6 +12,7 @@ import {
   type MatchingServerEvents,
   type MatchOffer,
 } from "@needy/shared";
+import { keys } from "../../domain/keys.js";
 import { config } from "../../config.js";
 import { signAccessToken } from "../../auth/jwt.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
@@ -426,5 +427,78 @@ describe("matching: radius escalation, eligibility and service filters", () => {
       permitted.some((o) => o.taskId === taskId),
       "an older helper is unaffected by the restriction",
     ).toBe(true);
+  }, 15_000);
+
+  /**
+   * A refusal the requester cannot see is the worst of both worlds.
+   *
+   * Reported live: a young man's search found the only nearby helper — a young woman two
+   * metres away — filtered her out correctly, and then told him "asking helpers closest to
+   * you first" forever. An empty neighbourhood and a deliberate refusal were indistinguishable
+   * on screen, so there was nothing to act on and no reason given.
+   *
+   * The count, and ONLY the count. Naming or placing these helpers would leak precisely what
+   * the rule exists to withhold.
+   */
+  it("tells the requester when the only nearby helpers were refused by the matrix", async () => {
+    const YOUNG_M = "esc-nearby-m";
+    const YOUNG_F = "esc-nearby-f";
+    await users.create(
+      makeUser({
+        id: YOUNG_M, phone: "+919700000011", displayName: YOUNG_M, role: "both",
+        kycStatus: "verified", onboardingStatus: "approved",
+        dateOfBirth: "2001-01-01", gender: "male", createdAt: FIXED_NOW, updatedAt: FIXED_NOW,
+      }),
+    );
+    await users.create(
+      makeUser({
+        id: YOUNG_F, phone: "+919700000012", displayName: YOUNG_F, role: "both",
+        kycStatus: "verified", onboardingStatus: "approved",
+        dateOfBirth: "2001-01-01", gender: "female", createdAt: FIXED_NOW, updatedAt: FIXED_NOW,
+      }),
+    );
+    // Earlier cases in this file leave their own helpers in the shared availability index, and
+    // this assertion is about a neighbourhood containing exactly ONE refused helper. Clearing
+    // both halves of the index is the only way to state that precisely.
+    await client.del(keys.helperGeo());
+    await client.del(keys.helperGeoFresh());
+
+    await services.setHelperServices(YOUNG_F, [], clock);
+    await publish(YOUNG_F, eastOf(0.2));
+
+    const s = await openSockets([YOUNG_M, YOUNG_F]);
+    const nearby: { count: number; restrictedNearby?: number }[] = [];
+    s[YOUNG_M]!.on("helpers-nearby", (p) => nearby.push(p));
+
+    const taskId = "esc-task-nearby-refused";
+    await tasks.create({
+      id: taskId,
+      requesterId: YOUNG_M,
+      helperId: null,
+      category: "errand",
+      state: "searching",
+      origin: ORIGIN,
+      title: "x",
+      description: "t",
+      price: 149,
+      serviceCode: "hospital",
+      scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
+      createdAt: clock,
+      updatedAt: clock,
+    });
+    await new Promise<void>((r) => s[YOUNG_M]!.emit("request-help", { taskId }, () => r()));
+    await sleep(250);
+
+    const first = nearby[0];
+    expect(first, "the requester must be told how the search went").toBeDefined();
+    expect(first!.count, "nobody was offered the task").toBe(0);
+    expect(
+      first!.restrictedNearby,
+      "…but the requester is told someone was there and was refused",
+    ).toBe(1);
   }, 15_000);
 });

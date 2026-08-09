@@ -663,7 +663,7 @@ async function findEligibleHelpers(
   deps: Deps,
   task: Task,
   radiusMeters: number,
-): Promise<Candidate[]> {
+): Promise<{ eligible: Candidate[]; restrictedNearby: number }> {
   // ioredis returns a loosely-typed array; with WITHCOORD + WITHDIST each entry is
   // [member, distString, [lngString, latString]]. Parse defensively.
   const raw = await deps.redis.client.geosearch(
@@ -695,6 +695,9 @@ async function findEligibleHelpers(
   );
 
   const eligible: Candidate[] = [];
+  /** In range and otherwise offerable, refused ONLY by the pairing matrix. Reported back to
+   *  the requester as a bare count so the search can say why it found nobody. */
+  let restrictedNearby = 0;
   for (const entry of raw as unknown[]) {
     if (!Array.isArray(entry)) continue;
     const [member, distStr, coord] = entry as [unknown, unknown, unknown];
@@ -730,7 +733,12 @@ async function findEligibleHelpers(
     // Only an outright `allowed` pairing enters live dispatch: a `requires-exception`
     // pairing is legal only as a scheduled booking once an admin has approved the pair, and
     // that path does not come through here.
-    if (!isLiveDispatchable(pairingDecision(requester ?? EMPTY_PARTY, user ?? EMPTY_PARTY, deps.now()))) {
+    const decision = pairingDecision(requester ?? EMPTY_PARTY, user ?? EMPTY_PARTY, deps.now());
+    if (!isLiveDispatchable(decision)) {
+      // Counted, not just skipped. `requires-exception` is a pairing that a human could
+      // approve; `denied` is one nobody can. Both are invisible to the requester today, and
+      // the first is the one they can actually do something about.
+      if (decision.kind === "requires-exception") restrictedNearby += 1;
       continue;
     }
 
@@ -749,7 +757,7 @@ async function findEligibleHelpers(
   eligible.sort(
     (a, b) => a.distanceMeters - b.distanceMeters || b.rating - a.rating,
   );
-  return eligible;
+  return { eligible, restrictedNearby };
 }
 
 /**
@@ -1053,7 +1061,11 @@ async function broadcastWave(
   const waves = deps.config.match.radiusWavesMeters;
   const radiusMeters = waves[Math.min(waveIndex, waves.length - 1)]!;
 
-  const candidates = await findEligibleHelpers(deps, task, radiusMeters);
+  const { eligible: candidates, restrictedNearby } = await findEligibleHelpers(
+    deps,
+    task,
+    radiusMeters,
+  );
 
   if (candidates.length === 0) {
     // Nothing to offer in this ring. The caller decides whether a wider one is available;
@@ -1063,6 +1075,9 @@ async function broadcastWave(
       taskId: task.id,
       count: 0,
       approxPoints: [],
+      // The difference between "nobody is around" and "someone is around and we will not
+      // introduce you". Both looked identical on the requester's screen until now.
+      restrictedNearby,
     });
     return 0;
   }
@@ -1098,6 +1113,7 @@ async function broadcastWave(
       lat: coarsen(c.point.lat),
       lng: coarsen(c.point.lng),
     })),
+    restrictedNearby,
   });
 
   return candidates.length;

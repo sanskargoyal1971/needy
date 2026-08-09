@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import {
   CalendarClock,
@@ -7,6 +8,7 @@ import {
   Copy,
   DoorOpen,
   Loader2,
+  ShieldAlert,
   Star,
   Video,
 } from "lucide-react";
@@ -14,6 +16,7 @@ import type { MatchedHelper, PublicTask } from "@needy/shared";
 import { RadarSweep, SoftScaleReveal, type RadarBlip } from "@/motion";
 import { LiveMap } from "@/lib/LiveMap";
 import { SandboxNote } from "@/components/ui";
+import { paths } from "@/lib/paths";
 import { taskClient } from "@/lib/taskClient";
 import type { EtaView, LatLng, LocationUpdate } from "@/realtime";
 
@@ -70,7 +73,7 @@ export function SearchingStage({
   helpersNearby,
 }: {
   origin: LatLng;
-  helpersNearby: { count: number; approxPoints: LatLng[] };
+  helpersNearby: { count: number; approxPoints: LatLng[]; restrictedNearby: number };
 }) {
   const blips =
     helpersNearby.approxPoints.length > 0
@@ -96,6 +99,37 @@ export function SearchingStage({
             } close to you. Waiting for someone to accept.`
           : "Asking helpers closest to you first. If nobody answers we'll widen the search."}
       </p>
+
+      {/* The difference between "nobody is around" and "someone is around and we will not
+          introduce you". Those looked identical here: the search sat on "asking helpers
+          closest to you" forever while the one person nearby had been deliberately filtered
+          out, and nothing ever said so. A refusal the person it refuses cannot see is the
+          worst of both worlds — they get neither the match nor the explanation.
+
+          Deliberately a COUNT and nothing else. These are the people this requester is
+          specifically not cleared to be matched with, so naming or placing them would leak
+          exactly what the rule exists to withhold. */}
+      {helpersNearby.count === 0 && helpersNearby.restrictedNearby > 0 && (
+        <div className="mt-6 rounded-2xl bg-amber-50 p-4 text-left">
+          <p className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+            <ShieldAlert size={16} aria-hidden />
+            {helpersNearby.restrictedNearby === 1
+              ? "Someone is nearby, but we can't match you automatically"
+              : `${helpersNearby.restrictedNearby} people are nearby, but we can't match you automatically`}
+          </p>
+          <p className="mt-1 text-sm text-amber-900">
+            For safety we don&apos;t automatically pair two adults under 36 of different
+            genders. It isn&apos;t about you — it applies to everyone, both ways round.
+            We&apos;re still widening the search for someone else.
+          </p>
+          <Link
+            href={paths.exceptions()}
+            className="mt-3 inline-block text-sm font-semibold text-amber-900 underline"
+          >
+            Ask for a pairing review instead
+          </Link>
+        </div>
+      )}
       <p className="mt-4 text-sm text-gray-500">
         You can close this page — we&apos;ll keep looking and it will be here when you come
         back.

@@ -46,7 +46,19 @@ export interface TaskExperienceState {
   userId: string;
   task: PublicTask | null;
   /** Requester-side: helpers surfacing during the search (§3 Stage 1). */
-  helpersNearby: { count: number; approxPoints: LatLng[] };
+  helpersNearby: {
+    count: number;
+    approxPoints: LatLng[];
+    /**
+     * Helpers who were in range and available, and whom the eligibility matrix refused.
+     *
+     * The requester cannot be told who or where — those are precisely the people they are not
+     * cleared to be matched with. But they must be told that this is what happened: without
+     * it, a deliberate refusal and an empty neighbourhood look identical, and the person sits
+     * watching a radar that will never resolve.
+     */
+    restrictedNearby: number;
+  };
   /** The matched, KYC-verified helper (§3 Stage 2). */
   helper: MatchedHelper | null;
   /** Latest interpolation target for the map marker (§3 Stage 4). */
@@ -91,7 +103,7 @@ export function initialTaskState(userId: string): TaskExperienceState {
     connection: "connecting",
     userId,
     task: null,
-    helpersNearby: { count: 0, approxPoints: [] },
+    helpersNearby: { count: 0, approxPoints: [], restrictedNearby: 0 },
     helper: null,
     location: null,
     eta: null,

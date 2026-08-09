@@ -242,7 +242,27 @@ export interface MatchingServerEvents {
   /** delivered to helpers who didn't win, so their UI can resolve gracefully. */
   "offer-closed": (payload: { taskId: string; reason: "already-taken" | "expired" | "cancelled" }) => void;
   /** delivered to the requester as helpers are found / when matched. */
-  "helpers-nearby": (payload: { taskId: string; count: number; approxPoints: LatLng[] }) => void;
+  /**
+   * How the search is going, per wave.
+   *
+   * `restrictedNearby` is the count of helpers who were in range, available, KYC-verified and
+   * offering the right service — and were excluded ONLY by the eligibility matrix. It exists
+   * because without it a refused search is indistinguishable from an empty neighbourhood: the
+   * requester watches "asking helpers closest to you first" forever while the one person 2
+   * metres away is silently filtered out, and nothing on screen ever says why. A deliberate
+   * refusal that the person it refuses cannot see is the worst of both worlds — they get
+   * neither the match nor the explanation.
+   *
+   * A COUNT only. Never who, never where: these are people the requester is specifically not
+   * cleared to be matched with, so naming them would leak exactly what the rule exists to
+   * withhold.
+   */
+  "helpers-nearby": (payload: {
+    taskId: string;
+    count: number;
+    approxPoints: LatLng[];
+    restrictedNearby?: number;
+  }) => void;
   matched: (payload: { task: PublicTask; helper: MatchedHelper }) => void;
   /** delivered to BOTH participants whenever the task's lifecycle state changes after match. */
   "task-updated": (payload: { task: PublicTask }) => void;

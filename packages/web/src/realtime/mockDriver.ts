@@ -178,7 +178,11 @@ export class MockNeedyClient implements NeedyDriver {
       ORIGIN.lng +
       (eastFrac * MOCK_SPREAD_DEG) / Math.max(0.2, Math.cos((ORIGIN.lat * Math.PI) / 180));
     const points = [...this.state.helpersNearby.approxPoints, { lat, lng }];
-    this.patch({ helpersNearby: { count: points.length, approxPoints: points } });
+    this.patch({
+      // The scripted driver never simulates a refused pairing — it exists to walk the happy
+      // path — so this is always zero rather than pretending to have been filtered.
+      helpersNearby: { count: points.length, approxPoints: points, restrictedNearby: 0 },
+    });
   }
 
   private pushMessage(senderId: string, body: string): void {

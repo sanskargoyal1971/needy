@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@needy/shared": "*",
+    "firebase": "^12.17.1",
     "framer-motion": "^11.18.2",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.30.0",
