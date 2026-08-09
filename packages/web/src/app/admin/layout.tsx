@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { ClipboardCheck, ScrollText, Users } from "lucide-react";
+import { ClipboardCheck, Flag, ScrollText, Siren, Users } from "lucide-react";
 import { AppGate } from "@/auth/AppGate";
 import { paths } from "@/lib/paths";
 
@@ -16,8 +16,12 @@ import { paths } from "@/lib/paths";
  *  by someone who was not told it exists.
  */
 
+/** Alerts lead, and that ordering is the one opinion this nav holds: everything else here can
+ *  wait until after lunch, and an alarm cannot. */
 const NAV = [
+  { href: paths.adminSos, label: "Alerts", icon: Siren },
   { href: paths.adminQueue, label: "Review queue", icon: ClipboardCheck },
+  { href: paths.adminAbuse, label: "Signals", icon: Flag },
   { href: paths.adminUsers, label: "Users", icon: Users },
   { href: paths.adminAudit, label: "Audit log", icon: ScrollText },
 ];

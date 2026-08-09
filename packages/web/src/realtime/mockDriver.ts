@@ -1,4 +1,4 @@
-import { canTransition, makeTask } from "@needy/shared";
+import { canTransition, makeSosAlert, makeTask } from "@needy/shared";
 import type {
   ChatMessage,
   LatLng,
@@ -242,17 +242,20 @@ export class MockNeedyClient implements NeedyDriver {
     return new Promise((resolve) => {
       this.at(600, () => {
         const now = Date.now();
-        const alert: SosAlert = {
+        // Through the shared factory, so the operator-lifecycle fields cannot silently be
+        // missed here. A hand-built literal that forgot `acknowledgedBy` would leave it
+        // `undefined` — and a console reading it for truthiness would render "an operator has
+        // seen this" about an alarm nobody has touched.
+        const alert: SosAlert = makeSosAlert({
           id: `mock-sos-${now}`,
           taskId: task.id,
           raisedBy: this.userId,
           kind,
-          status: "raised",
           at: task.origin,
           note: note ?? null,
           createdAt: now,
           updatedAt: now,
-        };
+        });
         this.patch({ sos: alert, lastError: null });
         resolve(alert);
       });

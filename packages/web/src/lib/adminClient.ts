@@ -4,6 +4,7 @@
  *  makes it harder to see at a glance what an ordinary user's bundle is allowed to call.
  */
 
+import type { AbuseRollup, AbuseSignal, SosAlert } from "@needy/shared";
 import { API_BASE as API } from "./apiConfig";
 import { AuthError, type DocumentKind, type Gender, type OnboardingStatus, type Role } from "./authClient";
 
@@ -48,6 +49,28 @@ export interface PacketDocument {
   url: string;
   /** Other accounts that submitted byte-identical content. A duplicate-identity signal. */
   alsoSubmittedBy: string[];
+}
+
+/** An alert as the operator console reads it: the durable row plus the context needed to act
+ *  without clicking through — who both parties are, and which of them pulled the alarm. */
+export interface AlertView extends SosAlert {
+  task: {
+    id: string;
+    title: string;
+    state: string;
+    category: string;
+    origin: { lat: number; lng: number };
+  } | null;
+  requester: AlertParty | null;
+  helper: AlertParty | null;
+  raisedByRole: "requester" | "helper" | "unknown";
+}
+
+export interface AlertParty {
+  id: string;
+  displayName: string;
+  /** Full, not masked — an operator answering a live emergency is going to phone someone. */
+  phone: string;
 }
 
 export interface AuditRow {
@@ -121,6 +144,47 @@ export const adminClient = {
     q.set("limit", String(params.limit ?? 100));
     return call<{ entries: AuditRow[]; durable: boolean }>(`/admin/audit?${q}`);
   },
+
+  // ── SOS ───────────────────────────────────────────────────────────────────
+
+  sosQueue: (scope: "open" | "all" | "resolved" | "cancelled" = "open") =>
+    call<{ alerts: AlertView[]; scope: string }>(
+      `/admin/sos?scope=${encodeURIComponent(scope)}`,
+    ),
+
+  /** Takes ownership AND tells the raiser a person has their alarm. Deliberately a separate
+   *  call from opening the queue — see the note on the route. */
+  acknowledgeSos: (alertId: string) =>
+    call<{ alert: AlertView }>(`/admin/sos/${encodeURIComponent(alertId)}/acknowledge`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  resolveSos: (alertId: string, note: string) =>
+    call<{ alert: AlertView }>(`/admin/sos/${encodeURIComponent(alertId)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+
+  // ── abuse ─────────────────────────────────────────────────────────────────
+
+  abuseQueue: (windowMs?: number) =>
+    call<{ entries: AbuseRollup[]; windowMs: number; since: number }>(
+      `/admin/abuse${windowMs ? `?windowMs=${windowMs}` : ""}`,
+    ),
+
+  abuseSubject: (userId: string) =>
+    call<{
+      user: (PacketUser & { phone: string }) | null;
+      signals: AbuseSignal[];
+      windowMs: number;
+    }>(`/admin/abuse/${encodeURIComponent(userId)}`),
+
+  reviewAbuse: (userId: string, outcome: "no-action" | "warned" | "escalated", note: string) =>
+    call<{ ok: true; outcome: string }>(`/admin/abuse/${encodeURIComponent(userId)}/review`, {
+      method: "POST",
+      body: JSON.stringify({ outcome, note }),
+    }),
 
   /**
    * Fetch document bytes into an object URL.

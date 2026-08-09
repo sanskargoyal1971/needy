@@ -37,6 +37,9 @@ export const paths = {
   /** Deliberately NOT linked from any public navigation. */
   adminHome: "/admin",
   adminQueue: "/admin/queue",
+  /** Live emergency alerts. First in the nav for a reason — see the layout. */
+  adminSos: "/admin/sos",
+  adminAbuse: "/admin/abuse",
   adminUsers: "/admin/users",
   adminAudit: "/admin/audit",
 } as const;
