@@ -122,6 +122,7 @@ describe("admin verification surface", () => {
         services,
         storage,
         audit,
+        auth: new AuthService({ users, sessions, phoneBlocks, now: () => NOW }),
         pool: null,
         now: () => NOW,
       }),
@@ -322,6 +323,8 @@ describe("admin verification surface", () => {
         services,
           storage,
           audit: createLoggingAuditLogger(),
+
+          auth: new AuthService({ users, sessions, phoneBlocks, now: () => NOW }),
           pool: null,
           now: () => NOW,
         }),
@@ -510,6 +513,8 @@ describe("admin verification surface", () => {
         services,
           storage,
           audit: createLoggingAuditLogger(),
+
+          auth: new AuthService({ users, sessions, phoneBlocks, now: () => NOW }),
           pool: null,
           now: () => NOW + 60 * 60 * 1000,
         }),

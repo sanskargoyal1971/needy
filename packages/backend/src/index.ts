@@ -308,6 +308,7 @@ async function main(): Promise<void> {
       services: serviceCatalog,
       storage,
       audit,
+      auth: authService,
       pool,
       now,
     }),

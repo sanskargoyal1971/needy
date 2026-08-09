@@ -4,6 +4,7 @@ import { config } from "../config.js";
 import { signAccessToken } from "./jwt.js";
 import type { PhoneBlockRepository } from "./phoneBlocks.js";
 import type { SessionRepository, UserRepository } from "./repos.js";
+import { burnVerification, hashPassword, verifyPassword } from "./password.js";
 import { makeUser, type User } from "./types.js";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -66,6 +67,81 @@ export class AuthService {
       );
     }
     return this.issue(user, userAgent);
+  }
+
+  /**
+   * Sign in with a phone number and a password.
+   *
+   * Three properties this owes, all of which are about what a FAILURE reveals rather than what
+   * a success does:
+   *
+   *  1. **One answer for every failure.** Unknown number, no password set, wrong password —
+   *     all return `null`. Distinguishing them would turn this route into a directory of who
+   *     holds an account, and on a platform whose users are selected for being vulnerable,
+   *     confirming that a given number belongs to an elderly person living alone is itself the
+   *     harm.
+   *  2. **The same amount of time either way.** A real account costs ~100 ms of scrypt; an
+   *     unknown one would cost nothing and answer instantly. `burnVerification` spends the
+   *     same work on the miss, so the clock does not become the oracle that (1) closed.
+   *  3. **Never creates an account.** `loginWithPhone` is find-or-create, because a verified
+   *     OTP proves the number. A password proves nothing about a number nobody has claimed, so
+   *     this path only ever authenticates an account that already exists.
+   */
+  async loginWithPassword(
+    phone: string,
+    password: string,
+    userAgent: string,
+  ): Promise<IssuedTokens | null> {
+    if (await this.deps.phoneBlocks.isBlocked(phone)) throw new PhoneBlockedError();
+
+    const user = await this.deps.users.getByPhone(phone);
+    if (!user) {
+      await burnVerification(password);
+      return null;
+    }
+    const hash = await this.deps.users.getPasswordHash(user.id);
+    if (!(await verifyPassword(password, hash))) return null;
+
+    return this.issue(user, userAgent);
+  }
+
+  /**
+   * Issue a session for a user we have already authenticated by another means.
+   *
+   * Exists for the admin second factor: the password is checked, then a one-time code, and the
+   * session is only minted once both have passed. Deliberately not exported as a general
+   * "log this user in" — it takes a `User` the caller must already have proven.
+   */
+  async issueFor(user: User, userAgent: string): Promise<IssuedTokens> {
+    return this.issue(user, userAgent);
+  }
+
+  /**
+   * Set or replace a password.
+   *
+   * Every existing session is revoked. That is the point of changing a password: the common
+   * reason to do it is that someone else may have had it, and leaving their session alive
+   * would make the change cosmetic. The caller's own session is re-issued by the route so the
+   * person changing it is not signed out of the device they are holding.
+   */
+  async setPassword(
+    userId: string,
+    password: string,
+    opts: { setBy?: string | null; revokeSessions?: boolean } = {},
+  ): Promise<void> {
+    const now = this.deps.now();
+    const hash = await hashPassword(password);
+    await this.deps.users.setPasswordHash(userId, hash, now, opts.setBy ?? null);
+    if (opts.revokeSessions !== false) {
+      await this.deps.sessions.revokeAllForUser(userId, now);
+    }
+  }
+
+  /** Remove a password, leaving the account reachable by one-time code only. */
+  async clearPassword(userId: string): Promise<void> {
+    const now = this.deps.now();
+    await this.deps.users.setPasswordHash(userId, null, now, null);
+    await this.deps.sessions.revokeAllForUser(userId, now);
   }
 
   async refresh(refreshToken: string, userAgent: string): Promise<IssuedTokens | null> {

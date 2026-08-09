@@ -11,7 +11,9 @@ import { requireAuth, requireRole, type AuthedRequest } from "../auth/middleware
 import type { PhoneBlockRepository } from "../auth/phoneBlocks.js";
 import type { SessionRepository, UserRepository } from "../auth/repos.js";
 import type { User } from "../auth/types.js";
-import { validateBody } from "../auth/validation.js";
+import { adminSetPasswordSchema, validateBody } from "../auth/validation.js";
+import { passwordProblem, PASSWORD_MIN_LENGTH } from "../auth/password.js";
+import type { AuthService } from "../auth/service.js";
 import { config } from "../config.js";
 import type { DbPool } from "../db.js";
 import { asyncRoute } from "../http/asyncRoute.js";
@@ -46,6 +48,9 @@ export interface VerificationRouterDeps {
   services: ServiceCatalog;
   storage: StorageProvider;
   audit: AuditLogger;
+  /** Owns password hashing and session revocation, so the admin override goes through exactly
+   *  the same path the account holder does rather than writing a hash of its own. */
+  auth: AuthService;
   pool: DbPool | null;
   now: () => number;
 }
@@ -353,6 +358,57 @@ export function createVerificationRouter(deps: VerificationRouterDeps): Router {
         ip: ip(req),
       });
       res.json({ user: packetView(updated) });
+    }),
+  );
+
+  // ── issue a temporary password ─────────────────────────────────────────────
+  //
+  // The last way back in for someone who has lost the number entirely — no handset, no SIM, so
+  // no one-time code and no self-service reset. It is deliberately the narrowest of the three
+  // routes and the loudest: staff can hand out a credential to an account that is not theirs,
+  // which is real power over a real person, so every use is audited with the admin's name
+  // against it and every existing session on that account is revoked.
+  //
+  // NOT usable on another admin. An operator who could reset a colleague's password could take
+  // over the console that sees every emergency — and the second factor would not stop them,
+  // because they would then hold the password and could ask for the code themselves.
+  router.post(
+    "/admin/users/:userId/password",
+    ...adminOnly,
+    validateBody(adminSetPasswordSchema),
+    asyncRoute(async (req: AuthedRequest, res: Response) => {
+      const adminId = req.user!.sub;
+      const { newPassword } = req.body as z.infer<typeof adminSetPasswordSchema>;
+      const user = await deps.users.getById(req.params.userId);
+      if (!user) {
+        res.status(404).json({ error: "user-not-found" });
+        return;
+      }
+      if (user.role === "admin") {
+        res.status(403).json({ error: "cannot-set-admin-password" });
+        return;
+      }
+      const problem = passwordProblem(newPassword, user.phone);
+      if (problem) {
+        res.status(422).json({ error: "weak-password", problem, minLength: PASSWORD_MIN_LENGTH });
+        return;
+      }
+
+      await deps.auth.setPassword(user.id, newPassword, { setBy: adminId });
+
+      await deps.audit.record({
+        action: "admin.password_set",
+        actorId: adminId,
+        actorRole: "admin",
+        subjectType: "user",
+        subjectId: user.id,
+        // The password itself is never recorded, here or anywhere. What matters after the fact
+        // is that staff issued one and when — not what it was.
+        metadata: { sessionsRevoked: true },
+        ip: ip(req),
+      });
+      logger.warn("admin issued a temporary password", { adminId, userId: user.id });
+      res.json({ ok: true });
     }),
   );
 

@@ -32,6 +32,10 @@ export const keys = {
   /** Failed handoff-code attempts for a task. Short-lived, so it lives in Redis rather than
    *  as a column on the hot tasks table. */
   handoffAttempts: (taskId: string) => `handoff:attempts:${taskId}`,
+  /** An admin who has passed the password step and still owes the one-time code. Holds a
+   *  DIGEST of a single-use token, not the token — a read-only leak of Redis must not hand
+   *  someone the half-finished login of the account that can see every emergency. */
+  mfaPending: (phone: string) => `auth:mfa:${phone}`,
   /** Dedup key mapping a chat clientMsgId → committed messageId, so a resend after a
    *  reconnect reconciles instead of double-posting (audit: clientMsgId was ignored). */
   chatDedup: (taskId: string, clientMsgId: string) =>

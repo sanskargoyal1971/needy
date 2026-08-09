@@ -9,6 +9,12 @@ import type { RedisClient } from "../redis.js";
 import { logger } from "../logger.js";
 import { asyncRoute } from "../http/asyncRoute.js";
 import { AuthService, PhoneBlockedError } from "./service.js";
+import {
+  passwordProblem,
+  verifyPassword,
+  PASSWORD_MIN_LENGTH,
+} from "./password.js";
+import { consumeToken, type RateLimit } from "../services/ratelimit.js";
 import type { OtpService } from "./otp.js";
 import { KYC_SIGNATURE_HEADER, verifyKycSignature, type KycProvider } from "./providers.js";
 import type { KycDocumentRepository } from "../onboarding/repos.js";
@@ -21,6 +27,9 @@ import {
   otpRequestSchema,
   otpVerifySchema,
   kycCallbackSchema,
+  passwordLoginSchema,
+  passwordMfaSchema,
+  setPasswordSchema,
   updateMeSchema,
   validateBody,
 } from "./validation.js";
@@ -67,6 +76,10 @@ function publicUser(u: User, documents: DocumentKind[] = []) {
     areaLat: u.areaLat,
     areaLng: u.areaLng,
     rejectionReason: u.rejectionReason,
+    // The FACT of a password, so the account screen can say "you have one" rather than
+    // guessing. The hash itself is not on `User` at all — it lives behind its own repository
+    // method, which is what stops it riding an allowlist out to a browser.
+    passwordSetAt: u.passwordSetAt,
     documents,
   };
 }
@@ -76,6 +89,22 @@ function publicUser(u: User, documents: DocumentKind[] = []) {
 /** The one route whose raw bytes must survive JSON parsing, exported so the composition root
  *  can scope the raw-body capture to exactly this path (see `kycRawBodyParser`). */
 export const KYC_CALLBACK_PATH = "/auth/kyc/callback";
+
+/**
+ * Password attempts, bounded on both scopes.
+ *
+ * Tighter than the OTP limiter because a password is guessable in a way a freshly minted
+ * random code is not: five tries then one every two minutes is generous for someone
+ * mistyping and hopeless for anyone working through a list. The per-IP bucket is the half
+ * that C15 established — per-phone alone lets an attacker walk a list of numbers unbounded.
+ */
+const PASSWORD_LOGIN_LIMIT: RateLimit = { capacity: 5, ratePerSec: 1 / 120 };
+const PASSWORD_LOGIN_IP_LIMIT: RateLimit = { capacity: 20, ratePerSec: 1 / 30 };
+
+/** How long the admin has to enter the second factor after the password is accepted. Long
+ *  enough for an SMS to arrive and be typed, short enough that an abandoned half-login is not
+ *  a standing ticket. */
+const MFA_PENDING_TTL_MS = 5 * 60 * 1000;
 
 /** How long a started verification stays claimable. A provider may take a while (document
  *  review, manual escalation), but an unbounded nonce is a permanently valid ticket. */
@@ -262,6 +291,202 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         logger.error("otp verify failed", { err: String(err) });
         res.status(500).json({ error: "login-failed" });
       }
+    }),
+  );
+
+  // ── sign in with a password ────────────────────────────────────────────────
+  //
+  // The second way in. Until this existed a verified one-time code was the ONLY thing that
+  // could create a session, which left no route at all for someone who cannot receive SMS —
+  // a lost handset, a number that has moved on, an operator who needs the console at 3am.
+  //
+  // The OTP path is untouched and remains both an alternative and the recovery route.
+  router.post(
+    "/auth/password/login",
+    validateBody(passwordLoginSchema),
+    asyncRoute(async (req, res) => {
+      const { phone, password } = req.body as { phone: string; password: string };
+      const ip = clientIp(req);
+
+      // Bounded on BOTH scopes, for the reason C15 established on the OTP route: per-phone
+      // alone lets an attacker walk a list of numbers unbounded, and per-IP alone lets a
+      // distributed attempt grind one account. Tighter than the OTP limiter because a password
+      // is guessable in a way a fresh random code is not.
+      const withinPhone = await consumeToken(
+        deps.redis,
+        keys.bucket("password-login", phone),
+        PASSWORD_LOGIN_LIMIT,
+        deps.now(),
+      );
+      const withinIp = await consumeToken(
+        deps.redis,
+        keys.bucket("password-login-ip", ip),
+        PASSWORD_LOGIN_IP_LIMIT,
+        deps.now(),
+      );
+      if (!withinPhone || !withinIp) {
+        logger.warn("password login rate-limited", { scope: withinPhone ? "ip" : "phone" });
+        res.status(429).json({ error: "too-many-attempts" });
+        return;
+      }
+
+      try {
+        const user = await deps.users.getByPhone(phone);
+        const issued = await deps.auth.loginWithPassword(phone, password, ua(req));
+        if (!issued) {
+          // One answer for every kind of failure — see `loginWithPassword`. A wrong password
+          // on a real account and an unknown number are indistinguishable from here.
+          if (user) {
+            // Attributable, so a grind against one real account becomes visible to an operator
+            // even though the caller is told nothing.
+            await emitSignal(deps.abuse, "auth.password_failed", user.id, deps.now());
+          }
+          res.status(401).json({ error: "invalid-credentials" });
+          return;
+        }
+
+        // ── the admin second factor ────────────────────────────────────────
+        //
+        // An admin sees every live emergency, both parties' phone numbers and every ID
+        // document. A password alone is a weaker gate than the one-time code this platform
+        // already had, so for staff the password is the FIRST factor and the code is still
+        // required. The session is not minted here: the tokens issued above are discarded and
+        // a short-lived pending token is returned instead.
+        if (issued.user.role === "admin") {
+          await deps.auth.logout(issued.refreshToken);
+          const pendingToken = randomBytes(24).toString("base64url");
+          await deps.redis.set(
+            keys.mfaPending(phone),
+            sha256(pendingToken),
+            "PX",
+            MFA_PENDING_TTL_MS,
+          );
+          // Sent through the ordinary OTP path so it is rate-limited and delivered exactly as
+          // every other code is.
+          await deps.otp.request(phone, ip);
+          logger.info("admin password accepted; second factor required", { userId: issued.user.id });
+          res.json({ mfaRequired: true, pendingToken, expiresInMs: MFA_PENDING_TTL_MS });
+          return;
+        }
+
+        setAuthCookies(res, issued.accessToken, issued.refreshToken);
+        res.json({ user: publicUser(issued.user), csrfToken: issueCsrfToken(res) });
+      } catch (err) {
+        if (err instanceof PhoneBlockedError) {
+          res.status(403).json({ error: "phone-blocked" });
+          return;
+        }
+        logger.error("password login failed", { err: String(err) });
+        res.status(500).json({ error: "login-failed" });
+      }
+    }),
+  );
+
+  // ── the admin's second factor ──────────────────────────────────────────────
+  router.post(
+    "/auth/password/mfa",
+    validateBody(passwordMfaSchema),
+    asyncRoute(async (req, res) => {
+      const { phone, code, pendingToken } = req.body as {
+        phone: string;
+        code: string;
+        pendingToken: string;
+      };
+      try {
+        // The pending token is what makes this a SECOND factor rather than a plain OTP login
+        // under another name: without it, anyone able to receive the code could sign in as the
+        // admin having never known the password. Compared by digest, and consumed on use.
+        const expected = await deps.redis.get(keys.mfaPending(phone));
+        if (!expected || !hashesMatch(expected, sha256(pendingToken))) {
+          res.status(401).json({ error: "mfa-expired" });
+          return;
+        }
+
+        const check = await deps.otp.verify(phone, code);
+        if (!check.ok) {
+          res.status(401).json({ error: "otp-invalid", reason: check.reason });
+          return;
+        }
+
+        const user = await deps.users.getByPhone(phone);
+        if (!user) {
+          res.status(401).json({ error: "invalid-credentials" });
+          return;
+        }
+        // Single-use: deleted only once BOTH factors have passed, so a wrong code does not
+        // cost the operator their password step.
+        await deps.redis.del(keys.mfaPending(phone));
+
+        const issued = await deps.auth.issueFor(user, ua(req));
+        setAuthCookies(res, issued.accessToken, issued.refreshToken);
+        logger.info("admin signed in with password and second factor", { userId: user.id });
+        res.json({ user: publicUser(issued.user), csrfToken: issueCsrfToken(res) });
+      } catch (err) {
+        logger.error("password mfa failed", { err: String(err) });
+        res.status(500).json({ error: "login-failed" });
+      }
+    }),
+  );
+
+  // ── set or change my own password ──────────────────────────────────────────
+  router.post(
+    "/auth/me/password",
+    requireAuth,
+    validateBody(setPasswordSchema),
+    asyncRoute(async (req: AuthedRequest, res) => {
+      const { currentPassword, newPassword } = req.body as {
+        currentPassword?: string;
+        newPassword: string;
+      };
+      const user = await deps.users.getById(req.user!.sub);
+      if (!user) {
+        res.status(404).json({ error: "user-not-found" });
+        return;
+      }
+
+      // Replacing an existing password requires proving you know it. Without this, anyone who
+      // walked up to an unlocked phone could lock the owner out of their own account — and on
+      // this platform the account holder may well be someone a family member is trying to
+      // control, which is precisely the situation the alarm exists for.
+      const existing = await deps.users.getPasswordHash(user.id);
+      if (existing) {
+        if (!currentPassword || !(await verifyPassword(currentPassword, existing))) {
+          res.status(401).json({ error: "current-password-invalid" });
+          return;
+        }
+      }
+
+      const problem = passwordProblem(newPassword, user.phone);
+      if (problem) {
+        res.status(422).json({ error: "weak-password", problem, minLength: PASSWORD_MIN_LENGTH });
+        return;
+      }
+
+      await deps.auth.setPassword(user.id, newPassword);
+      // Every other session was just revoked, so re-issue for the device doing the changing —
+      // otherwise changing your password signs you out of the browser you are holding.
+      const issued = await deps.auth.issueFor(user, ua(req));
+      setAuthCookies(res, issued.accessToken, issued.refreshToken);
+      logger.info("password set by account holder", { userId: user.id });
+      res.json({ ok: true, passwordSetAt: deps.now() });
+    }),
+  );
+
+  // ── remove my password (back to codes only) ────────────────────────────────
+  router.delete(
+    "/auth/me/password",
+    requireAuth,
+    asyncRoute(async (req: AuthedRequest, res) => {
+      const user = await deps.users.getById(req.user!.sub);
+      if (!user) {
+        res.status(404).json({ error: "user-not-found" });
+        return;
+      }
+      await deps.auth.clearPassword(user.id);
+      const issued = await deps.auth.issueFor(user, ua(req));
+      setAuthCookies(res, issued.accessToken, issued.refreshToken);
+      logger.info("password removed by account holder", { userId: user.id });
+      res.json({ ok: true });
     }),
   );
 

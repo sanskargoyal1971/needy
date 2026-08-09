@@ -42,6 +42,20 @@ export interface User {
   reviewedAt: number | null;
   /** When the packet entered the queue — the queue's sort key. */
   submittedAt: number | null;
+
+  // ── password credentials (migration 6) ────────────────────────────────────
+  /**
+   * When a password was last set, or null if this account has none.
+   *
+   * The FACT of a password, never the password. The hash lives in its own column behind
+   * `UserRepository.getPasswordHash` and is deliberately absent from this type — see the note
+   * there. This field is safe to serialise and is what the account screen reads to say "you
+   * have a password" rather than guessing.
+   */
+  passwordSetAt: number | null;
+  /** The admin who issued a temporary password, or null when the holder set their own. Makes
+   *  a staff-set credential visible in the account itself, not only in the audit log. */
+  passwordSetBy: string | null;
 }
 
 /**
@@ -77,6 +91,8 @@ export function makeUser(seed: Pick<User, "id" | "phone"> & Partial<User>): User
     reviewedBy: null,
     reviewedAt: null,
     submittedAt: null,
+    passwordSetAt: null,
+    passwordSetBy: null,
     ...seed,
   };
 }

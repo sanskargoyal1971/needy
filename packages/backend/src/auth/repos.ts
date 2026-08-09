@@ -8,6 +8,30 @@ export interface UserRepository {
   getByPhone(phone: string): Promise<User | null>;
   create(user: User): Promise<User>;
   update(id: string, patch: Partial<User>): Promise<User>;
+
+  /**
+   * The password hash, on its own, by its own method.
+   *
+   * Deliberately NOT a field on `User`. `User` is the object that flows through `publicUser`
+   * to `/auth/me` and into every admin view, and today's `handoffOtpHash` incident is what a
+   * secret riding a widely-serialised type looks like when it eventually escapes: the sanitiser
+   * at one boundary was correct, and the other three boundaries had simply never been
+   * considered. A credential that is unreachable except through a method named for it cannot
+   * leak by being forgotten about.
+   *
+   * Null means the account has no password, which is the normal state for every account that
+   * predates this and for anyone who never sets one.
+   */
+  getPasswordHash(userId: string): Promise<string | null>;
+
+  /** Set or clear the password. `null` removes it, leaving the account OTP-only.
+   *  `setBy` is the admin who issued a temporary one, or null when the holder set it. */
+  setPasswordHash(
+    userId: string,
+    hash: string | null,
+    at: number,
+    setBy?: string | null,
+  ): Promise<void>;
 }
 
 export interface SessionRepository {
@@ -31,6 +55,9 @@ export type InMemoryUserRepository = UserRepository & { all(): User[] };
 export function createInMemoryUserRepo(): InMemoryUserRepository {
   const byId = new Map<string, User>();
   const byPhone = new Map<string, string>();
+  /** Separate from the user records for the same reason the column is separate from `User`:
+   *  nothing that enumerates users should be able to hand out credentials by accident. */
+  const passwordHashes = new Map<string, string>();
   return {
     all() {
       return [...byId.values()];
@@ -46,6 +73,21 @@ export function createInMemoryUserRepo(): InMemoryUserRepository {
       byId.set(user.id, user);
       byPhone.set(user.phone, user.id);
       return user;
+    },
+    async getPasswordHash(userId) {
+      return passwordHashes.get(userId) ?? null;
+    },
+    async setPasswordHash(userId, hash, at, setBy = null) {
+      const user = byId.get(userId);
+      if (!user) throw new Error(`user not found: ${userId}`);
+      if (hash == null) passwordHashes.delete(userId);
+      else passwordHashes.set(userId, hash);
+      byId.set(userId, {
+        ...user,
+        passwordSetAt: hash == null ? null : at,
+        passwordSetBy: hash == null ? null : setBy,
+        updatedAt: at,
+      });
     },
     async update(id, patch) {
       const existing = byId.get(id);
@@ -106,6 +148,8 @@ interface UserRow {
   reviewed_by: string | null;
   reviewed_at: number | string | null;
   submitted_at: number | string | null;
+  password_set_at: number | string | null;
+  password_set_by: string | null;
 }
 
 const numOrNull = (v: number | string | null | undefined): number | null =>
@@ -149,6 +193,10 @@ function rowToUser(r: UserRow): User {
     reviewedBy: r.reviewed_by ?? null,
     reviewedAt: numOrNull(r.reviewed_at),
     submittedAt: numOrNull(r.submitted_at),
+    // The hash column is read by `SELECT *` and deliberately NOT mapped here: `User` must not
+    // be able to carry it, whatever the query returns.
+    passwordSetAt: numOrNull(r.password_set_at),
+    passwordSetBy: r.password_set_by ?? null,
   };
 }
 
@@ -195,6 +243,28 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
         ],
       );
       return next;
+    },
+    async getPasswordHash(userId) {
+      const { rows } = await pool.query<{ password_hash: string | null }>(
+        `SELECT password_hash FROM users WHERE id = $1`,
+        [userId],
+      );
+      return rows[0]?.password_hash ?? null;
+    },
+    async setPasswordHash(userId, hash, at, setBy = null) {
+      // A targeted UPDATE rather than a read-modify-write through `update()`: that path
+      // rewrites every column from a snapshot it read earlier, so a password change would
+      // clobber any concurrent edit to the rest of the row, and vice versa.
+      const { rowCount } = await pool.query(
+        `UPDATE users
+            SET password_hash = $2,
+                password_set_at = CASE WHEN $2::text IS NULL THEN NULL ELSE $3 END,
+                password_set_by = CASE WHEN $2::text IS NULL THEN NULL ELSE $4 END,
+                updated_at = $3
+          WHERE id = $1`,
+        [userId, hash, at, setBy],
+      );
+      if (rowCount === 0) throw new Error(`user not found: ${userId}`);
     },
   };
 }

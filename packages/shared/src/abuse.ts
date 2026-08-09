@@ -36,6 +36,10 @@ export const ABUSE_SIGNAL_KINDS = [
   "task.cancelled_after_match",
   /** A number blocked by a rejection tried to register again. */
   "auth.blocked_phone_retry",
+  /** Repeated wrong passwords against one real account. The caller is told nothing that
+   *  distinguishes this from an unknown number, so the signal is the only way a grind against
+   *  a specific person becomes visible to an operator. */
+  "auth.password_failed",
 ] as const;
 
 export type AbuseSignalKind = (typeof ABUSE_SIGNAL_KINDS)[number];
@@ -58,6 +62,9 @@ export function isAbuseSignalKind(value: unknown): value is AbuseSignalKind {
 export const ABUSE_SIGNAL_WEIGHTS: Record<AbuseSignalKind, number> = {
   "handoff.code_burned": 5,
   "auth.blocked_phone_retry": 5,
+  // Low on its own — people forget passwords constantly. It is the ACCUMULATION against one
+  // account that means something, which is what the rollup window is for.
+  "auth.password_failed": 1,
   "task.cancelled_after_match": 3,
   "sos.cancelled_immediately": 2,
   "chat.flood": 2,
@@ -73,6 +80,7 @@ export const ABUSE_SIGNAL_LABELS: Record<AbuseSignalKind, string> = {
   "chat.flood": "Chat flood refused",
   "task.cancelled_after_match": "Cancelled after a helper was matched",
   "auth.blocked_phone_retry": "Blocked number attempted to re-register",
+  "auth.password_failed": "Wrong password on this account",
 };
 
 export interface AbuseSignal {

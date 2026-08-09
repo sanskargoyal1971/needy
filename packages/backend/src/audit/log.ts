@@ -27,6 +27,9 @@ export type AuditAction =
   // admin handling of other people's data
   | "admin.document_viewed"
   | "admin.user_blocked"
+  /** Staff issued a temporary password for another account. The credential is never recorded
+   *  — what matters afterwards is that a human did this, to whom, and when. */
+  | "admin.password_set"
   | "admin.user_unblocked"
   | "admin.role_changed"
   // safety

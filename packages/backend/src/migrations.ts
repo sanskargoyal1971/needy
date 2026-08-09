@@ -405,6 +405,33 @@ export const MIGRATIONS: readonly Migration[] = [
       `CREATE RULE abuse_signals_no_delete AS ON DELETE TO abuse_signals DO INSTEAD NOTHING`,
     ],
   },
+  {
+    id: 6,
+    name: "password-credentials",
+    statements: [
+      // ── a second way in ─────────────────────────────────────────────────────────────────
+      //
+      // Until now `loginWithPhone` was the ONLY way a session came into existence: one factor,
+      // a one-time code, and no route back in for someone who cannot receive SMS — a lost
+      // phone, a number that has moved on, an operator who needs the console at 3am from a
+      // laptop. This adds a password as an alternative, not a replacement: the OTP path stays
+      // exactly as it was and remains the recovery route.
+      //
+      // NULL means "no password set", which is every existing account. That is not a
+      // half-migrated state to clean up later — it is the correct steady state for anyone who
+      // never wants one, and the login route treats it as "this account does not use
+      // passwords" rather than as an error.
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`,
+      // When it was last set. Surfaced to the account screen so a person can see that they
+      // have one, and useful evidence if an account is later disputed.
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set_at BIGINT`,
+      // Who set it. NULL for the account holder themselves; an admin id when staff issued a
+      // temporary one through the override, which is the case that most needs to be visible
+      // after the fact. The audit log records the act; this makes the current state legible
+      // without a log search.
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set_by TEXT`,
+    ],
+  },
 ];
 
 /** Single-quote a string for inline SQL.
