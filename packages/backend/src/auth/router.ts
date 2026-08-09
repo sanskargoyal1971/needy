@@ -60,6 +60,12 @@ function publicUser(u: User, documents: DocumentKind[] = []) {
     dateOfBirth: u.dateOfBirth,
     gender: u.gender,
     areaLabel: u.areaLabel,
+    // The coarse coordinates behind the label, so the request screen can seed its pin from
+    // the user's own home area when the device has no fix. Their own data, already shown to
+    // them as a place name — and coarse by construction, which is why it is safe to return
+    // where a live position would not be.
+    areaLat: u.areaLat,
+    areaLng: u.areaLng,
     rejectionReason: u.rejectionReason,
     documents,
   };

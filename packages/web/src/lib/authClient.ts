@@ -39,6 +39,10 @@ export interface PublicUser {
   dateOfBirth: string | null;
   gender: Gender | null;
   areaLabel: string | null;
+  /** Coarse coordinates for `areaLabel`. Used to seed the request pin when the device has no
+   *  fix; never a substitute for a live position. */
+  areaLat: number | null;
+  areaLng: number | null;
   /** Set only when `onboardingStatus === "rejected"` — shown on the terminal screen. */
   rejectionReason: string | null;
   /** Which of the three required documents the server has on file. Drives wizard resume. */
