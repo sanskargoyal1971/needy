@@ -37,6 +37,9 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
       res.status,
       typeof body.error === "string" ? body.error : `http-${res.status}`,
       typeof body.reason === "string" ? body.reason : undefined,
+      // Carried through, not discarded — see the note on `AuthError.details`. The handoff's
+      // `attemptsRemaining` is the case that needs it.
+      body,
     );
   }
   return body as T;

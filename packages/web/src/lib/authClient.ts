@@ -56,6 +56,20 @@ export class AuthError extends Error {
     readonly status: number,
     readonly code: string,
     message?: string,
+    /**
+     * The refusal's full body, when the caller needs more than a code.
+     *
+     * Some refusals carry a number the user has to act on and cannot be told any other way.
+     * The handoff is the case that forced this: a wrong code comes back with
+     * `attemptsRemaining`, and five failures destroy the code — so a helper standing at a door
+     * needs "two tries left", not a generic "that didn't work" followed by a code that
+     * silently stops working. Dropping the body meant the server was computing that number and
+     * throwing it away at the boundary.
+     *
+     * Optional and untyped on purpose: this is the raw shape of one endpoint's error, and
+     * pretending otherwise would mean a union of every refusal in the app.
+     */
+    readonly details?: Record<string, unknown>,
   ) {
     super(message ?? code);
     this.name = "AuthError";
