@@ -55,6 +55,8 @@ import {
   createPgSessionRepo,
   createPgUserRepo,
 } from "./auth/repos.js";
+import type { UserRepository } from "./auth/repos.js";
+import type { User } from "./auth/types.js";
 import {
   createInMemoryPhoneBlockRepo,
   createPgPhoneBlockRepo,
@@ -84,6 +86,7 @@ import {
   type ExceptionRepository,
 } from "./domain/exceptions.js";
 import { createVerificationRouter } from "./admin/verification.js";
+import { createStaffRouter } from "./admin/staff.js";
 import {
   createInMemoryAdminUserQueries,
   createPgAdminUserQueries,
@@ -112,7 +115,9 @@ async function main(): Promise<void> {
   // Both satisfy the same interfaces, so nothing downstream cares which is chosen.
   let pool: DbPool | null = null;
   let repos;
-  let userRepo;
+  // Annotated rather than inferred: `listStaff` below closes over it, and an inferred `let`
+  // is not resolvable at that point.
+  let userRepo: UserRepository;
   let sessionRepo;
   let sosRepo;
   let applicationRepo: HelperApplicationRepository;
@@ -120,6 +125,9 @@ async function main(): Promise<void> {
   let phoneBlockRepo: PhoneBlockRepository;
   let audit: AuditLogger;
   let adminQueries: AdminUserQueries;
+  /** Operator accounts only, for the super admin's staff screen. Narrower than a full
+   *  user listing on purpose — see the note on `StaffRouterDeps.listStaff`. */
+  let listStaff: () => Promise<User[]>;
   let serviceCatalog: ServiceCatalog;
   let exceptionRepo: ExceptionRepository;
   let abuseRepo: AbuseRepository;
@@ -144,6 +152,13 @@ async function main(): Promise<void> {
     phoneBlockRepo = createPgPhoneBlockRepo(pool);
     audit = createPgAuditLogger(pool, () => Date.now());
     adminQueries = createPgAdminUserQueries(pool);
+    listStaff = async () => {
+      const { rows } = await pool!.query<{ id: string }>(
+        `SELECT id FROM users WHERE role IN ('admin','super_admin')`,
+      );
+      const found = await Promise.all(rows.map((r) => userRepo.getById(r.id)));
+      return found.filter((u): u is User => u != null);
+    };
     serviceCatalog = createPgServiceCatalog(pool);
     exceptionRepo = createPgExceptionRepo(pool);
     abuseRepo = createPgAbuseRepo(pool);
@@ -165,6 +180,8 @@ async function main(): Promise<void> {
     // The in-memory admin queries read straight out of the in-memory user repo, which is the
     // only implementation that can enumerate — see the note on InMemoryUserRepository.
     adminQueries = createInMemoryAdminUserQueries(() => inMemoryUsers.all());
+    listStaff = async () =>
+      inMemoryUsers.all().filter((u) => u.role === "admin" || u.role === "super_admin");
     serviceCatalog = createInMemoryServiceCatalog();
     exceptionRepo = createInMemoryExceptionRepo();
     abuseRepo = createInMemoryAbuseRepo();
@@ -310,6 +327,15 @@ async function main(): Promise<void> {
       audit,
       auth: authService,
       pool,
+      now,
+    }),
+  );
+  app.use(
+    createStaffRouter({
+      users: userRepo,
+      sessions: sessionRepo,
+      audit,
+      listStaff,
       now,
     }),
   );

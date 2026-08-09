@@ -22,7 +22,10 @@ type Stage =
   | { name: "phone" }
   | { name: "code"; phone: string }
   | { name: "password"; phone: string }
-  | { name: "mfa"; phone: string; pendingToken: string };
+  | { name: "mfa"; phone: string; pendingToken: string }
+  /** The super admin's door: a username and a password, no code. That account administers the
+   *  operators rather than participating, so it has no verified number to send one to. */
+  | { name: "staff" };
 
 function LoginForm() {
   const router = useRouter();
@@ -33,6 +36,7 @@ function LoginForm() {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -73,7 +77,7 @@ function LoginForm() {
     setFormError(null);
     setBusy(true);
     try {
-      const res = await authClient.passwordLogin(stage.phone, password);
+      const res = await authClient.passwordLogin({ phone: stage.phone }, password);
       // An admin is NOT signed in yet, however successful this looks. Sending them onward here
       // would drop them into a logged-out app.
       if ("mfaRequired" in res && res.mfaRequired) {
@@ -88,6 +92,31 @@ function LoginForm() {
         // Deliberately vague, matching the server: it does not say whether the number is known
         // or whether that account even uses a password, and neither may this.
         setFieldError("That didn't work. Check your password, or sign in with a code instead.");
+      } else {
+        setFormError(describe(err));
+      }
+      setBusy(false);
+    }
+  }
+
+  async function signInAsStaff(e: React.FormEvent) {
+    e.preventDefault();
+    setFieldError(null);
+    setFormError(null);
+    setBusy(true);
+    try {
+      const res = await authClient.passwordLogin({ username }, password);
+      // A super admin never gets `mfaRequired` — there is no number on the account. If the
+      // server ever did ask, the honest thing is to say so rather than pretend we are in.
+      if ("mfaRequired" in res && res.mfaRequired) {
+        setFormError("This account needs a code. Sign in with your number instead.");
+        setBusy(false);
+        return;
+      }
+      land(res.user);
+    } catch (err) {
+      if (err instanceof AuthError && err.status === 401) {
+        setFieldError("That username and password don't match.");
       } else {
         setFormError(describe(err));
       }
@@ -191,6 +220,70 @@ function LoginForm() {
             Sign up
           </Link>
         </p>
+        {/* Quiet, and last. Almost nobody who reaches this page is staff, and a prominent
+            "staff login" is an invitation to try guessing one. */}
+        <button
+          type="button"
+          onClick={() => {
+            setFieldError(null);
+            setFormError(null);
+            setStage({ name: "staff" });
+          }}
+          className="mx-auto block text-xs text-gray-400 hover:text-gray-600"
+        >
+          Staff sign-in
+        </button>
+      </AuthCard>
+    );
+  }
+
+  if (stage.name === "staff") {
+    return (
+      <AuthCard title="Staff sign-in" subtitle="For Needy operators">
+        <form className="space-y-5" onSubmit={signInAsStaff}>
+          <FormError>{formError}</FormError>
+          <Field label="Username" error={fieldError} htmlFor="username">
+            <TextInput
+              id="username"
+              name="username"
+              autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+              required
+              autoFocus
+              value={username}
+              invalid={Boolean(fieldError)}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </Field>
+          <Field label="Password" htmlFor="staff-password">
+            <TextInput
+              id="staff-password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </Field>
+          <Button type="submit" loading={busy}>
+            Sign in
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setUsername("");
+              setPassword("");
+              setFieldError(null);
+              setFormError(null);
+              setStage({ name: "phone" });
+            }}
+          >
+            Back
+          </Button>
+        </form>
       </AuthCard>
     );
   }

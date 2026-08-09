@@ -106,6 +106,42 @@ export class AuthService {
   }
 
   /**
+   * Sign in with a username and a password — the staff door.
+   *
+   * Same three properties as the phone path: one answer for every failure, the same time
+   * either way, and it never creates an account. The difference is only which column is
+   * looked up, because a super admin is not a participant and has no verified number to be
+   * keyed on.
+   *
+   * Refuses anyone whose role does not use a username, even if a username is somehow set on
+   * their row. That is a second lock on the same door: the staff login must not become an
+   * alternative way into an ordinary account that bypasses the phone.
+   */
+  async loginWithUsername(
+    username: string,
+    password: string,
+    userAgent: string,
+  ): Promise<IssuedTokens | null> {
+    const user = await this.deps.users.getByUsername(username);
+    // SUPER ADMIN ONLY. An ordinary admin has an assigned phone and signs in through it, so
+    // that they always owe the second factor — if the username door accepted them it would be
+    // a way to reach the console with one factor, which is exactly what the second factor is
+    // there to prevent.
+    if (!user || user.role !== "super_admin") {
+      await burnVerification(password);
+      return null;
+    }
+    // A deactivated account is refused here as everywhere else. Without this the staff door
+    // would be the one entrance that ignored a block.
+    if (user.blockedAt != null) return null;
+
+    const hash = await this.deps.users.getPasswordHash(user.id);
+    if (!(await verifyPassword(password, hash))) return null;
+
+    return this.issue(user, userAgent);
+  }
+
+  /**
    * Issue a session for a user we have already authenticated by another means.
    *
    * Exists for the admin second factor: the password is checked, then a one-time code, and the

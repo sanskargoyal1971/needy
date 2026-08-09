@@ -23,10 +23,27 @@ export const otpVerifySchema = z.object({
  *  character in a password, and silently removing it locks people out of what they typed. */
 const passwordSchema = z.string().min(1).max(PASSWORD_MAX_LENGTH);
 
-export const passwordLoginSchema = z.object({
-  phone: phoneSchema,
-  password: passwordSchema,
-});
+/** Letters, digits, dot, dash and underscore. No spaces and no `@`, so a username can never be
+ *  mistaken for a phone number or an email and the login route's branch stays unambiguous. */
+export const usernameSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(64)
+  .regex(/^[a-zA-Z0-9._-]+$/, "letters, numbers, dots, dashes and underscores only");
+
+/** Exactly one identifier. A body carrying both would leave the route deciding which one it
+ *  meant, and "whichever matched" is how an account gets reached by the wrong door. */
+export const passwordLoginSchema = z
+  .object({
+    phone: phoneSchema.optional(),
+    username: usernameSchema.optional(),
+    password: passwordSchema,
+  })
+  .refine((v) => Boolean(v.phone) !== Boolean(v.username), {
+    message: "provide either a phone number or a username",
+    path: ["phone"],
+  });
 
 /** The admin second factor. `pendingToken` is what proves the password step already passed —
  *  without it this route would be a plain OTP login wearing a different name. */

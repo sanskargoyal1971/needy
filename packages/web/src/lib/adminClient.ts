@@ -108,7 +108,51 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+/** An operator, as the super admin's screen sees them. Never any password material — the hash
+ *  is not on the user object at any layer, only the fact that one exists. */
+export interface StaffMember {
+  id: string;
+  username: string | null;
+  phone: string;
+  displayName: string;
+  role: Role;
+  active: boolean;
+  deactivatedAt: number | null;
+  deactivatedReason: string | null;
+  hasPassword: boolean;
+  createdAt: number;
+}
+
 export const adminClient = {
+  // ── staff administration (super admin only) ───────────────────────────────
+
+  staff: () => call<{ staff: StaffMember[] }>("/admin/staff"),
+
+  /** Create an operator. The NUMBER is assigned here and is not theirs to change — it is where
+   *  their second factor will be sent, so letting them re-point it would hand the second factor
+   *  to whoever holds the password. */
+  createStaff: (body: {
+    phone: string;
+    displayName: string;
+    password: string;
+    username?: string;
+  }) =>
+    call<{ staff: StaffMember }>("/admin/staff", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  deactivateStaff: (userId: string, reason: string) =>
+    call<{ staff: StaffMember }>(`/admin/staff/${encodeURIComponent(userId)}/deactivate`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
+  activateStaff: (userId: string) =>
+    call<{ staff: StaffMember }>(`/admin/staff/${encodeURIComponent(userId)}/activate`, {
+      method: "POST",
+    }),
+
   queue: (status: OnboardingStatus = "under_review") =>
     call<{ entries: QueueEntry[]; counts: Record<string, number> }>(
       `/admin/verifications?status=${encodeURIComponent(status)}`,

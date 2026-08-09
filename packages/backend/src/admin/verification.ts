@@ -339,6 +339,14 @@ export function createVerificationRouter(deps: VerificationRouterDeps): Router {
         res.status(403).json({ error: "cannot-block-self" });
         return;
       }
+      // Staff are administered from the super admin's surface, not from here. Without this an
+      // ordinary admin could block a colleague — or the super admin — and lock the rest of the
+      // team out of the console mid-incident, which is a far larger power than "review this
+      // applicant" was ever meant to carry.
+      if (user.role === "admin" || user.role === "super_admin") {
+        res.status(403).json({ error: "staff-account", hint: "use the staff surface" });
+        return;
+      }
       const now = deps.now();
       const updated = await deps.users.update(user.id, {
         blockedAt: now,

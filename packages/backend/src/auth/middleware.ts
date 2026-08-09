@@ -35,10 +35,15 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
   next();
 }
 
-/** True if `held` is allowed to act as `required`. Admin is a superset; "both" covers
- *  requester and helper; otherwise an exact match. */
+/** True if `held` is allowed to act as `required`.
+ *
+ *  `super_admin` satisfies everything, including `admin` — it is strictly above it, so every
+ *  admin surface is reachable without duplicating a guard on each route. `admin` satisfies
+ *  everything EXCEPT `super_admin`: staff administration is the one thing an ordinary admin
+ *  may not reach, which is what stops an admin minting another admin. */
 export function satisfiesRole(held: Role, required: Role): boolean {
-  if (held === "admin") return true;
+  if (held === "super_admin") return true;
+  if (held === "admin") return required !== "super_admin";
   if (held === required) return true;
   if (held === "both" && (required === "requester" || required === "helper")) return true;
   return false;

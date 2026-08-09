@@ -52,6 +52,9 @@ export const paths = {
   adminAbuse: "/admin/abuse",
   adminUsers: "/admin/users",
   adminAudit: "/admin/audit",
+  /** Staff administration. Super admin only — an ordinary admin is refused by the API, and
+   *  the nav does not offer it to them. */
+  adminStaff: "/admin/staff",
 } as const;
 
 /**
@@ -66,6 +69,7 @@ export function homeFor(role: Role, onboarding: OnboardingStatus): string {
   if (onboarding !== "approved") return paths.onboarding;
 
   switch (role) {
+    case "super_admin":
     case "admin":
       return paths.adminHome;
     case "helper":

@@ -432,6 +432,38 @@ export const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_set_by TEXT`,
     ],
   },
+  {
+    id: 7,
+    name: "super-admin-and-usernames",
+    statements: [
+      // ── a name to sign in with ──────────────────────────────────────────────────────────
+      //
+      // Every account so far is keyed on a phone number, because a verified number is what
+      // this platform's identity rests on. Staff are the exception: a super admin
+      // administers the people who administer the platform and is not a participant, so
+      // there is no meaningful phone to verify and no SMS to wait on. They sign in with a
+      // username.
+      //
+      // Nullable and UNIQUE together, which Postgres allows — every existing account keeps a
+      // NULL and remains phone-only. A partial unique index rather than a plain constraint
+      // so a table of NULLs does not collide with itself.
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username
+         ON users (lower(username)) WHERE username IS NOT NULL`,
+    ],
+    tolerant: [
+      // The role CHECK predates `super_admin` and would refuse the row outright. Replaced
+      // rather than dropped: a column that accepts any string is how "admin" ends up in a
+      // database because someone typo'd a migration.
+      `ALTER TABLE users DROP CONSTRAINT chk_users_role`,
+      `ALTER TABLE users ADD CONSTRAINT chk_users_role CHECK (role IN
+         ('requester','helper','both','admin','super_admin'))`,
+      // Staff sign in by name; everyone else by number. Neither may be absent for the role
+      // that depends on it.
+      `ALTER TABLE users ADD CONSTRAINT chk_users_super_admin_has_username CHECK
+         (role <> 'super_admin' OR username IS NOT NULL)`,
+    ],
+  },
 ];
 
 /** Single-quote a string for inline SQL.

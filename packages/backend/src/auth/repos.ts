@@ -6,6 +6,10 @@ import type { Session, User } from "./types.js";
 export interface UserRepository {
   getById(id: string): Promise<User | null>;
   getByPhone(phone: string): Promise<User | null>;
+  /** Staff sign-in. Case-insensitive, matching the unique index on `lower(username)` — a
+   *  console account reached as `Needy_Admin` and `needy_admin` must be one account, not two
+   *  depending on how it was typed. */
+  getByUsername(username: string): Promise<User | null>;
   create(user: User): Promise<User>;
   update(id: string, patch: Partial<User>): Promise<User>;
 
@@ -68,6 +72,10 @@ export function createInMemoryUserRepo(): InMemoryUserRepository {
     async getByPhone(phone) {
       const id = byPhone.get(phone);
       return id ? (byId.get(id) ?? null) : null;
+    },
+    async getByUsername(username) {
+      const wanted = username.toLowerCase();
+      return [...byId.values()].find((u) => u.username?.toLowerCase() === wanted) ?? null;
     },
     async create(user) {
       byId.set(user.id, user);
@@ -150,6 +158,7 @@ interface UserRow {
   submitted_at: number | string | null;
   password_set_at: number | string | null;
   password_set_by: string | null;
+  username: string | null;
 }
 
 const numOrNull = (v: number | string | null | undefined): number | null =>
@@ -197,6 +206,7 @@ function rowToUser(r: UserRow): User {
     // be able to carry it, whatever the query returns.
     passwordSetAt: numOrNull(r.password_set_at),
     passwordSetBy: r.password_set_by ?? null,
+    username: r.username ?? null,
   };
 }
 
@@ -210,17 +220,25 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
       const { rows } = await pool.query<UserRow>(`SELECT * FROM users WHERE phone = $1`, [phone]);
       return rows[0] ? rowToUser(rows[0]) : null;
     },
+    async getByUsername(username) {
+      const { rows } = await pool.query<UserRow>(
+        `SELECT * FROM users WHERE lower(username) = lower($1)`,
+        [username],
+      );
+      return rows[0] ? rowToUser(rows[0]) : null;
+    },
     async create(user) {
       await pool.query(
         `INSERT INTO users (id, phone, email, display_name, role, kyc_status, created_at, updated_at,
                             onboarding_status, date_of_birth, gender, area_label, area_lat, area_lng,
-                            rejection_reason, blocked_at, reviewed_by, reviewed_at, submitted_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+                            rejection_reason, blocked_at, reviewed_by, reviewed_at, submitted_at,
+                            username)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
         [
           user.id, user.phone, user.email, user.displayName, user.role, user.kycStatus,
           user.createdAt, user.updatedAt, user.onboardingStatus, user.dateOfBirth, user.gender,
           user.areaLabel, user.areaLat, user.areaLng, user.rejectionReason, user.blockedAt,
-          user.reviewedBy, user.reviewedAt, user.submittedAt,
+          user.reviewedBy, user.reviewedAt, user.submittedAt, user.username,
         ],
       );
       return user;
@@ -233,13 +251,13 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
         `UPDATE users SET phone=$2, email=$3, display_name=$4, role=$5, kyc_status=$6, updated_at=$7,
                           onboarding_status=$8, date_of_birth=$9, gender=$10, area_label=$11,
                           area_lat=$12, area_lng=$13, rejection_reason=$14, blocked_at=$15,
-                          reviewed_by=$16, reviewed_at=$17, submitted_at=$18
+                          reviewed_by=$16, reviewed_at=$17, submitted_at=$18, username=$19
          WHERE id=$1`,
         [
           next.id, next.phone, next.email, next.displayName, next.role, next.kycStatus,
           next.updatedAt, next.onboardingStatus, next.dateOfBirth, next.gender, next.areaLabel,
           next.areaLat, next.areaLng, next.rejectionReason, next.blockedAt, next.reviewedBy,
-          next.reviewedAt, next.submittedAt,
+          next.reviewedAt, next.submittedAt, next.username,
         ],
       );
       return next;
@@ -256,11 +274,16 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
       // rewrites every column from a snapshot it read earlier, so a password change would
       // clobber any concurrent edit to the rest of the row, and vice versa.
       const { rowCount } = await pool.query(
+        // Every parameter inside a CASE is cast explicitly. Postgres infers the result type of
+        // a CASE from its branches, and `NULL` tells it nothing — so an untyped `$3` was
+        // inferred as text and the statement failed with "column password_set_at is of type
+        // bigint but expression is of type text". It only fired on the Postgres path, which is
+        // why the in-memory tests were green.
         `UPDATE users
-            SET password_hash = $2,
-                password_set_at = CASE WHEN $2::text IS NULL THEN NULL ELSE $3 END,
-                password_set_by = CASE WHEN $2::text IS NULL THEN NULL ELSE $4 END,
-                updated_at = $3
+            SET password_hash = $2::text,
+                password_set_at = CASE WHEN $2::text IS NULL THEN NULL ELSE $3::bigint END,
+                password_set_by = CASE WHEN $2::text IS NULL THEN NULL ELSE $4::text END,
+                updated_at = $3::bigint
           WHERE id = $1`,
         [userId, hash, at, setBy],
       );

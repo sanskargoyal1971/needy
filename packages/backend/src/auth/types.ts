@@ -2,8 +2,33 @@ import type { Gender, OnboardingStatus } from "@needy/shared";
 
 /** Roles are enforced at the API layer (not just the UI). "both" = a user who is both a
  *  requester and an active helper; "admin" gates the trust & safety surfaces (Stage B). */
-export type Role = "requester" | "helper" | "both" | "admin";
-export const ROLES: readonly Role[] = ["requester", "helper", "both", "admin"];
+/**
+ * Who someone is on the platform.
+ *
+ * `super_admin` is the only role that can create staff. It sits above `admin` and is
+ * deliberately NOT a participant role: a super admin holds no tasks, publishes no
+ * availability and is never a matching candidate. It exists to administer the people who
+ * administer the platform, and nothing else.
+ */
+export type Role = "requester" | "helper" | "both" | "admin" | "super_admin";
+/**
+ * The runtime list behind `isRole`, which every access token is verified against.
+ *
+ * The type-level check below fails compilation if `Role` gains a member that is missing here.
+ * Without it, adding `super_admin` to the union left this array behind and every super-admin
+ * token failed verification as a malformed claim — a 401 that looks like an expired session
+ * and has nothing to do with expiry.
+ */
+export const ROLES = [
+  "requester",
+  "helper",
+  "both",
+  "admin",
+  "super_admin",
+] as const satisfies readonly Role[];
+type RolesAreExhaustive = Role extends (typeof ROLES)[number] ? true : never;
+const _rolesAreExhaustive: RolesAreExhaustive = true;
+void _rolesAreExhaustive;
 export function isRole(v: unknown): v is Role {
   return typeof v === "string" && (ROLES as readonly string[]).includes(v);
 }
@@ -56,6 +81,16 @@ export interface User {
   /** The admin who issued a temporary password, or null when the holder set their own. Makes
    *  a staff-set credential visible in the account itself, not only in the audit log. */
   passwordSetBy: string | null;
+
+  /**
+   * A name to sign in with, for staff. Null for everyone else.
+   *
+   * Identity on this platform is a verified phone number, and that is the right anchor for a
+   * participant. A super admin is not a participant — they hold no tasks and are never a
+   * matching candidate — so there is no number to verify and no SMS to wait on. Compared
+   * case-insensitively; the unique index is on `lower(username)`.
+   */
+  username: string | null;
 }
 
 /**
@@ -93,6 +128,7 @@ export function makeUser(seed: Pick<User, "id" | "phone"> & Partial<User>): User
     submittedAt: null,
     passwordSetAt: null,
     passwordSetBy: null,
+    username: null,
     ...seed,
   };
 }

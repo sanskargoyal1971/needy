@@ -305,16 +305,24 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
     "/auth/password/login",
     validateBody(passwordLoginSchema),
     asyncRoute(async (req, res) => {
-      const { phone, password } = req.body as { phone: string; password: string };
+      const { phone, username, password } = req.body as {
+        phone?: string;
+        username?: string;
+        password: string;
+      };
       const ip = clientIp(req);
+      // One bucket keyed on whichever identifier was supplied, so a username is limited
+      // exactly as tightly as a number. Prefixed so `+9198…` and a username `+9198…` — which
+      // the schema forbids anyway — could never share a bucket.
+      const identifier = phone ? `p:${phone}` : `u:${username}`;
 
       // Bounded on BOTH scopes, for the reason C15 established on the OTP route: per-phone
       // alone lets an attacker walk a list of numbers unbounded, and per-IP alone lets a
       // distributed attempt grind one account. Tighter than the OTP limiter because a password
       // is guessable in a way a fresh random code is not.
-      const withinPhone = await consumeToken(
+      const withinIdentifier = await consumeToken(
         deps.redis,
-        keys.bucket("password-login", phone),
+        keys.bucket("password-login", identifier),
         PASSWORD_LOGIN_LIMIT,
         deps.now(),
       );
@@ -324,15 +332,21 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         PASSWORD_LOGIN_IP_LIMIT,
         deps.now(),
       );
-      if (!withinPhone || !withinIp) {
-        logger.warn("password login rate-limited", { scope: withinPhone ? "ip" : "phone" });
+      if (!withinIdentifier || !withinIp) {
+        logger.warn("password login rate-limited", {
+          scope: withinIdentifier ? "ip" : "identifier",
+        });
         res.status(429).json({ error: "too-many-attempts" });
         return;
       }
 
       try {
-        const user = await deps.users.getByPhone(phone);
-        const issued = await deps.auth.loginWithPassword(phone, password, ua(req));
+        const user = phone
+          ? await deps.users.getByPhone(phone)
+          : await deps.users.getByUsername(username!);
+        const issued = phone
+          ? await deps.auth.loginWithPassword(phone, password, ua(req))
+          : await deps.auth.loginWithUsername(username!, password, ua(req));
         if (!issued) {
           // One answer for every kind of failure — see `loginWithPassword`. A wrong password
           // on a real account and an unknown number are indistinguishable from here.
@@ -352,18 +366,30 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         // already had, so for staff the password is the FIRST factor and the code is still
         // required. The session is not minted here: the tokens issued above are discarded and
         // a short-lived pending token is returned instead.
+        //
+        // A SUPER ADMIN is exempt, by explicit decision. They sign in with a username and a
+        // password and have no verified number to send a code to — the account exists to
+        // administer staff, not to participate, so there is no phone in the picture at all.
+        // That does concentrate the strongest account on the platform behind one secret, which
+        // is why this account is barred from being a participant, is rate-limited on the same
+        // bucket as everyone else, and has every action it takes written to the audit log.
         if (issued.user.role === "admin") {
           await deps.auth.logout(issued.refreshToken);
+          // The code goes to the number ON THE ACCOUNT, not to one supplied in the request.
+          // A super admin assigns that number when they create the admin precisely so it is
+          // not the admin's to choose — sending to a request-supplied number would hand the
+          // second factor straight back to whoever is doing the signing in.
+          const target = issued.user.phone;
           const pendingToken = randomBytes(24).toString("base64url");
           await deps.redis.set(
-            keys.mfaPending(phone),
+            keys.mfaPending(target),
             sha256(pendingToken),
             "PX",
             MFA_PENDING_TTL_MS,
           );
           // Sent through the ordinary OTP path so it is rate-limited and delivered exactly as
           // every other code is.
-          await deps.otp.request(phone, ip);
+          await deps.otp.request(target, ip);
           logger.info("admin password accepted; second factor required", { userId: issued.user.id });
           res.json({ mfaRequired: true, pendingToken, expiresInMs: MFA_PENDING_TTL_MS });
           return;

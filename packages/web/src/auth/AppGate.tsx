@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { canTransact } from "@needy/shared";
 import { useAuth } from "./AuthProvider";
 import { homeFor, loginWithReturn, paths } from "@/lib/paths";
+import type { Role } from "@/lib/authClient";
 
 /** ── Client route guard ────────────────────────────────────────────────────
  *  Wraps every screen that requires an approved account. Phase 1 ships the guard; the app
@@ -24,6 +25,10 @@ import { homeFor, loginWithReturn, paths } from "@/lib/paths";
  *  possible would reintroduce exactly the staleness the server-side gate was designed to
  *  avoid — a user rejected at 10:00 keeping access until their token expired.
  */
+/** Roles allowed on an admin surface. Kept next to the gate so the two checks below cannot
+ *  drift apart. */
+const isStaff = (role: Role): boolean => role === "admin" || role === "super_admin";
+
 export function AppGate({
   children,
   /** Require the admin role as well. Admin screens compose both checks. */
@@ -53,7 +58,10 @@ export function AppGate({
       router.replace(homeFor(role, onboardingStatus));
       return;
     }
-    if (requireAdmin && role !== "admin") {
+    // `super_admin` is strictly above `admin` and must reach every admin screen — the API
+    // says the same thing in `satisfiesRole`. Comparing to the single string "admin" is how
+    // a new role silently loses access to surfaces it outranks.
+    if (requireAdmin && !isStaff(role)) {
       router.replace(homeFor(role, onboardingStatus));
     }
   }, [state, router, requireAdmin]);
@@ -61,7 +69,7 @@ export function AppGate({
   const allowed =
     state.status === "authenticated" &&
     canTransact(state.user.onboardingStatus) &&
-    (!requireAdmin || state.user.role === "admin");
+    (!requireAdmin || isStaff(state.user.role));
 
   if (!allowed) {
     // Render the spinner rather than the children while deciding. Flashing a dashboard for one

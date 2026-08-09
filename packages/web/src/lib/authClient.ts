@@ -11,7 +11,9 @@
 
 import { adoptCsrfToken, clearCsrfToken, csrfFetch } from "./csrf";
 
-export type Role = "requester" | "helper" | "both" | "admin";
+/** `super_admin` sits above `admin`: it administers the operators themselves, and is not a
+ *  participant — it holds no tasks and is never a matching candidate. */
+export type Role = "requester" | "helper" | "both" | "admin" | "super_admin";
 export type KycStatus = "unverified" | "pending" | "verified" | "rejected";
 
 /** The onboarding pipeline. Distinct from `kycStatus`, which tracks the *provider* seam;
@@ -162,13 +164,16 @@ export const authClient = {
    * platform already had. The caller must handle both; treating a successful response as "I am
    * signed in" would leave an admin looking at a logged-out app.
    */
-  passwordLogin: async (phone: string, password: string) => {
+  passwordLogin: async (
+    identifier: { phone: string } | { username: string },
+    password: string,
+  ) => {
     const res = await call<
       | { user: PublicUser; csrfToken?: string; mfaRequired?: undefined }
       | { mfaRequired: true; pendingToken: string; expiresInMs: number }
     >("/auth/password/login", {
       method: "POST",
-      body: JSON.stringify({ phone, password }),
+      body: JSON.stringify({ ...identifier, password }),
     });
     if (!("mfaRequired" in res) || !res.mfaRequired) adoptCsrfToken(res.csrfToken);
     return res;

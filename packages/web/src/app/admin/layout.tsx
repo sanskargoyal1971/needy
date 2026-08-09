@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { ClipboardCheck, Flag, ScrollText, Siren, Users } from "lucide-react";
+import { ClipboardCheck, Flag, ScrollText, ShieldCheck, Siren, Users } from "lucide-react";
 import { AppGate } from "@/auth/AppGate";
+import { useAuth } from "@/auth/AuthProvider";
 import { paths } from "@/lib/paths";
 
 /** ── Admin shell ───────────────────────────────────────────────────────────
@@ -24,10 +25,15 @@ const NAV = [
   { href: paths.adminAbuse, label: "Signals", icon: Flag },
   { href: paths.adminUsers, label: "Users", icon: Users },
   { href: paths.adminAudit, label: "Audit log", icon: ScrollText },
+  /** Super admin only. Hidden rather than shown-and-refused: a tab that 403s on every
+   *  click teaches operators to ignore refusals. */
+  { href: paths.adminStaff, label: "Operators", icon: ShieldCheck, superAdminOnly: true },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { state } = useAuth();
+  const isSuperAdmin = state.status === "authenticated" && state.user.role === "super_admin";
 
   return (
     <AppGate requireAdmin>
@@ -41,7 +47,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           </header>
 
           <nav className="mb-8 flex gap-1 border-b border-gray-200" aria-label="Admin sections">
-            {NAV.map(({ href, label, icon: Icon }) => {
+            {NAV.filter((item) => !item.superAdminOnly || isSuperAdmin).map(
+              ({ href, label, icon: Icon }) => {
               // startsWith so a packet detail page keeps its parent tab lit, but the exact
               // check first so /admin/users does not also light /admin.
               const active = pathname === href || pathname.startsWith(`${href}/`);
@@ -60,7 +67,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   {label}
                 </Link>
               );
-            })}
+              },
+            )}
           </nav>
 
           {children}

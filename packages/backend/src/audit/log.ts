@@ -27,6 +27,9 @@ export type AuditAction =
   // admin handling of other people's data
   | "admin.document_viewed"
   | "admin.user_blocked"
+  /** A super admin created an operator account. Never records the password — what matters
+   *  later is who was made staff, by whom, and on which number. */
+  | "admin.staff_created"
   /** Staff issued a temporary password for another account. The credential is never recorded
    *  — what matters afterwards is that a human did this, to whom, and when. */
   | "admin.password_set"
