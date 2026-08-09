@@ -18,6 +18,7 @@ import { signAccessToken } from "../../auth/jwt.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 import type { KycStatus, Role } from "../../auth/types.js";
 import type { Deps } from "../../domain/deps.js";
 import { keys } from "../../domain/keys.js";
@@ -235,6 +236,7 @@ describe("/presence idle availability (audit A1 / B9 / B10)", () => {
       users: createInMemoryUserRepo(),
       services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
+      ...safetyDeps(),
       now: () => clock,
     };
     io.of(NS.presence).use(authMiddleware);

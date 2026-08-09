@@ -25,6 +25,7 @@ import { createInMemorySosRepo } from "../../domain/sosStore.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 import { authMiddleware } from "../auth.js";
 import { registerMatching } from "../matching.js";
 
@@ -107,6 +108,7 @@ describe("/matching advance-task lifecycle guard", () => {
       users: createInMemoryUserRepo(),
       services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
+      ...safetyDeps(),
       now: () => 1_700_000_050_000,
     };
     io.of(NS.matching).use(authMiddleware);

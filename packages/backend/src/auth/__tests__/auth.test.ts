@@ -6,6 +6,7 @@ import { config } from "../../config.js";
 import type { RedisClient } from "../../redis.js";
 import { createInMemorySessionRepo, createInMemoryUserRepo } from "../repos.js";
 import { createInMemoryKycDocumentRepo } from "../../onboarding/repos.js";
+import { createInMemoryAbuseRepo } from "../../domain/abuseStore.js";
 import { createInMemoryPhoneBlockRepo } from "../phoneBlocks.js";
 import { AuthService } from "../service.js";
 import { OtpService } from "../otp.js";
@@ -74,6 +75,7 @@ describe("Stage A — auth", () => {
         users,
         documents,
         redis,
+        abuse: createInMemoryAbuseRepo(),
         now,
       }),
     );

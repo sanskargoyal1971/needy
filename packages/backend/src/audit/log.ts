@@ -31,7 +31,15 @@ export type AuditAction =
   | "admin.role_changed"
   // safety
   | "sos.raised"
-  | "sos.resolved";
+  /** An operator took ownership. Recorded separately from `sos.resolved` because how long an
+   *  alarm waited before a human answered it is the number this platform should be judged on,
+   *  and it is not recoverable from the resolution alone. */
+  | "sos.acknowledged"
+  | "sos.resolved"
+  // abuse review. The signals themselves live in `abuse_signals`; these are the human
+  // judgements about them, kept here so an observation and the decision taken on it survive
+  // independently of each other.
+  | "abuse.reviewed";
 
 export interface AuditEntry {
   action: AuditAction;

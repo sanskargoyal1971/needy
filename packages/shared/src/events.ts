@@ -155,8 +155,52 @@ export interface SosAlert {
   /** Last known position of the raiser, so responders have somewhere to go. */
   at: LatLng | null;
   note: string | null;
+  /** The operator who took ownership, and when. This is the field the raiser's UI is allowed
+   *  to read "a person is looking at this" from — and it is null until one actually is. */
+  acknowledgedBy: string | null;
+  acknowledgedAt: number | null;
+  /** Who closed it, and what they found. A resolution with no account of what happened is
+   *  indistinguishable from someone clearing their queue. */
+  resolvedBy: string | null;
+  resolutionNote: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * Build a `SosAlert` from the fields a raiser supplies, defaulting the operator-lifecycle
+ * fields to their un-handled state.
+ *
+ * Same rationale as `makeTask` and `makeUser`: this interface has grown once and will grow
+ * again, and without a factory every new field must be added by hand at every construction
+ * site — where the one that gets missed is `undefined` at runtime while typechecking fine.
+ * For this type in particular a missed `acknowledgedBy` would render as "an operator has
+ * seen this" in a console that reads truthiness, which is the exact lie this file exists to
+ * prevent.
+ */
+export function makeSosAlert(
+  seed: Pick<SosAlert, "id" | "taskId" | "raisedBy" | "kind"> & Partial<SosAlert>,
+): SosAlert {
+  return {
+    status: "raised",
+    at: null,
+    note: null,
+    acknowledgedBy: null,
+    acknowledgedAt: null,
+    resolvedBy: null,
+    resolutionNote: null,
+    createdAt: 0,
+    updatedAt: 0,
+    ...seed,
+  };
+}
+
+/** Alerts an operator still owes an answer to. `cancelled` is excluded because the raiser
+ *  themselves stood it down; `resolved` because an operator closed it. */
+export const OPEN_SOS_STATUSES: readonly SosStatus[] = ["raised", "acknowledged"];
+
+export function isSosOpen(alert: SosAlert): boolean {
+  return OPEN_SOS_STATUSES.includes(alert.status);
 }
 
 export interface SosClientEvents {
@@ -169,6 +213,20 @@ export interface SosClientEvents {
     payload: { alertId: string },
     ack: (result: { ok: true; alert: SosAlert } | { ok: false; error: string }) => void,
   ) => void;
+  /**
+   * Subscribe to every live alert on the platform — the operator console's feed.
+   *
+   * Admin-only, and the check is against the DURABLE user record rather than the JWT's `role`
+   * claim: an access token lives 15 minutes, so a demoted or compromised admin would otherwise
+   * keep a window onto every emergency on the platform for the remainder of its life. The ack
+   * carries the currently-open queue so the console renders a correct backlog immediately
+   * instead of appearing empty until the next alarm.
+   */
+  watch: (
+    ack: (result: { ok: true; open: SosAlert[] } | { ok: false; error: string }) => void,
+  ) => void;
+  /** Drop the operator feed without dropping the socket. */
+  unwatch: () => void;
 }
 
 export interface SosServerEvents {

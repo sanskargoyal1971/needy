@@ -12,6 +12,7 @@ import type { RedisClient, RedisClients } from "../../redis.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 import { createInMemorySosRepo } from "../../domain/sosStore.js";
 import {
   createInMemoryHelperProfileRepo,
@@ -91,6 +92,7 @@ describe("socket acks are optional on the wire", () => {
       users: createInMemoryUserRepo(),
       services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
+      ...safetyDeps(),
       now: () => Date.now(),
     };
     io.of(NS.chat).use(authMiddleware);

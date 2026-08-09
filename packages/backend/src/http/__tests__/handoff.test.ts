@@ -8,7 +8,9 @@ import { signAccessToken } from "../../auth/jwt.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { makeUser } from "../../auth/types.js";
 import type { Deps } from "../../domain/deps.js";
+import { createInMemoryAbuseRepo } from "../../domain/abuseStore.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 import { createInMemorySosRepo } from "../../domain/sosStore.js";
 import {
   createInMemoryHelperProfileRepo,
@@ -51,6 +53,7 @@ describe("doorstep handoff", () => {
   let app: express.Express;
   let redisRaw: Redis;
   let tasks: ReturnType<typeof createInMemoryTaskRepo>;
+  let abuse: ReturnType<typeof createInMemoryAbuseRepo>;
   let clock = NOW;
 
   const token = (sub: string) =>
@@ -88,6 +91,7 @@ describe("doorstep handoff", () => {
     clock = NOW;
     await redisRaw.flushdb();
     tasks = createInMemoryTaskRepo();
+    abuse = createInMemoryAbuseRepo();
     await tasks.create(
       makeTask({
         id: TASK,
@@ -115,6 +119,10 @@ describe("doorstep handoff", () => {
       users,
       services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
+      ...safetyDeps(),
+      // Overrides the default from `safetyDeps` so the burn case below can assert on the
+      // signal the limiter emits, rather than trusting that it does.
+      abuse,
       now: () => clock,
     };
     app = express();
@@ -243,6 +251,15 @@ describe("doorstep handoff", () => {
     const burned = await verify("199999");
     expect(burned.status).toBe(429);
     expect(burned.body.codeBurned).toBe(true);
+
+    // Burning the code is the strongest abuse signal this system produces: the code travels
+    // by voice from the requester to the person in front of them, so five failures means the
+    // person at the door and the person holding the phone are not talking to each other.
+    // Recorded against the HELPER, who is the one entering codes.
+    const signals = await abuse.listForSubject(HELPER, 0, 10);
+    expect(signals.map((s) => s.kind)).toEqual(["handoff.code_burned"]);
+    expect(signals[0]!.taskId).toBe(TASK);
+    expect(await abuse.listForSubject(REQUESTER, 0, 10)).toHaveLength(0);
 
     // The originally-issued code is now dead, so even the right answer does nothing.
     const withRealCode = await verify(issued.body.code);

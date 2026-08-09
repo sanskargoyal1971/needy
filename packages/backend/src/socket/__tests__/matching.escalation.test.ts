@@ -29,6 +29,7 @@ import {
 import type { Logger } from "../../logger.js";
 import type { RedisClient, RedisClients } from "../../redis.js";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 import { authMiddleware } from "../auth.js";
 import { registerMatching } from "../matching.js";
 
@@ -201,6 +202,7 @@ describe("matching: radius escalation, eligibility and service filters", () => {
       users,
       services,
       exceptions,
+      ...safetyDeps(),
       now: () => clock,
     };
     io.of(NS.matching).use(authMiddleware);

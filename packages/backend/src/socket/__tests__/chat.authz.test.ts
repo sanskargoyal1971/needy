@@ -19,6 +19,7 @@ import type { Logger } from "../../logger.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 import { createInMemorySosRepo } from "../../domain/sosStore.js";
 import {
   createInMemoryHelperProfileRepo,
@@ -204,6 +205,7 @@ describe("/chat participant authorization (audit A3)", () => {
       users: createInMemoryUserRepo(),
       services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
+      ...safetyDeps(),
       now: () => clockNow,
     };
     io.of(NS.chat).use(authMiddleware);

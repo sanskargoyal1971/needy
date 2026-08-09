@@ -3,6 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { DocumentKind } from "@needy/shared";
 import { config } from "../config.js";
+import { emitSignal, type AbuseRepository } from "../domain/abuseStore.js";
 import { keys } from "../domain/keys.js";
 import type { RedisClient } from "../redis.js";
 import { logger } from "../logger.js";
@@ -30,6 +31,8 @@ export interface AuthRouterDeps {
   users: UserRepository;
   documents: KycDocumentRepository;
   redis: RedisClient;
+  /** Behavioural signals. Only one is emitted from here — a blocked number trying again. */
+  abuse: AbuseRepository;
   now: () => number;
 }
 
@@ -220,6 +223,21 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         // the client shows the terminal screen instead of "something went wrong, try again".
         if (err instanceof PhoneBlockedError) {
           logger.warn("login refused — phone is blocked");
+
+          // Someone rejected by a human is still trying to get in. One attempt is a person who
+          // forgot; a run of them is worth an operator knowing about, especially if the same
+          // person then appears under a different number.
+          //
+          // Attributed to the existing account when there is one. When there is not — the block
+          // outlived the account, or the number was blocked before it ever registered — there
+          // is nothing to attribute it to, and inventing a subject key from the phone number
+          // would put a plaintext identifier of a refused person into a long-lived table. The
+          // refusal is still in the application log above either way.
+          const blockedUser = await deps.users.getByPhone(phone).catch(() => null);
+          if (blockedUser) {
+            await emitSignal(deps.abuse, "auth.blocked_phone_retry", blockedUser.id, deps.now());
+          }
+
           res.status(403).json({ error: "phone-blocked" });
           return;
         }

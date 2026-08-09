@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 // Typed by the ambient `declare module "ioredis-mock"` in src/types/ioredis-mock.d.ts — the
 // package ships none of its own, and it is only ever used through the RedisClient cast below.
 import RedisMock from "ioredis-mock";
@@ -300,6 +301,7 @@ describe("/matching double-accept race (§2.4)", () => {
       users,
       services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
+      ...safetyDeps(),
       now: () => FIXED_NOW,
     };
     io.of(NS.matching).use(authMiddleware);

@@ -1,4 +1,4 @@
-import type { SosAlert, SosStatus } from "@needy/shared";
+import { OPEN_SOS_STATUSES, type SosAlert, type SosStatus } from "@needy/shared";
 import type { DbPool } from "../db.js";
 
 /** ── SOS persistence ───────────────────────────────────────────────────────
@@ -6,7 +6,11 @@ import type { DbPool } from "../db.js";
  *  component state: pressing it notified nobody and left no record, so nothing could be
  *  followed up, audited, or handed to an operator after the fact. Alerts are therefore
  *  durable and append-mostly — `cancel` records a stand-down rather than deleting the row,
- *  because "there was an alarm and it was withdrawn" is itself safety-relevant history. */
+ *  because "there was an alarm and it was withdrawn" is itself safety-relevant history.
+ *
+ *  The lifecycle methods below (`acknowledge`, `resolve`, `listOpen`, `listRecent`) are what
+ *  the operator console is built on. Until they existed, `acknowledged` was a status in the
+ *  type union that no code path could ever produce. */
 export interface SosRepository {
   create(alert: SosAlert): Promise<SosAlert>;
   get(alertId: string): Promise<SosAlert | null>;
@@ -14,12 +18,47 @@ export interface SosRepository {
   /** Live (non-resolved, non-cancelled) alerts for a task — surfaced in the snapshot so a
    *  reconnecting client still sees that an alarm is active. */
   activeForTask(taskId: string): Promise<SosAlert[]>;
+
+  /**
+   * An operator takes ownership. Guarded to `raised` only: acknowledging an alert someone
+   * else already resolved would reopen a closed case, and acknowledging one the raiser
+   * cancelled would assert an emergency they have said is over.
+   *
+   * Returns null when the alert does not exist OR is no longer in `raised` — the caller
+   * distinguishes the two with a separate read, because the second is a 409 and the first a
+   * 404 and an operator deserves to know which.
+   */
+  acknowledge(alertId: string, operatorId: string, at: number): Promise<SosAlert | null>;
+
+  /**
+   * Close an alert with an account of what happened. Guarded to the open statuses, so
+   * resolving twice is a no-op rather than a silent overwrite of the first operator's note.
+   */
+  resolve(
+    alertId: string,
+    operatorId: string,
+    note: string,
+    at: number,
+  ): Promise<SosAlert | null>;
+
+  /** The console's queue: everything still owed an answer, OLDEST FIRST. The person waiting
+   *  longest is the one to answer next — see the index comment in migration 5. */
+  listOpen(limit: number): Promise<SosAlert[]>;
+
+  /** History, newest first. `statuses` empty means all. */
+  listRecent(filter: { statuses?: readonly SosStatus[]; limit: number }): Promise<SosAlert[]>;
+
+  /** How many alerts this user raised since `since`. Feeds the `sos.repeated` abuse signal,
+   *  and is a cheap COUNT rather than a fetch-and-length because the caller only wants the
+   *  number. */
+  countRaisedBySince(userId: string, since: number): Promise<number>;
 }
 
 // ── in-memory ────────────────────────────────────────────────────────────────
 
 export function createInMemorySosRepo(): SosRepository {
   const byId = new Map<string, SosAlert>();
+  const isOpen = (a: SosAlert) => OPEN_SOS_STATUSES.includes(a.status);
   return {
     async create(alert) {
       byId.set(alert.id, alert);
@@ -36,10 +75,49 @@ export function createInMemorySosRepo(): SosRepository {
       return next;
     },
     async activeForTask(taskId) {
-      return [...byId.values()].filter(
-        (a) =>
-          a.taskId === taskId && a.status !== "resolved" && a.status !== "cancelled",
-      );
+      return [...byId.values()].filter((a) => a.taskId === taskId && isOpen(a));
+    },
+    async acknowledge(alertId, operatorId, at) {
+      const existing = byId.get(alertId);
+      if (!existing || existing.status !== "raised") return null;
+      const next: SosAlert = {
+        ...existing,
+        status: "acknowledged",
+        acknowledgedBy: operatorId,
+        acknowledgedAt: at,
+        updatedAt: at,
+      };
+      byId.set(alertId, next);
+      return next;
+    },
+    async resolve(alertId, operatorId, note, at) {
+      const existing = byId.get(alertId);
+      if (!existing || !isOpen(existing)) return null;
+      const next: SosAlert = {
+        ...existing,
+        status: "resolved",
+        resolvedBy: operatorId,
+        resolutionNote: note,
+        updatedAt: at,
+      };
+      byId.set(alertId, next);
+      return next;
+    },
+    async listOpen(limit) {
+      return [...byId.values()]
+        .filter(isOpen)
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(0, limit);
+    },
+    async listRecent({ statuses, limit }) {
+      return [...byId.values()]
+        .filter((a) => !statuses?.length || statuses.includes(a.status))
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, limit);
+    },
+    async countRaisedBySince(userId, since) {
+      return [...byId.values()].filter((a) => a.raisedBy === userId && a.createdAt >= since)
+        .length;
     },
   };
 }
@@ -55,6 +133,10 @@ interface SosRow {
   at_lat: number | null;
   at_lng: number | null;
   note: string | null;
+  acknowledged_by: string | null;
+  acknowledged_at: number | string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
   created_at: number | string;
   updated_at: number | string;
 }
@@ -71,6 +153,10 @@ function rowToAlert(r: SosRow): SosAlert {
         ? { lat: Number(r.at_lat), lng: Number(r.at_lng) }
         : null,
     note: r.note,
+    acknowledgedBy: r.acknowledged_by,
+    acknowledgedAt: r.acknowledged_at == null ? null : Number(r.acknowledged_at),
+    resolvedBy: r.resolved_by,
+    resolutionNote: r.resolution_note,
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
   };
@@ -123,6 +209,58 @@ export function createPgSosRepo(pool: DbPool): SosRepository {
         [taskId],
       );
       return rows.map(rowToAlert);
+    },
+    async acknowledge(alertId, operatorId, at) {
+      // The `status = 'raised'` predicate IS the concurrency control: two operators clicking
+      // acknowledge at the same moment both run this statement, and exactly one matches a row.
+      // The loser gets null and is told the alert is already owned — which is the truth, and
+      // is more useful to them than a silent success that overwrites a colleague's name.
+      const { rows } = await pool.query<SosRow>(
+        `UPDATE sos_alerts
+            SET status = 'acknowledged', acknowledged_by = $2, acknowledged_at = $3,
+                updated_at = $3
+          WHERE id = $1 AND status = 'raised'
+          RETURNING *`,
+        [alertId, operatorId, at],
+      );
+      return rows[0] ? rowToAlert(rows[0]) : null;
+    },
+    async resolve(alertId, operatorId, note, at) {
+      const { rows } = await pool.query<SosRow>(
+        `UPDATE sos_alerts
+            SET status = 'resolved', resolved_by = $2, resolution_note = $3, updated_at = $4
+          WHERE id = $1 AND status IN ('raised','acknowledged')
+          RETURNING *`,
+        [alertId, operatorId, note, at],
+      );
+      return rows[0] ? rowToAlert(rows[0]) : null;
+    },
+    async listOpen(limit) {
+      const { rows } = await pool.query<SosRow>(
+        `SELECT * FROM sos_alerts
+          WHERE status IN ('raised','acknowledged')
+          ORDER BY created_at ASC
+          LIMIT $1`,
+        [limit],
+      );
+      return rows.map(rowToAlert);
+    },
+    async listRecent({ statuses, limit }) {
+      const { rows } = await pool.query<SosRow>(
+        `SELECT * FROM sos_alerts
+          WHERE ($1::text[] IS NULL OR status = ANY($1))
+          ORDER BY created_at DESC
+          LIMIT $2`,
+        [statuses?.length ? [...statuses] : null, limit],
+      );
+      return rows.map(rowToAlert);
+    },
+    async countRaisedBySince(userId, since) {
+      const { rows } = await pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM sos_alerts WHERE raised_by = $1 AND created_at >= $2`,
+        [userId, since],
+      );
+      return Number(rows[0]?.count ?? 0);
     },
   };
 }

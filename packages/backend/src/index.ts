@@ -26,7 +26,14 @@ import {
 } from "./domain/stores.js";
 import { createPgRepositories } from "./domain/pgStores.js";
 import { createInMemorySosRepo, createPgSosRepo } from "./domain/sosStore.js";
+import {
+  createInMemoryAbuseRepo,
+  createPgAbuseRepo,
+  type AbuseRepository,
+} from "./domain/abuseStore.js";
 import { createAdminRouter } from "./admin/router.js";
+import { createSosAdminRouter } from "./admin/sos.js";
+import { createAbuseRouter } from "./admin/abuse.js";
 import { createInMemoryApplicationRepo, createPgApplicationRepo, type HelperApplicationRepository } from "./admin/repos.js";
 import { createPool, seedHelperProfiles, type DbPool } from "./db.js";
 import { migrate } from "./migrations.js";
@@ -113,6 +120,7 @@ async function main(): Promise<void> {
   let adminQueries: AdminUserQueries;
   let serviceCatalog: ServiceCatalog;
   let exceptionRepo: ExceptionRepository;
+  let abuseRepo: AbuseRepository;
   if (config.databaseUrl) {
     pool = createPool(config.databaseUrl);
     // Versioned, advisory-locked migrations (see migrations.ts). Replaces re-executing the
@@ -136,6 +144,7 @@ async function main(): Promise<void> {
     adminQueries = createPgAdminUserQueries(pool);
     serviceCatalog = createPgServiceCatalog(pool);
     exceptionRepo = createPgExceptionRepo(pool);
+    abuseRepo = createPgAbuseRepo(pool);
     logger.info("using postgres repositories");
   } else {
     repos = {
@@ -156,6 +165,7 @@ async function main(): Promise<void> {
     adminQueries = createInMemoryAdminUserQueries(() => inMemoryUsers.all());
     serviceCatalog = createInMemoryServiceCatalog();
     exceptionRepo = createInMemoryExceptionRepo();
+    abuseRepo = createInMemoryAbuseRepo();
     if (config.isProduction) {
       // Non-durable storage in production means tasks, chat history and SOS alerts vanish
       // on restart. That is a data-loss configuration, not a degraded mode.
@@ -193,6 +203,8 @@ async function main(): Promise<void> {
     users: userRepo,
     services: serviceCatalog,
     exceptions: exceptionRepo,
+    audit,
+    abuse: abuseRepo,
     now,
   };
 
@@ -235,6 +247,7 @@ async function main(): Promise<void> {
       users: userRepo,
       documents: documentRepo,
       redis: redis.client,
+      abuse: abuseRepo,
       now,
     }),
   );
@@ -282,6 +295,11 @@ async function main(): Promise<void> {
       now,
     }),
   );
+  // The safety consoles. Both read `deps.io` to fan changes back out over the socket, so they
+  // are mounted here but only become live once `deps.io` is assigned below — which is fine,
+  // since neither can be reached before the server is listening.
+  app.use(createSosAdminRouter(deps));
+  app.use(createAbuseRouter(deps));
   app.use(createHandoffRouter(deps));
   app.use(createHttpRouter(deps, pool ? { db: pool } : {}));
 

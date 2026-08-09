@@ -18,6 +18,7 @@ import {
 } from "@needy/shared";
 import type { User } from "../auth/types.js";
 import type { RedisClient } from "../redis.js";
+import { emitSignal } from "../domain/abuseStore.js";
 import type { Deps, NamespaceRegistrar } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
 import {
@@ -489,7 +490,7 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
               state: to,
               updatedAt: deps.now(),
             });
-            return { ok: true, task: updated };
+            return { ok: true, task: updated, from: task.state };
           },
         );
 
@@ -523,6 +524,20 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
           .to(personalRoom(updated.requesterId))
           .to(personalRoom(updated.helperId ?? updated.requesterId))
           .emit("task-updated", { task: updated });
+
+        // Cancelling a search nobody has answered yet is free and completely legitimate —
+        // people change their minds. Cancelling AFTER a helper accepted means someone stopped
+        // what they were doing, possibly set off, and got nothing. That asymmetry is why the
+        // signal keys off `from` rather than off the cancellation itself.
+        //
+        // Attributed to whoever pulled out, which is not always the requester: a helper who
+        // accepts and then cancels has done the more costly version of this.
+        if (to === "cancelled" && outcome.from !== "searching") {
+          await emitSignal(deps.abuse, "task.cancelled_after_match", userId, deps.now(), {
+            taskId,
+            metadata: { from: outcome.from, role: taskRoleOf(updated, userId) },
+          });
+        }
 
         // `searching -> cancelled` is a LEGAL edge (TASK_TRANSITIONS) and the only one a
         // requester can drive while an offer is still out. `task-updated` reaches the two
@@ -585,7 +600,12 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
 /** The result of an attempted advance, computed under the match lock and reported outside it
  *  so the socket emit/ack happens after the lock is released. */
 type AdvanceOutcome =
-  | { ok: true; task: Task }
+  /** `from` is the state read INSIDE the lock, which is the only copy that was actually
+   *  transitioned away from. Carried out of the closure because the abuse signal below needs
+   *  to distinguish "cancelled while still searching" (ordinary, costs nobody anything) from
+   *  "cancelled after a helper committed to travelling" (costs a real person a trip), and
+   *  re-reading the task afterwards would report the state it has now, not the one it left. */
+  | { ok: true; task: Task; from: TaskState }
   | {
       ok: false;
       error: string;

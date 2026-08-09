@@ -7,6 +7,7 @@ import { requireOnboarded } from "../auth/onboardingGate.js";
 import { validateBody } from "../auth/validation.js";
 import type { Deps } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
+import { emitSignal } from "../domain/abuseStore.js";
 import { consumeToken, type RateLimit } from "../services/ratelimit.js";
 import { asyncRoute } from "./asyncRoute.js";
 
@@ -250,6 +251,17 @@ export function createHandoffRouter(deps: Deps): Router {
             updatedAt: deps.now(),
           });
           deps.logger.warn("handoff code burned after repeated failures", { taskId: task.id });
+
+          // The strongest signal this system produces. The code is spoken aloud by the
+          // requester to the person standing in front of them, so five failures means the
+          // person at the door and the person holding the phone are not talking to each
+          // other — which is either a helper at the wrong address or somebody who should not
+          // be there. Against the HELPER, who is the one entering codes.
+          await emitSignal(deps.abuse, "handoff.code_burned", req.user!.sub, deps.now(), {
+            taskId: task.id,
+            metadata: { attempts },
+          });
+
           res.status(429).json({ error: "too-many-attempts", codeBurned: true });
           return;
         }

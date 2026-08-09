@@ -1,4 +1,6 @@
 import type { ExceptionRepository } from "./exceptions.js";
+import type { AbuseRepository } from "./abuseStore.js";
+import type { AuditLogger } from "../audit/log.js";
 import type { ServiceCatalog } from "../services/catalog.js";
 import type { Server } from "socket.io";
 import type { Config } from "../config.js";
@@ -34,6 +36,13 @@ export interface Deps {
   services: ServiceCatalog;
   /** Approved waivers for pairings the eligibility matrix restricts. */
   exceptions: ExceptionRepository;
+  /** Append-only record of SOS triggers and admin overrides. Reached from the socket layer
+   *  because raising an alarm is one of the three things AGENTS.md requires audited, and the
+   *  raise path is a socket event rather than a route. */
+  audit: AuditLogger;
+  /** Behavioural signals emitted from the choke points that already detect them. Never
+   *  enforces anything on its own — see the note in `shared/src/abuse.ts`. */
+  abuse: AbuseRepository;
   /** Injectable clock so tests are deterministic (rate-limit refills, offer windows,
    *  away-sweeps all read time through this). Defaults to Date.now in production wiring. */
   now: () => number;

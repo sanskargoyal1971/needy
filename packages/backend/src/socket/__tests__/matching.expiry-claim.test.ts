@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 import { Redis } from "ioredis";
 import { Server as IOServer } from "socket.io";
 import { io as ioClient, type Socket as ClientSocket } from "socket.io-client";
@@ -205,6 +206,7 @@ describe("/matching offer-expiry claim under a real clock (C19)", () => {
       users,
       services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
+      ...safetyDeps(),
       // REAL clock — the whole point of this file.
       now,
     };

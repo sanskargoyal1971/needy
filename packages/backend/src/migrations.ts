@@ -344,6 +344,67 @@ export const MIGRATIONS: readonly Migration[] = [
          FOREIGN KEY (service_code) REFERENCES services (code)`,
     ],
   },
+  {
+    id: 5,
+    name: "sos-operator-lifecycle-and-abuse-signals",
+    statements: [
+      // ── sos_alerts: who answered, and what they found ───────────────────────────────────
+      //
+      // `acknowledged` was already in the SosStatus union and was UNREACHABLE: nothing could
+      // set it, because there was no operator surface and no columns to record one. An alert
+      // could only go from raised to cancelled-by-the-raiser. These four columns are what make
+      // "somebody is dealing with this" a fact the system holds rather than a hope.
+      `ALTER TABLE sos_alerts ADD COLUMN IF NOT EXISTS acknowledged_by TEXT`,
+      `ALTER TABLE sos_alerts ADD COLUMN IF NOT EXISTS acknowledged_at BIGINT`,
+      `ALTER TABLE sos_alerts ADD COLUMN IF NOT EXISTS resolved_by TEXT`,
+      `ALTER TABLE sos_alerts ADD COLUMN IF NOT EXISTS resolution_note TEXT`,
+
+      // The console's queue query. ASCENDING on created_at, unlike every other queue index
+      // here: the alert waiting longest is the one to answer next, and an operator surface
+      // sorted newest-first buries the person who has been waiting the longest under each
+      // fresh arrival — the opposite of triage.
+      `CREATE INDEX IF NOT EXISTS idx_sos_open_queue ON sos_alerts (created_at)
+         WHERE status IN ('raised','acknowledged')`,
+
+      // ── abuse_signals ───────────────────────────────────────────────────────────────────
+      //
+      // Append-only, like audit_log and for the same reason: this is evidence a human decides
+      // on, and evidence the application can rewrite is not evidence. A signal is never
+      // "dismissed" by deleting it — an operator's decision is a row in audit_log, so the
+      // original observation and the judgement about it both survive independently.
+      `CREATE TABLE IF NOT EXISTS abuse_signals (
+         id          BIGSERIAL PRIMARY KEY,
+         kind        TEXT NOT NULL,
+         subject_id  TEXT NOT NULL,
+         task_id     TEXT,
+         weight      INTEGER NOT NULL DEFAULT 1,
+         metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
+         at          BIGINT NOT NULL
+       )`,
+      // The rollup query is "this user's signals within the window", so the index leads with
+      // the subject and carries time as the range.
+      `CREATE INDEX IF NOT EXISTS idx_abuse_subject ON abuse_signals (subject_id, at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_abuse_at ON abuse_signals (at DESC)`,
+    ],
+    tolerant: [
+      // Both of these were missing entirely: `status` and `kind` are written straight from a
+      // client-supplied union with only zod between them and the row, so the database had no
+      // opinion at all about what an SOS row could say.
+      `ALTER TABLE sos_alerts ADD CONSTRAINT chk_sos_status CHECK (status IN
+         ('raised','acknowledged','resolved','cancelled'))`,
+      `ALTER TABLE sos_alerts ADD CONSTRAINT chk_sos_kind CHECK (kind IN
+         ('panic','medical','unsafe','other'))`,
+
+      // NOTE: deliberately NO foreign key from abuse_signals.subject_id to users.id, matching
+      // audit_log. An ON DELETE CASCADE would collide with the append-only rules below — the
+      // rule rewrites the cascaded DELETE into nothing, and the parent delete then fails on a
+      // constraint that believes it cleaned up. The two mechanisms cannot both be right, and
+      // between "signals survive a deleted account" and "accounts can be deleted", the
+      // append-only guarantee is the one worth keeping.
+      `CREATE RULE abuse_signals_no_update AS ON UPDATE TO abuse_signals DO INSTEAD NOTHING`,
+      `CREATE RULE abuse_signals_no_delete AS ON DELETE TO abuse_signals DO INSTEAD NOTHING`,
+    ],
+  },
 ];
 
 /** Single-quote a string for inline SQL.

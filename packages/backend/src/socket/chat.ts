@@ -8,6 +8,7 @@ import {
 } from "@needy/shared";
 import type { Deps, NamespaceRegistrar } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
+import { emitSignal } from "../domain/abuseStore.js";
 import { CHAT_LIMIT, consumeToken, type RateLimit } from "../services/ratelimit.js";
 import { requireLiveParticipant, requireParticipant } from "./guards.js";
 import { joinRoom, leaveRoom } from "./rooms.js";
@@ -154,6 +155,10 @@ export const registerChat: NamespaceRegistrar = (deps) => {
             message: "too many messages; slow down",
             taskId,
           });
+          // Emitted on every refusal, not on a threshold. The bucket has already absorbed the
+          // legitimate burst — reaching this branch at all means the sender kept going past
+          // it, and the console scores on the accumulation rather than on any single event.
+          await emitSignal(deps.abuse, "chat.flood", userId, deps.now(), { taskId });
           ack({ ok: false, error: "rate-limited" });
           return;
         }

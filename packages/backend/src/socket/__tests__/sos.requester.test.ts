@@ -19,6 +19,7 @@ import type { Logger } from "../../logger.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 import { createInMemorySosRepo, type SosRepository } from "../../domain/sosStore.js";
 import {
   createInMemoryHelperProfileRepo,
@@ -189,6 +190,7 @@ describe("requester SOS reaches a real server (frontend audit: the button called
       users: createInMemoryUserRepo(),
       services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
+      ...safetyDeps(),
       now: () => clockNow,
     };
     io.of(NS.sos).use(authMiddleware);

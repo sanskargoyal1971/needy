@@ -16,13 +16,18 @@ import {
 } from "@needy/shared";
 import type { DbPool } from "../db.js";
 import type { Deps } from "../domain/deps.js";
+import { keys } from "../domain/keys.js";
 import { getTaskLocation } from "../domain/location-store.js";
 import { readPresence } from "../domain/presence-store.js";
 import { signAccessToken, type AuthClaims } from "../auth/jwt.js";
 import { readAccessClaims } from "../auth/middleware.js";
 import { requireOnboarded } from "../auth/onboardingGate.js";
 import { computeEta } from "../services/eta.js";
+import { consumeToken, type RateLimit } from "../services/ratelimit.js";
 import { asyncRoute } from "./asyncRoute.js";
+
+/** Burst of ten, refilling at one every ten seconds. See the note at the call site. */
+const CREATE_TASK_LIMIT: RateLimit = { capacity: 10, ratePerSec: 0.1 };
 
 /** Request carrying the userId resolved by the bearer-auth middleware. Kept local since
  *  it's only meaningful behind `requireAuth`. */
@@ -246,6 +251,26 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
     requireOnboarded({ users: deps.users }),
     asyncRoute(async (req: AuthedRequest, res: Response) => {
       const requesterId = req.userId!;
+
+      // AGENTS.md requires Redis-backed rate limiting on "task creation, chat, and SOS".
+      // Chat and SOS had it; this route did not, so the one endpoint that fans work out to
+      // every nearby helper was the one an unbounded loop could hammer. Each unanswered
+      // request also occupies real people's attention for a full offer window, which is what
+      // makes this worth limiting even though nothing here is expensive to store.
+      //
+      // Sized for a person, not a script: ten in a burst covers someone retrying a search
+      // that found nobody, and the slow refill makes a sustained loop pointless.
+      const allowed = await consumeToken(
+        deps.redis.client,
+        keys.bucket("create-task", requesterId),
+        CREATE_TASK_LIMIT,
+        deps.now(),
+      );
+      if (!allowed) {
+        res.status(429).json({ error: "too-many-requests" });
+        return;
+      }
+
       const parsed = createTaskSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
         res.status(400).json({ error: "invalid-input", details: parsed.error.flatten() });

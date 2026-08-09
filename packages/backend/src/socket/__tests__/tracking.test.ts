@@ -20,6 +20,7 @@ import type { Logger } from "../../logger.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 import { createInMemorySosRepo } from "../../domain/sosStore.js";
 import {
   createInMemoryHelperProfileRepo,
@@ -157,6 +158,7 @@ describe("/tracking location guards (§2.3)", () => {
       users: createInMemoryUserRepo(),
       services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
+      ...safetyDeps(),
       now: () => clockNow,
     };
     io.of(NS.tracking).use(authMiddleware);

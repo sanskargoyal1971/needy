@@ -5,6 +5,7 @@ import type { Server } from "socket.io";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 import { logger } from "../../logger.js";
 import type { Deps } from "../../domain/deps.js";
 import type { RedisClient, RedisClients } from "../../redis.js";
@@ -16,6 +17,7 @@ import {
 import { createInMemorySosRepo } from "../../domain/sosStore.js";
 import { createInMemorySessionRepo, createInMemoryUserRepo } from "../repos.js";
 import { createInMemoryKycDocumentRepo } from "../../onboarding/repos.js";
+import { createInMemoryAbuseRepo } from "../../domain/abuseStore.js";
 import { createInMemoryPhoneBlockRepo } from "../phoneBlocks.js";
 import { AuthService } from "../service.js";
 import { OtpService } from "../otp.js";
@@ -60,6 +62,7 @@ function makeDeps(redisClient: RedisClient, config: Deps["config"]): Deps {
     users: createInMemoryUserRepo(),
     services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
+      ...safetyDeps(),
     now: () => NOW,
   };
 }
@@ -286,6 +289,7 @@ describe("audit A5 — KYC callback authenticity", () => {
         users,
         documents,
         redis,
+        abuse: createInMemoryAbuseRepo(),
         now,
       }),
     );

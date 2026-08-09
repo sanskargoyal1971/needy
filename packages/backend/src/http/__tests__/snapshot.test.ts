@@ -5,6 +5,7 @@ import type { Server } from "socket.io";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
+import { safetyDeps } from "../../test/safetyDeps.js";
 import type { LocationUpdate, SessionSnapshot } from "@needy/shared";
 import { config } from "../../config.js";
 import { logger } from "../../logger.js";
@@ -87,6 +88,7 @@ beforeAll(async () => {
     users,
     services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
+      ...safetyDeps(),
     now: () => NOW,
   };
 
