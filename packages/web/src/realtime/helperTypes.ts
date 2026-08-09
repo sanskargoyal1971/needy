@@ -4,8 +4,8 @@ import type {
   MatchOffer,
   SocketErrorPayload,
   SosAlert,
+  PublicTask,
   SosKind,
-  Task,
   TaskState,
 } from "@needy/shared";
 import type { ConnectionState, EtaView } from "./types.js";
@@ -62,7 +62,7 @@ export interface HelperExperienceState {
     reason: "already-taken" | "expired" | "cancelled";
   } | null;
   /** The task we have accepted, if any. Null is the normal, most common state for a helper. */
-  task: Task | null;
+  task: PublicTask | null;
   messages: ChatMessage[];
   /** Whether the REQUESTER is typing (the mirror of the requester view's `otherTyping`). */
   otherTyping: boolean;

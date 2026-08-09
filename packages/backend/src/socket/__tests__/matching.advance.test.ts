@@ -7,8 +7,8 @@ import { io as ioClient, type Socket as ClientSocket } from "socket.io-client";
 import {
   NS,
   type MatchingClientEvents,
+  type PublicTask,
   type MatchingServerEvents,
-  type Task,
   type TaskState,
 } from "@needy/shared";
 import { config } from "../../config.js";
@@ -36,7 +36,7 @@ import { registerMatching } from "../matching.js";
  */
 
 type AppClient = ClientSocket<MatchingServerEvents, MatchingClientEvents>;
-type AdvanceAck = { ok: true; task: Task } | { ok: false; error: string };
+type AdvanceAck = { ok: true; task: PublicTask } | { ok: false; error: string };
 
 const TASK_ID = "task-advance-1";
 const REQUESTER_ID = "req-1";

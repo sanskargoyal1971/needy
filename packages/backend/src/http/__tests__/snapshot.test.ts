@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
 import { safetyDeps } from "../../test/safetyDeps.js";
-import type { LocationUpdate, SessionSnapshot } from "@needy/shared";
+import { makeTask, type LocationUpdate, type SessionSnapshot } from "@needy/shared";
 import { config } from "../../config.js";
 import { logger } from "../../logger.js";
 import type { Deps } from "../../domain/deps.js";
@@ -171,6 +171,73 @@ describe("GET /snapshot (§2.1 reconnect)", () => {
     // Messages is always an array (empty here — no chat yet).
     expect(Array.isArray(snap.messages)).toBe(true);
     expect(snap.messages).toHaveLength(0);
+  });
+
+  /**
+   * The handoff credential must not come back out of a read endpoint.
+   *
+   * This is the test that was missing, and its absence hid a real defect: `buildTaskSnapshot`
+   * returned the stored task verbatim, so a helper reconnecting mid-handoff received the
+   * SHA-256 of the live code. Six digits is a million candidates — recovering the code from
+   * the digest is a fraction of a second of work — so the helper could have typed in a number
+   * the requester never read aloud, from anywhere. That is the entire presence property of the
+   * doorstep handoff, defeated by the reconnect path.
+   *
+   * Asserted from the HELPER's session deliberately: they are the party the control is aimed
+   * at, and the one with a legitimate reason to call both of these endpoints.
+   */
+  it("never returns the handoff code hash to either party", async () => {
+    const helperToken: string = (
+      await request(app)
+        .post("/dev/token")
+        .send({ userId: HELPER_ID, role: "helper", displayName: "Priya" })
+    ).body.token;
+    const requesterToken: string = (
+      await request(app)
+        .post("/dev/token")
+        .send({ userId: "requester-1", role: "requester", displayName: "Alex" })
+    ).body.token;
+
+    const created = await deps.tasks.create(
+      makeTask({
+        id: "leak-task",
+        requesterId: "requester-1",
+        helperId: HELPER_ID,
+        category: "errand",
+        state: "arrived",
+        origin: { lat: 12.9611, lng: 77.6387 },
+        title: "At the door",
+      }),
+    );
+    // Exactly the state the reveal endpoint leaves behind: a live code, un-entered.
+    await deps.tasks.update(created.id, {
+      handoffOtpHash: "a".repeat(64),
+      handoffOtpExpiresAt: NOW + 60_000,
+    });
+
+    for (const [who, token] of [
+      ["helper", helperToken],
+      ["requester", requesterToken],
+    ] as const) {
+      const detail = await request(app)
+        .get(`/tasks/${created.id}`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(detail.status, who).toBe(200);
+      expect(detail.body.task, who).not.toHaveProperty("handoffOtpHash");
+      expect(detail.body.task, who).not.toHaveProperty("handoffOtpExpiresAt");
+      // The rest of the task still arrives — stripping the credential must not cost the
+      // screen the fields it renders from.
+      expect(detail.body.task.state, who).toBe("arrived");
+
+      const snap = await request(app).get("/snapshot").set("Authorization", `Bearer ${token}`);
+      expect(snap.status, who).toBe(200);
+      const found = (snap.body as SessionSnapshot).activeTasks.find(
+        (t) => t.task.id === created.id,
+      );
+      expect(found, who).toBeDefined();
+      expect(found!.task, who).not.toHaveProperty("handoffOtpHash");
+      expect(found!.task, who).not.toHaveProperty("handoffOtpExpiresAt");
+    }
   });
 
   it("returns 401 without a valid bearer token", async () => {

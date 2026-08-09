@@ -6,6 +6,7 @@ import type {
   Presence,
   SocketErrorPayload,
   SosAlert,
+  PublicTask,
   SosKind,
   Task,
   TaskState,
@@ -43,7 +44,7 @@ export interface TaskExperienceState {
    * here fixes it once, at the root, for every consumer.
    */
   userId: string;
-  task: Task | null;
+  task: PublicTask | null;
   /** Requester-side: helpers surfacing during the search (§3 Stage 1). */
   helpersNearby: { count: number; approxPoints: LatLng[] };
   /** The matched, KYC-verified helper (§3 Stage 2). */
@@ -142,6 +143,7 @@ export interface NeedyDriver {
 export type {
   ChatMessage,
   MatchedHelper,
+  PublicTask,
   Task,
   TaskState,
   LocationUpdate,

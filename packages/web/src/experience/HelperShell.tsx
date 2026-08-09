@@ -3,6 +3,7 @@
 import { useMemo, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { HelperProvider, RealHelperClient } from "@/realtime";
+import { MotionPreferencesProvider } from "@/motion/preferences";
 import { useAuth } from "@/auth/AuthProvider";
 import { AppGate } from "@/auth/AppGate";
 import { API_BASE, SUPPORT_PHONE } from "@/lib/apiConfig";
@@ -31,9 +32,16 @@ export function HelperShell({ children }: { children: ReactNode }) {
   return (
     <AppGate>
       {driver ? (
-        <HelperProvider driver={driver} supportPhone={SUPPORT_PHONE}>
-          {children}
-        </HelperProvider>
+        // `MotionPreferencesProvider` wraps the experience because its context default is
+        // `reduced: false` — without a provider the OS's prefers-reduced-motion setting is
+        // silently ignored, and every primitive falls back to its animated branch. For an
+        // audience that skews elderly, and on screens whose whole job is a moving map and a
+        // pulsing alarm, that is not a cosmetic default to leave unmounted.
+        <MotionPreferencesProvider>
+          <HelperProvider driver={driver} supportPhone={SUPPORT_PHONE}>
+            {children}
+          </HelperProvider>
+        </MotionPreferencesProvider>
       ) : (
         <div className="flex min-h-[60vh] items-center justify-center">
           <Loader2 className="animate-spin text-primary" aria-label="Loading" />

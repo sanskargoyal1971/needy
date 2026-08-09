@@ -64,7 +64,10 @@ export interface Task {
   serviceBrief: string | null;
   /** SHA-256 of the live handoff code. Never the code itself: the requester reads it aloud
    *  and the helper types it, so a plaintext column would let anyone with database access
-   *  complete a handoff they were not present for. */
+   *  complete a handoff they were not present for.
+   *
+   *  SERVER-ONLY. It must never reach a client — see {@link publicTask}, which is what every
+   *  boundary that hands a task to a browser is required to go through. */
   handoffOtpHash: string | null;
   handoffOtpExpiresAt: number | null;
   /** When the two-sided doorstep confirmation actually completed. */
@@ -102,6 +105,38 @@ export function makeTask(
     updatedAt: 0,
     ...seed,
   };
+}
+
+/**
+ * A task as it may be sent to a client.
+ *
+ * The handoff credential is stripped. This is not tidiness — it is the property the entire
+ * doorstep handoff rests on.
+ *
+ * The code is six digits, so its SHA-256 is not a secret in any meaningful sense: an attacker
+ * holding the digest recovers the code by hashing a million candidates, which is milliseconds
+ * of work. And the party who most wants it is a legitimate participant with a valid session —
+ * the helper, who could read it from `GET /snapshot` or `GET /tasks/:id` and then type in a
+ * code the requester never said out loud. That defeats the one thing the exchange exists to
+ * prove: that the person entering the code is standing at the door being spoken to. A helper
+ * could complete the handoff from the street, or from another city.
+ *
+ * `handoffOtpExpiresAt` goes with it. On its own a timestamp is harmless, but it announces
+ * "a live code exists right now" to the party who must not know, which is exactly the window
+ * an offline crack wants. The requester learns their own expiry from the reveal response, and
+ * the helper's UI needs only to be told whether to show an entry box — which is what
+ * `handoffView`'s `codeIssued` is for.
+ *
+ * Typing alone cannot enforce this: a `Task` is structurally assignable to a `PublicTask`
+ * slot, extra properties and all, and `res.json` serialises the runtime object rather than
+ * the declared type. So every boundary must actually CALL this function. The declared types
+ * below state the intent; `publicTask` is what makes it true.
+ */
+export type PublicTask = Omit<Task, "handoffOtpHash" | "handoffOtpExpiresAt">;
+
+export function publicTask(task: Task): PublicTask {
+  const { handoffOtpHash: _hash, handoffOtpExpiresAt: _expiry, ...rest } = task;
+  return rest;
 }
 
 /** Terminal states never transition further; the reconnect snapshot uses this to decide

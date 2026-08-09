@@ -15,6 +15,7 @@ import {
   type MatchingClientEvents,
   type MatchingServerEvents,
   type MatchOffer,
+  type PublicTask,
   type Task,
   type TaskCategory,
   type TaskState,
@@ -55,10 +56,10 @@ import { claimLapsedOffer, registerMatching } from "../matching.js";
 
 type AppClient = ClientSocket<MatchingServerEvents, MatchingClientEvents>;
 type AcceptAck =
-  | { won: true; task: Task }
+  | { won: true; task: PublicTask }
   | { won: false; reason: "already-taken" | "expired" };
 type OkAck = { ok: true } | { ok: false; error: string };
-type AdvanceAck = { ok: true; task: Task } | { ok: false; error: string };
+type AdvanceAck = { ok: true; task: PublicTask } | { ok: false; error: string };
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 const REDIS_DB = 15;
@@ -190,7 +191,7 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
     [REQUESTER]: [],
   };
   const nearby: { taskId: string; count: number }[] = [];
-  const matchedReveals: { task: Task; helper: MatchedHelper }[] = [];
+  const matchedReveals: { task: PublicTask; helper: MatchedHelper }[] = [];
   /** `offer-closed` deliveries to HELPER_OK. Recorded from `beforeAll` rather than inside the
    *  expiry case, because the durable sweep fires on its own interval as soon as ANY case
    *  moves the clock past a window — subscribing late would make the assertion order-dependent
@@ -198,7 +199,7 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
   const offerClosed: { taskId: string; reason: string }[] = [];
   /** `task-updated` deliveries to the requester — the fan-out that follows a successful
    *  advance, and the thing an ack-less frame used to skip. */
-  const taskUpdates: { task: Task }[] = [];
+  const taskUpdates: { task: PublicTask }[] = [];
   /** Unhandled rejections. The `ack is not a function` throw happens inside an async socket.io
    *  handler, which swallows it — without watching here the failure is invisible to the test. */
   const rejections: unknown[] = [];
@@ -499,7 +500,7 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
     expect(acceptAck.won).toBe(true);
 
     const reveal = await withTimeout(
-      new Promise<{ task: Task; helper: MatchedHelper }>((resolve) => {
+      new Promise<{ task: PublicTask; helper: MatchedHelper }>((resolve) => {
         const existing = matchedReveals.find((m) => m.task.id === T_ETA);
         if (existing) return resolve(existing);
         helperOk.on("matched", (p) => {
@@ -535,7 +536,7 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
     expect(ack).toEqual({ ok: true });
     await settle();
 
-    const reveal = new Promise<{ task: Task; helper: MatchedHelper }>((resolve) => {
+    const reveal = new Promise<{ task: PublicTask; helper: MatchedHelper }>((resolve) => {
       helperEta.on("matched", (p) => {
         if (p.task.id === T_ETA_FALLBACK) resolve(p);
       });
@@ -654,7 +655,7 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
     await settle();
     expect(await client.sismember(keys.offerAudience(T_NO_ACK), HELPER_OK)).toBe(1);
 
-    const reveal = new Promise<{ task: Task; helper: MatchedHelper }>((resolve) => {
+    const reveal = new Promise<{ task: PublicTask; helper: MatchedHelper }>((resolve) => {
       helperOk.on("matched", (p) => {
         if (p.task.id === T_NO_ACK) resolve(p);
       });

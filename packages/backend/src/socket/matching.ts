@@ -6,6 +6,7 @@ import {
   isLiveDispatchable,
   NS,
   pairingDecision,
+  publicTask,
   taskRoleOf,
   type LatLng,
   type MatchedHelper,
@@ -370,13 +371,13 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
           return ack({ won: false, reason: settled.reason });
         }
 
-        ack({ won: true, task: settled.task });
+        ack({ won: true, task: publicTask(settled.task) });
 
         // Reveal the match to both parties.
         nsp
           .to(personalRoom(settled.task.requesterId))
           .to(personalRoom(helperId))
-          .emit("matched", { task: settled.task, helper: settled.helper });
+          .emit("matched", { task: publicTask(settled.task), helper: settled.helper });
 
         // The search is over: drop the durable expiry entry so the sweep has nothing left to
         // do for this task. `expireOffer` re-checks task state anyway, so a sweep that raced
@@ -518,12 +519,15 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
         }
 
         const updated = outcome.task;
-        ack({ ok: true, task: updated });
+        // Both go out stripped. A cancellation is reachable from `arrived`, so this path can
+        // fire while a handoff code is live — and it is broadcast to the helper.
+        const forClients = publicTask(updated);
+        ack({ ok: true, task: forClients });
 
         nsp
           .to(personalRoom(updated.requesterId))
           .to(personalRoom(updated.helperId ?? updated.requesterId))
-          .emit("task-updated", { task: updated });
+          .emit("task-updated", { task: forClients });
 
         // Cancelling a search nobody has answered yet is free and completely legitimate —
         // people change their minds. Cancelling AFTER a helper accepted means someone stopped

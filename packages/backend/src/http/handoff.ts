@@ -1,7 +1,7 @@
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 import { Router, type Response } from "express";
 import { z } from "zod";
-import { NS, type Task } from "@needy/shared";
+import { NS, publicTask, type Task } from "@needy/shared";
 import { requireAuth, type AuthedRequest } from "../auth/middleware.js";
 import { requireOnboarded } from "../auth/onboardingGate.js";
 import { validateBody } from "../auth/validation.js";
@@ -119,8 +119,15 @@ export function createHandoffRouter(deps: Deps): Router {
   function broadcast(task: Task): void {
     try {
       const nsp = deps.io.of(NS.matching);
-      nsp.to(`user:${task.requesterId}`).emit("task-updated", { task });
-      if (task.helperId) nsp.to(`user:${task.helperId}`).emit("task-updated", { task });
+      // Stripped, like every other client-facing path. Both of this function's callers happen
+      // to run when the hash is already null — the brief precedes the code, and verification
+      // clears it — but that is a property of today's call sites, not of the broadcast, and
+      // it is not a thing to leave a future caller to rediscover.
+      const forClients = publicTask(task);
+      nsp.to(`user:${task.requesterId}`).emit("task-updated", { task: forClients });
+      if (task.helperId) {
+        nsp.to(`user:${task.helperId}`).emit("task-updated", { task: forClients });
+      }
     } catch (err) {
       // A broadcast failure must not fail the request: the state change is already committed
       // and both clients resync from /snapshot on reconnect.

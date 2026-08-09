@@ -13,7 +13,7 @@ import {
   NS,
   type MatchingClientEvents,
   type MatchingServerEvents,
-  type Task,
+  type PublicTask,
 } from "@needy/shared";
 import { config, type Config } from "../../config.js";
 import { signAccessToken } from "../../auth/jwt.js";
@@ -55,7 +55,7 @@ type AppClient = ClientSocket<ServerToClient, ClientToServer>;
 
 /** The accept ack shape, mirrored from MatchingClientEvents["accept"]. */
 type AcceptAck =
-  | { won: true; task: Task }
+  | { won: true; task: PublicTask }
   | { won: false; reason: "already-taken" | "expired" };
 type RequestHelpAck = { ok: true } | { ok: false; error: string };
 

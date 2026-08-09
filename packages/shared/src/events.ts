@@ -1,6 +1,6 @@
 import type { LatLng, LocationUpdate } from "./geo.js";
 import type { Presence } from "./presence.js";
-import type { Task, TaskState } from "./task.js";
+import type { PublicTask, TaskState } from "./task.js";
 
 /** Socket.io namespace-per-concern (§2.1). Keep these as the only source of namespace
  *  strings so client and server can never disagree. */
@@ -107,7 +107,7 @@ export interface ChatServerEvents {
  *  window; first-accept-wins under a distributed lock (§2.4). */
 export interface MatchOffer {
   taskId: string;
-  category: Task["category"];
+  category: PublicTask["category"];
   origin: LatLng;
   title: string;
   distanceMeters: number;
@@ -123,7 +123,7 @@ export interface MatchingClientEvents {
   /** helper accepts an offer; ack tells them whether they won the race. */
   accept: (
     payload: { taskId: string },
-    ack: (result: { won: true; task: Task } | { won: false; reason: "already-taken" | "expired" }) => void,
+    ack: (result: { won: true; task: PublicTask } | { won: false; reason: "already-taken" | "expired" }) => void,
   ) => void;
   decline: (payload: { taskId: string }) => void;
   /** Drive a matched task through its lifecycle (matched → verifying → … → completed, or
@@ -131,7 +131,7 @@ export interface MatchingClientEvents {
    *  broadcasts `task-updated` to both parties. */
   "advance-task": (
     payload: { taskId: string; to: TaskState },
-    ack: (result: { ok: true; task: Task } | { ok: false; error: string }) => void,
+    ack: (result: { ok: true; task: PublicTask } | { ok: false; error: string }) => void,
   ) => void;
 }
 /** ── SOS (audit: previously UI-only) ───────────────────────────────────────
@@ -243,9 +243,9 @@ export interface MatchingServerEvents {
   "offer-closed": (payload: { taskId: string; reason: "already-taken" | "expired" | "cancelled" }) => void;
   /** delivered to the requester as helpers are found / when matched. */
   "helpers-nearby": (payload: { taskId: string; count: number; approxPoints: LatLng[] }) => void;
-  matched: (payload: { task: Task; helper: MatchedHelper }) => void;
+  matched: (payload: { task: PublicTask; helper: MatchedHelper }) => void;
   /** delivered to BOTH participants whenever the task's lifecycle state changes after match. */
-  "task-updated": (payload: { task: Task }) => void;
+  "task-updated": (payload: { task: PublicTask }) => void;
   error: (payload: SocketErrorPayload) => void;
 }
 
@@ -263,7 +263,7 @@ export interface MatchedHelper {
  *  On reconnect the client MUST re-sync from this REST snapshot before trusting
  *  new socket events. It is the authoritative post-drop truth. */
 export interface TaskSnapshot {
-  task: Task;
+  task: PublicTask;
   helper: MatchedHelper | null;
   lastKnownLocation: LocationUpdate | null;
   eta: { etaSeconds: number; distanceMeters: number } | null;

@@ -13,6 +13,7 @@ import {
   EXCEPTION_REVIEW_SLA_MS,
   pairingDecision,
   scheduleProblem,
+  publicTask,
 } from "@needy/shared";
 import type { DbPool } from "../db.js";
 import type { Deps } from "../domain/deps.js";
@@ -362,7 +363,7 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
           updatedAt: now,
         };
         const created = await deps.tasks.create(task);
-        res.status(201).json(created);
+        res.status(201).json(publicTask(created));
       } catch (err) {
         deps.logger.error("create task failed", { requesterId, err: String(err) });
         res.status(500).json({ error: "create task failed" });
@@ -429,7 +430,7 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
         res.status(403).json({ error: "not-a-participant" });
         return;
       }
-      res.json({ task });
+      res.json({ task: publicTask(task) });
     }),
   );
 
@@ -461,7 +462,11 @@ async function buildTaskSnapshot(deps: Deps, task: Task, callerId: string): Prom
       : null;
 
   return {
-    task,
+    // Stripped of the handoff credential. `/snapshot` is the boundary that made this
+    // exploitable rather than merely untidy: it is the reconnect path, so the HELPER's own
+    // client calls it routinely — and it returns every task they are party to, including one
+    // sitting in `arrived` with a live code. See `publicTask`.
+    task: publicTask(task),
     helper,
     lastKnownLocation,
     eta: eta ? { etaSeconds: eta.etaSeconds, distanceMeters: eta.distanceMeters } : null,

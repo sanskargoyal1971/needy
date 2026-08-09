@@ -3,6 +3,7 @@
 import { useMemo, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { RealNeedyClient, RealtimeProvider } from "@/realtime";
+import { MotionPreferencesProvider } from "@/motion/preferences";
 import { useAuth } from "@/auth/AuthProvider";
 import { AppGate } from "@/auth/AppGate";
 import { API_BASE, SUPPORT_PHONE } from "@/lib/apiConfig";
@@ -36,9 +37,16 @@ export function RequesterShell({ children }: { children: ReactNode }) {
   return (
     <AppGate>
       {driver ? (
-        <RealtimeProvider driver={driver} supportPhone={SUPPORT_PHONE}>
-          {children}
-        </RealtimeProvider>
+        // `MotionPreferencesProvider` wraps the experience because its context default is
+        // `reduced: false` — without a provider the OS's prefers-reduced-motion setting is
+        // silently ignored, and every primitive falls back to its animated branch. For an
+        // audience that skews elderly, and on screens whose whole job is a moving map and a
+        // pulsing alarm, that is not a cosmetic default to leave unmounted.
+        <MotionPreferencesProvider>
+          <RealtimeProvider driver={driver} supportPhone={SUPPORT_PHONE}>
+            {children}
+          </RealtimeProvider>
+        </MotionPreferencesProvider>
       ) : (
         // `AppGate` is already redirecting in this state; the spinner just avoids a frame of
         // nothing while it decides.
