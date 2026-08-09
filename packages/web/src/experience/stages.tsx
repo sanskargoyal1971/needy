@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   CheckCircle2,
   Copy,
@@ -184,24 +184,24 @@ export function ArrivedStage({
   task: PublicTask;
   helper: MatchedHelper | null;
 }) {
-  const [brief, setBrief] = useState<string | null>(null);
   const [code, setCode] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [issuing, setIssuing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const view = await taskClient.handoff(task.id);
-        setBrief(view.serviceBrief);
-      } catch {
-        setError("Couldn't load what your helper plans to do.");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [task.id]);
+  /**
+   * Read from the LIVE task, not from a fetch on mount.
+   *
+   * The first version called `GET /tasks/:id/handoff` once in an effect, which gets the
+   * ordering exactly backwards: the requester is already sitting on this screen watching
+   * their helper approach, and the brief is written afterwards, at the door. A one-shot read
+   * would therefore almost always find `null` and stay there — a permanently empty "what
+   * they'll do" panel and a permanently disabled code button, with nothing erroring.
+   *
+   * `POST /handoff/brief` broadcasts `task-updated` to both parties precisely so this is
+   * unnecessary; the driver patches `task` and this re-renders. Same source of truth as every
+   * other stage, which is the rule this file is built on.
+   */
+  const brief = task.serviceBrief;
 
   async function reveal() {
     setIssuing(true);
@@ -233,9 +233,7 @@ export function ArrivedStage({
           server refuses to issue one without a brief for exactly this reason. */}
       <div className="rounded-2xl border border-gray-200 bg-white p-5">
         <h3 className="font-semibold text-gray-900">What they&apos;ll do</h3>
-        {loading ? (
-          <Loader2 className="mt-2 animate-spin text-primary" aria-label="Loading" />
-        ) : brief ? (
+        {brief ? (
           <p className="mt-2 whitespace-pre-wrap text-gray-700">{brief}</p>
         ) : (
           <p className="mt-2 text-gray-500">
@@ -277,6 +275,79 @@ export function ArrivedStage({
         <p role="alert" className="text-sm text-red-700">
           {error}
         </p>
+      )}
+    </div>
+  );
+}
+
+// ── Stage 6: in progress — and the only way out of it ────────────────────────
+
+/**
+ * The work is happening. The requester is the one who says when it is finished.
+ *
+ * `TRANSITION_ACTORS["completed"]` lists the requester alone, and this screen is the only
+ * place that edge is driven from — so the button is not a convenience, it is the transition.
+ * A helper who could mark their own work complete would be closing the tracked, chattable,
+ * SOS-capable window on their own say-so, from inside the requester's home. The asymmetry is
+ * the whole point.
+ *
+ * Which is also why it confirms. One stray tap on a phone being put back in a pocket would
+ * end the safety window early and silently; the second tap costs a moment and is plainly
+ * labelled. This is the same reasoning as the alarm's two taps, pointing the other way.
+ */
+export function InProgressStage({
+  helperName,
+  onComplete,
+}: {
+  helperName: string;
+  onComplete: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+
+  return (
+    <div className="rounded-3xl border border-gray-100 bg-white p-6">
+      <h2 className="font-display text-xl font-bold text-gray-900">
+        {helperName} is helping you
+      </h2>
+      <p className="mt-1 text-gray-600">
+        Message them if you need to. Press the red button if anything feels wrong.
+      </p>
+
+      {confirming ? (
+        <div className="mt-5 rounded-2xl bg-gray-50 p-4">
+          <p className="font-medium text-gray-900">Is {helperName} finished?</p>
+          {/* Says what ends, rather than only what happens. Someone about to lose the alarm
+              and the chat deserves to be told that is what they are agreeing to. */}
+          <p className="mt-1 text-sm text-gray-600">
+            This ends the visit. You will no longer be able to message {helperName} or raise
+            an alarm from this screen.
+          </p>
+          <div className="mt-4 flex gap-3">
+            <button
+              type="button"
+              onClick={onComplete}
+              className="flex-1 rounded-xl bg-primary px-4 py-3 font-semibold text-white transition-colors hover:bg-primary-dark"
+            >
+              Yes, all done
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="rounded-xl px-4 py-3 font-medium text-gray-600 hover:text-gray-900"
+            >
+              Not yet
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-primary px-4 py-3 font-semibold text-primary transition-colors hover:bg-primary/5"
+        >
+          <CheckCircle2 size={16} aria-hidden />
+          Mark this as done
+        </button>
       )}
     </div>
   );

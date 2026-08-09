@@ -13,6 +13,7 @@ import {
   CancelledStage,
   CompletedStage,
   EnRouteStage,
+  InProgressStage,
   MatchedStage,
   SearchingStage,
   VerifyingStage,
@@ -118,14 +119,10 @@ export function TaskExperience({ taskId }: { taskId: string }) {
       )}
       {task.state === "arrived" && <ArrivedStage task={task} helper={helper} />}
       {task.state === "in-progress" && (
-        <div className="rounded-3xl border border-gray-100 bg-white p-6">
-          <h2 className="font-display text-xl font-bold text-gray-900">
-            {otherName} is helping you
-          </h2>
-          <p className="mt-1 text-gray-600">
-            Message them if you need to. Press the red button if anything feels wrong.
-          </p>
-        </div>
+        <InProgressStage
+          helperName={otherName}
+          onComplete={() => driver.advanceTo("completed")}
+        />
       )}
       {task.state === "completed" && <CompletedStage helper={helper} />}
       {task.state === "cancelled" && <CancelledStage />}
