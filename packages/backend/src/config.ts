@@ -176,6 +176,20 @@ export const config = {
        *  users behind one address, and this must not lock out a household. */
       maxPerHourPerIp: num("OTP_MAX_PER_HOUR_PER_IP", num("OTP_MAX_PER_HOUR", 5) * 4),
     },
+    /**
+     * A fixed one-time code, for development only.
+     *
+     * There is no SMS provider wired up yet — delivery is the console stub — so every sign-in
+     * currently means reading a random code out of the backend log. This makes it a known
+     * constant instead.
+     *
+     * It is exactly as dangerous as it sounds: with a fixed code, knowing someone's phone
+     * number IS their account. That is why it is not merely discouraged in production but
+     * refused — `createOtpService` throws at boot rather than starting a server where every
+     * account on the platform shares one passcode. Remove `DEV_FIXED_OTP` from the environment
+     * the moment a real SMS provider is configured.
+     */
+    devFixedOtp: process.env.DEV_FIXED_OTP ?? (isProduction ? "" : "123456"),
     /** Which OTP/SMS + KYC providers to use. "console"/"sandbox" are dev stand-ins. */
     smsProvider: process.env.SMS_PROVIDER ?? "console",
     kycProvider: process.env.KYC_PROVIDER ?? "sandbox",

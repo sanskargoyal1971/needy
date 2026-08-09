@@ -15,3 +15,13 @@ export const API_BASE: string = process.env.NEXT_PUBLIC_API_URL ?? "http://local
 /** A phone number a stuck user can actually call. Empty by default: the fallback then says
  *  "call our help line" generically rather than printing a tappable number that rings nowhere. */
 export const SUPPORT_PHONE: string = process.env.NEXT_PUBLIC_SUPPORT_PHONE ?? "";
+
+/**
+ * The fixed development sign-in code, if the backend is running with one.
+ *
+ * Mirrors the backend's `DEV_FIXED_OTP` so the sandbox note can print the actual code instead
+ * of sending someone to read a log file. It is only ever a convenience: the backend decides
+ * whether a code is accepted, and refuses to start with a fixed one in production. Setting
+ * this on the web side alone changes nothing except what the note says.
+ */
+export const DEV_FIXED_OTP: string = process.env.NEXT_PUBLIC_DEV_FIXED_OTP ?? "123456";

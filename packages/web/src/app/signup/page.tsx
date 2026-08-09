@@ -8,6 +8,7 @@ import { authClient, AuthError } from "@/lib/authClient";
 import { paths } from "@/lib/paths";
 import { normalisePhone, phoneError } from "@/lib/phone";
 import { AuthCard, Button, Field, FormError, SandboxNote, TextInput } from "@/components/ui";
+import { DEV_FIXED_OTP } from "@/lib/apiConfig";
 
 /**
  * Step 1 of signup: prove the phone number.
@@ -159,8 +160,9 @@ export default function Signup() {
           Use a different number
         </Button>
         <SandboxNote>
-          SMS delivery uses the console adapter unless Twilio credentials are configured. In
-          development the code is printed in the backend logs.
+          No SMS provider is connected yet, so every account accepts the same code:{" "}
+          <strong>{DEV_FIXED_OTP}</strong>. This is a development stand-in — the server refuses to
+          start with a fixed code in production.
         </SandboxNote>
       </form>
     </AuthCard>

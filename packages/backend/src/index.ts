@@ -8,7 +8,7 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import { NS, type MatchedHelper } from "@needy/shared";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
-import { createRedisClients } from "./redis.js";
+import { createRedisClients, type RedisClient } from "./redis.js";
 import { authMiddleware } from "./socket/auth.js";
 import { createSocketOnboardingGate } from "./socket/onboardingGate.js";
 import { registerPresence } from "./socket/presence.js";
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
   // the sandbox adapters are refused outright in production.
   const smsProvider = createSmsProvider();
   const kycProvider = createKycProvider();
-  const otpService = new OtpService(redis.client, smsProvider, config.auth.otp);
+  const otpService = createOtpService(redis.client, smsProvider);
   const authService = new AuthService({
     users: userRepo,
     sessions: sessionRepo,
@@ -455,6 +455,44 @@ async function main(): Promise<void> {
   process.on("unhandledRejection", (reason) => {
     logger.error("unhandled promise rejection", { err: reason });
   });
+}
+
+/**
+ * Build the OTP service, honouring the development fixed code.
+ *
+ * `OtpService` already took an injectable generator so tests could be deterministic; this uses
+ * the same seam for the same reason at a larger scale, while there is no SMS provider and every
+ * sign-in otherwise means reading a random code out of a log file.
+ *
+ * The production check is the important half. A fixed code means a phone number IS an account:
+ * anyone who knows a helper's number can sign in as that helper, read their chats, see the
+ * requester's address and raise or stand down an alarm. So this does not warn and continue —
+ * it refuses to construct, and the process fails to start. A guard that can be ignored is one
+ * that will be.
+ */
+function createOtpService(redis: RedisClient, sms: SmsProvider): OtpService {
+  const fixed = config.auth.devFixedOtp;
+  if (!fixed) return new OtpService(redis, sms, config.auth.otp);
+
+  if (config.isProduction) {
+    throw new Error(
+      "DEV_FIXED_OTP is set in production. Every account would share one passcode. Unset it.",
+    );
+  }
+  if (!new RegExp(`^\\d{${config.auth.otp.length}}$`).test(fixed)) {
+    throw new Error(
+      `DEV_FIXED_OTP must be ${config.auth.otp.length} digits, got "${fixed}".`,
+    );
+  }
+
+  // Loud, every boot, and at warn so it survives a log level that hides info. Someone reading
+  // the startup output of a shared environment should not have to go looking for this.
+  logger.warn(
+    "DEVELOPMENT: every account accepts the same one-time code. Anyone who knows a phone " +
+      "number can sign in as that person. Remove DEV_FIXED_OTP once SMS is configured.",
+    { code: fixed },
+  );
+  return new OtpService(redis, sms, config.auth.otp, () => fixed);
 }
 
 /** Select the SMS adapter. A misconfigured provider name must not silently degrade to

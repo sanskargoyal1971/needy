@@ -9,6 +9,7 @@ import { authClient, AuthError } from "@/lib/authClient";
 import { homeFor, paths, safeReturnTo } from "@/lib/paths";
 import { AuthCard, Button, Field, FormError, SandboxNote, TextInput } from "@/components/ui";
 import { normalisePhone, phoneError } from "@/lib/phone";
+import { DEV_FIXED_OTP } from "@/lib/apiConfig";
 
 /** Panes on one route: ask for the number, then for a code or a password. Separate routes
  *  would lose the phone number on refresh and let someone deep-link to a code prompt for a
@@ -365,8 +366,9 @@ function LoginForm() {
             it needs both.
           </p>
           <SandboxNote>
-            SMS delivery uses the console adapter unless Twilio credentials are configured. In
-            development the code is printed in the backend logs.
+            No SMS provider is connected yet, so every account accepts the same code:{" "}
+            <strong>{DEV_FIXED_OTP}</strong>. This is a development stand-in — the server refuses
+            to start with a fixed code in production.
           </SandboxNote>
         </form>
       </AuthCard>
@@ -410,8 +412,9 @@ function LoginForm() {
           Use a different number
         </Button>
         <SandboxNote>
-          SMS delivery uses the console adapter unless Twilio credentials are configured. In
-          development the code is printed in the backend logs.
+          No SMS provider is connected yet, so every account accepts the same code:{" "}
+          <strong>{DEV_FIXED_OTP}</strong>. This is a development stand-in — the server refuses to
+          start with a fixed code in production.
         </SandboxNote>
       </form>
     </AuthCard>
