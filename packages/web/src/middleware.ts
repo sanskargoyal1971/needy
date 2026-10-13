@@ -103,6 +103,11 @@ export function middleware(request: NextRequest) {
 
   // Headers that are not CSP but belong with it.
   response.headers.set("X-Content-Type-Options", "nosniff");
+  // Browsers ignore HSTS over plain HTTP, so this is inert in local development. The API sets
+  // the same header; a document origin without it can still be downgraded on first visit.
+  if (!isDev) {
+    response.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
   // `strict-origin-when-cross-origin` would still leak the origin; there is nothing on an
   // outbound link that benefits from knowing which page of this app someone came from, and
   // some of those paths contain a user id. Map tiles are the one exception and opt in to

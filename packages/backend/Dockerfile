@@ -11,7 +11,10 @@ WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/backend/package.json packages/backend/
-COPY packages/frontend/package.json packages/frontend/
+# Every workspace manifest, or `npm ci` cannot reconcile the lockfile. This used to copy
+# `packages/frontend`, a directory that stopped existing when the two front ends were merged
+# into `packages/web` — so the image had not been buildable since.
+COPY packages/web/package.json packages/web/
 # Ignore scripts during install: nothing here needs a postinstall, and running arbitrary
 # dependency scripts in an image build is avoidable attack surface.
 RUN npm ci --ignore-scripts

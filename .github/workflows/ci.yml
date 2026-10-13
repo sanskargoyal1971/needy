@@ -141,5 +141,9 @@ jobs:
           context: .
           file: packages/web/Dockerfile
           push: false
+          # Required by the Dockerfile on purpose (no localhost default). A placeholder is
+          # fine here: the image is built to prove it builds and is never pushed.
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://api.example.test
           cache-from: type=gha
           cache-to: type=gha,mode=max

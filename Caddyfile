@@ -1,0 +1,30 @@
+# TLS termination for the production stack (docker-compose.prod.yml).
+#
+# Caddy obtains and renews certificates from Let's Encrypt by itself, so both names below must
+# already resolve to this host before the stack starts. Two names, one registrable domain:
+# the browser treats the app and the API as same-site, which is what lets the SameSite=Strict
+# session cookies travel between them.
+
+{
+	email {$ACME_EMAIL}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+}
+
+{$DOMAIN} {
+	import security_headers
+	encode zstd gzip
+	reverse_proxy web:3000
+}
+
+api.{$DOMAIN} {
+	import security_headers
+	# Socket.io upgrades to a WebSocket on this same name; reverse_proxy handles the upgrade.
+	reverse_proxy backend:4000
+}
