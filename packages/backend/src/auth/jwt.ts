@@ -12,18 +12,36 @@ export interface AuthClaims {
   kyc?: KycStatus;
 }
 
+/** Pinned on both sides. `jsonwebtoken` would otherwise accept any HMAC variant the token's
+ *  own header names; the verifier should not take its algorithm from the thing it verifies. */
+const ALGORITHM = "HS256" as const;
+
 export function signAccessToken(
   claims: AuthClaims,
   ttlSeconds = config.auth.accessTtlSeconds,
 ): string {
-  return jwt.sign(claims, config.jwtSecret, { expiresIn: ttlSeconds });
+  return jwt.sign(claims, config.jwtSecret, { expiresIn: ttlSeconds, algorithm: ALGORITHM });
 }
 
-/** Returns claims or null. Never throws — callers decide how to reject. */
+/** Verify against the current key, then the previous one if a rotation is in progress. Tokens
+ *  are only ever SIGNED with the current key, so the previous key ages out within one access
+ *  token lifetime and can then be removed. */
+function verifyWithKnownKeys(token: string): string | jwt.JwtPayload | null {
+  const keys = [config.jwtSecret, config.jwtSecretPrevious].filter(Boolean);
+  for (const key of keys) {
+    try {
+      return jwt.verify(token, key, { algorithms: [ALGORITHM] });
+    } catch {
+      // try the next key
+    }
+  }
+  return null;
+}
+
 export function verifyAccessToken(token: string): AuthClaims | null {
   try {
-    const decoded = jwt.verify(token, config.jwtSecret);
-    if (typeof decoded === "string") return null;
+    const decoded = verifyWithKnownKeys(token);
+    if (decoded === null || typeof decoded === "string") return null;
     const { sub, role, displayName, kyc } = decoded as jwt.JwtPayload & Partial<AuthClaims>;
     if (typeof sub !== "string" || !isRole(role)) return null;
     return {

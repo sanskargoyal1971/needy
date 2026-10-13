@@ -14,6 +14,7 @@ import {
 import { config } from "../../config.js";
 import { signAccessToken } from "../../auth/jwt.js";
 import type { Deps } from "../../domain/deps.js";
+import { getTaskLocation, setTaskLocation } from "../../domain/location-store.js";
 import type { RedisClient, RedisClients } from "../../redis.js";
 import type { Logger } from "../../logger.js";
 import {
@@ -187,8 +188,24 @@ describe("/matching advance-task lifecycle guard", () => {
 
     // Move to in-progress the only way there is, so `completed` (requester-only) is reachable.
     await tasks.update(TASK_ID, { state: "in-progress", updatedAt: 1_700_000_050_000 });
+
+    // The helper's last reported position is in Redis while the task is live…
+    const redisClient = mock as unknown as RedisClient;
+    await setTaskLocation(redisClient, TASK_ID, {
+      lat: 12.97,
+      lng: 77.59,
+      heading: 0,
+      speedMps: 1,
+      at: 1_700_000_040_000,
+    });
+    expect(await getTaskLocation(redisClient, TASK_ID)).not.toBeNull();
+
     const closed = await advance(requester, "completed");
     expect(closed.ok).toBe(true);
+
+    // …and is gone the moment it ends. It used to sit there for the rest of a four-hour TTL:
+    // location sharing is scoped to the active task, and "active" has to mean something.
+    expect(await getTaskLocation(redisClient, TASK_ID)).toBeNull();
 
     // Give the broadcasts a tick to arrive. The out-of-band `in-progress` write above is a
     // repository call, not an advance, so it broadcasts nothing — hence `completed` follows

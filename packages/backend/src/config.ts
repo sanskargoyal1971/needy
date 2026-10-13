@@ -30,8 +30,18 @@ function numList(name: string, fallback: number[]): number[] {
 /** True when running as a real deployment. Drives the fail-fast secret checks below and the
  *  mounting of dev-only routes (audit A4: `config.env` existed but was read NOWHERE, so
  *  /dev/token — which mints a token for any userId and role — shipped unconditionally). */
-const nodeEnv = process.env.NODE_ENV ?? "development";
-const isProduction = nodeEnv === "production";
+/**
+ * An UNSET `NODE_ENV` is production.
+ *
+ * It used to default to "development", which is the dangerous direction: development mounts
+ * `/dev/token` (a token for any user id and role) and makes one fixed code open every account.
+ * A deploy that simply forgot the variable therefore came up wide open and looked healthy.
+ * Development is now something you say out loud — the `dev` script and `.env.example` both
+ * do — and forgetting it produces a process that refuses to start for want of real secrets,
+ * which is the failure you can see.
+ */
+const nodeEnv = process.env.NODE_ENV || "production";
+const isProduction = nodeEnv !== "development" && nodeEnv !== "test";
 
 const DEV_JWT_SECRET = "dev-only-change-me";
 
@@ -81,6 +91,10 @@ export const config = {
     .map((o) => o.trim())
     .filter(Boolean),
   jwtSecret: requireSecret("JWT_SECRET", process.env.JWT_SECRET, DEV_JWT_SECRET),
+  /** The key being rotated OUT. Accepted for verification only, never used to sign; set it to
+   *  the old `JWT_SECRET` while deploying a new one, and remove it an access-token lifetime
+   *  later. Empty means no rotation is in progress. */
+  jwtSecretPrevious: process.env.JWT_SECRET_PREVIOUS ?? "",
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
   databaseUrl: process.env.DATABASE_URL ?? "",
   match: {

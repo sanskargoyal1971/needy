@@ -109,7 +109,22 @@ describe("staff administration", () => {
   });
 
   it("refuses an ordinary user and an anonymous caller", async () => {
+    // A real, approved, ordinary account — staff authority is read from the row, so "ordinary"
+    // has to mean an account that exists and is not staff.
+    await users.create(
+      makeUser({
+        id: "nobody",
+        phone: "+919000000321",
+        displayName: "Nobody",
+        role: "requester",
+        onboardingStatus: "approved",
+      }),
+    );
     expect((await as(request(app).get("/admin/staff"), "nobody", "requester")).status).toBe(403);
+    // And a token that merely CLAIMS super_admin for that account gets no further.
+    expect((await as(request(app).get("/admin/staff"), "nobody", "super_admin")).status).toBe(403);
+    // An account that does not exist is not authenticated at all.
+    expect((await as(request(app).get("/admin/staff"), "ghost", "super_admin")).status).toBe(401);
     expect((await request(app).get("/admin/staff")).status).toBe(401);
   });
 

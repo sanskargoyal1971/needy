@@ -8,6 +8,10 @@ import { burnVerification, hashPassword, verifyPassword } from "./password.js";
 import { makeUser, type User } from "./types.js";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+/** How long after a rotation a second presentation of the old refresh token is treated as a
+ *  race between the user's own tabs rather than as theft. */
+const REFRESH_REUSE_GRACE_MS = 10_000;
 const defaultName = (phone: string) => `User ${phone.slice(-4)}`;
 
 export interface AuthServiceDeps {
@@ -183,10 +187,30 @@ export class AuthService {
   async refresh(refreshToken: string, userAgent: string): Promise<IssuedTokens | null> {
     const now = this.deps.now();
     const session = await this.deps.sessions.getByHash(sha256(refreshToken));
-    if (!session || session.revokedAt != null || session.expiresAt < now) return null;
+    if (!session) return null;
+
+    if (session.revokedAt != null) {
+      // A refresh token that was already rotated is being presented again. Either two tabs
+      // raced (harmless, and recent) or a copy of the token is in someone else's hands. Past
+      // a short grace window there is no innocent explanation, and the thief may be the one
+      // holding the *current* token — so every session for the account ends and the real
+      // owner signs in again.
+      if (now - session.revokedAt > REFRESH_REUSE_GRACE_MS) {
+        await this.deps.sessions.revokeAllForUser(session.userId, now);
+      }
+      return null;
+    }
+    if (session.expiresAt < now) return null;
+
     const user = await this.deps.users.getById(session.userId);
-    if (!user) return null;
-    await this.deps.sessions.revoke(session.id, now); // rotate
+    // A blocked account does not get a new access token. Blocking already revokes sessions;
+    // this is the same rule stated where the token is minted.
+    if (!user || user.blockedAt != null) return null;
+
+    // Rotate. Only the call that actually flips the row may issue — two concurrent refreshes
+    // used to both read "not revoked" and both walk away with a live session.
+    const rotated = await this.deps.sessions.revoke(session.id, now);
+    if (!rotated) return null;
     return this.issue(user, userAgent);
   }
 

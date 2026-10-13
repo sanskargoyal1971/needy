@@ -6,6 +6,7 @@ import {
   canTransition,
   HELPER_SHARE_PERCENT,
   isLiveDispatchable,
+  isTerminal,
   NS,
   pairingDecision,
   publicTask,
@@ -25,6 +26,7 @@ import { emitSignal } from "../domain/abuseStore.js";
 import type { Deps, NamespaceRegistrar } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
 import { freshHelperIds, getTaskLocation, removeHelperGeo } from "../domain/location-store.js";
+import { clearTaskLocation } from "../domain/location-store.js";
 import { readPresence } from "../domain/presence-store.js";
 import { computeEta } from "../services/eta.js";
 import { withLock } from "../services/lock.js";
@@ -556,6 +558,14 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
           await closeCancelledOffer(deps, nsp, taskId);
         }
 
+        // Location sharing is scoped to the active task (AGENTS.md: "auto-revoke on
+        // completion or cancellation"). The helper's last position used to stay readable in
+        // Redis for the rest of its four-hour TTL after the task was over; `clearTaskLocation`
+        // existed for exactly this and nothing called it.
+        if (isTerminal(updated.state)) {
+          await clearTaskLocation(client, taskId);
+        }
+
         // Credit the helper their share of the task price on completion.
         if (updated.state === "completed" && updated.helperId != null && updated.price > 0) {
           // Calculate helper share: Math.floor prevents fractional paisa issues
@@ -1055,9 +1065,15 @@ async function broadcastWave(
     const offer: MatchOffer = {
       taskId: task.id,
       category: task.category,
-      origin: task.origin,
+      // APPROXIMATE, both of them. An offer goes to every eligible helper in range, almost
+      // all of whom will never take the task — and this used to hand each of them the
+      // requester's exact coordinates, while the request form promised "helpers only see a
+      // rough area until one of them accepts". The exact origin is in the task returned to
+      // the ONE helper whose accept wins. The distance is rounded as well: an exact distance
+      // from a known position, together with a 110 m cell, narrows to a doorstep.
+      origin: { lat: coarsen(task.origin.lat), lng: coarsen(task.origin.lng) },
       title: task.title,
-      distanceMeters: c.distanceMeters,
+      distanceMeters: Math.max(100, Math.round(c.distanceMeters / 100) * 100),
       expiresAt,
     };
     nsp.to(personalRoom(c.helperId)).emit("offer", offer);

@@ -62,13 +62,23 @@ export class OtpService {
    * auth/router.ts, which reads it from `req.ip`) rather than this service reaching for a
    * request object, so the limiter stays a pure function of its inputs and is testable.
    */
+  /** Increment a windowed counter. The TTL is (re)applied whenever the key has none, not only
+   *  on the first increment: a process that died between INCR and EXPIRE used to leave a
+   *  counter with no expiry, which for these keys is a permanent lockout. */
+  private async bump(key: string): Promise<number> {
+    const n = await this.redis.incr(key);
+    if (n === 1 || (await this.redis.ttl(key)) < 0) {
+      await this.redis.expire(key, WINDOW_SECONDS);
+    }
+    return n;
+  }
+
   async request(phone: string, ip: string): Promise<RequestResult> {
     // Per-IP hourly cap, charged FIRST and charged even when the phone cap also trips: a
     // bomber cycling numbers must not get free IP budget for the attempts a phone limiter
     // happened to absorb.
     const ipKey = ipRequestsKey(ip || "unknown");
-    const ipReqs = await this.redis.incr(ipKey);
-    if (ipReqs === 1) await this.redis.expire(ipKey, WINDOW_SECONDS);
+    const ipReqs = await this.bump(ipKey);
     // Return BEFORE touching the per-phone counter. Charging the phone's budget for a request
     // we are about to refuse would let one blocked host burn every user's hourly OTP allowance
     // (the phone counter kept climbing while the caller got a 429), i.e. deny logins to
@@ -76,12 +86,16 @@ export class OtpService {
     if (ipReqs > this.maxPerHourPerIp) return { ok: false, reason: "rate-limited", scope: "ip" };
 
     // Per-phone hourly request cap.
-    const reqs = await this.redis.incr(requestsKey(phone));
-    if (reqs === 1) await this.redis.expire(requestsKey(phone), WINDOW_SECONDS);
+    const reqs = await this.bump(requestsKey(phone));
     if (reqs > this.config.maxPerHour) return { ok: false, reason: "rate-limited", scope: "phone" };
 
     const code = this.generateCode();
     await this.redis.set(codeKey(phone), hash(code), "EX", this.config.ttlSeconds);
+    // The attempt counter is deliberately NOT reset here (audit C15). Resetting it would
+    // multiply the guessing budget by the number of codes a caller may request. The cost is
+    // that a stranger can spend a number's attempts and lock its owner out for the window;
+    // that is the cheaper failure — a locked-out owner still has a password or can wait, a
+    // guessed code is an account. The per-IP limit on verification is what bounds the abuse.
     // Audit C15 — a `del(attemptsKey)` used to live here, which handed the attacker their
     // attempt budget back for the price of one more OTP request: 5 codes/hour × 5 attempts = 25
     // guesses against a 6-digit code instead of the 5 the cap advertises. The attempt counter is
@@ -101,8 +115,7 @@ export class OtpService {
     // forever, learn from the `expired`/`invalid` split exactly when a real code existed for
     // that number, and only then start spending their (also resettable) attempt budget. The
     // charge is now unconditional and happens first, so every call costs.
-    const attempts = await this.redis.incr(attemptsKey(phone));
-    if (attempts === 1) await this.redis.expire(attemptsKey(phone), WINDOW_SECONDS);
+    const attempts = await this.bump(attemptsKey(phone));
     if (attempts > this.config.maxAttempts) {
       // Burn any live code, but NEVER the attempts counter — deleting it here was the other
       // half of the reset bug, since hitting the cap silently restored a full budget.

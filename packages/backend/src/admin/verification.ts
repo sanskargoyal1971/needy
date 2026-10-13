@@ -3,7 +3,7 @@ import { z } from "zod";
 import { DOCUMENT_LABELS, isOnboardingStatus, REQUIRED_DOCUMENTS } from "@needy/shared";
 import type { AuditLogger } from "../audit/log.js";
 import { readAuditLog } from "../audit/log.js";
-import { requireAuth, requireRole, type AuthedRequest } from "../auth/middleware.js";
+import { requireAuth, requireStaff, type AuthedRequest } from "../auth/middleware.js";
 import type { PhoneBlockRepository } from "../auth/phoneBlocks.js";
 import type { SessionRepository, UserRepository } from "../auth/repos.js";
 import type { User } from "../auth/types.js";
@@ -35,6 +35,9 @@ import type { AdminUserQueries } from "./verificationRepo.js";
  */
 
 export interface VerificationRouterDeps {
+  /** Close the account's live sockets. Revoking sessions stops the next sign-in; this ends the
+   *  connection that is already open. Optional so a router test need not stand up Socket.io. */
+  disconnectUser?: (userId: string) => Promise<unknown>;
   users: UserRepository;
   sessions: SessionRepository;
   documents: KycDocumentRepository;
@@ -96,7 +99,7 @@ function packetView(user: User) {
 
 export function createVerificationRouter(deps: VerificationRouterDeps): Router {
   const router = Router();
-  const adminOnly = [requireAuth, requireRole("admin")] as const;
+  const adminOnly = [requireAuth, requireStaff(deps.users, "admin")] as const;
   const ip = (req: Request) => req.ip ?? req.socket?.remoteAddress ?? null;
 
   // ── the review queue ───────────────────────────────────────────────────────
@@ -301,6 +304,7 @@ export function createVerificationRouter(deps: VerificationRouterDeps): Router {
       // already refused on their next request, but their refresh token would otherwise keep
       // minting fresh access tokens indefinitely — the block has to reach the credential too.
       await deps.sessions.revokeAllForUser(user.id, now);
+      await deps.disconnectUser?.(user.id);
 
       await deps.audit.record({
         action: "onboarding.rejected",
@@ -351,6 +355,7 @@ export function createVerificationRouter(deps: VerificationRouterDeps): Router {
       });
       if (body.blockPhone) await deps.phoneBlocks.block(user.phone, body.reason, adminId, now);
       await deps.sessions.revokeAllForUser(user.id, now);
+      await deps.disconnectUser?.(user.id);
 
       await deps.audit.record({
         action: "admin.user_blocked",

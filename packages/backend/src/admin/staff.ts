@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { AuditLogger } from "../audit/log.js";
-import { requireAuth, requireRole, type AuthedRequest } from "../auth/middleware.js";
+import { requireAuth, requireStaff, type AuthedRequest } from "../auth/middleware.js";
 import { hashPassword, passwordProblem, PASSWORD_MIN_LENGTH } from "../auth/password.js";
 import type { SessionRepository, UserRepository } from "../auth/repos.js";
 import { makeUser, type User } from "../auth/types.js";
@@ -42,6 +42,9 @@ const deactivateSchema = z.object({
 });
 
 export interface StaffRouterDeps {
+  /** Close the account's live sockets. Revoking sessions stops the next sign-in; this ends the
+   *  connection that is already open. Optional so a router test need not stand up Socket.io. */
+  disconnectUser?: (userId: string) => Promise<unknown>;
   users: UserRepository;
   sessions: SessionRepository;
   audit: AuditLogger;
@@ -73,7 +76,7 @@ function staffView(u: User) {
 
 export function createStaffRouter(deps: StaffRouterDeps): Router {
   const router = Router();
-  const superAdminOnly = [requireAuth, requireRole("super_admin")] as const;
+  const superAdminOnly = [requireAuth, requireStaff(deps.users, "super_admin")] as const;
   const ip = (req: Request) => req.ip ?? req.socket?.remoteAddress ?? null;
 
   // ── who the operators are ──────────────────────────────────────────────────
@@ -221,6 +224,7 @@ export function createStaffRouter(deps: StaffRouterDeps): Router {
         updatedAt: now,
       });
       await deps.sessions.revokeAllForUser(user.id, now);
+      await deps.disconnectUser?.(user.id);
 
       await deps.audit.record({
         action: "admin.user_blocked",

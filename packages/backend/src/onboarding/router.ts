@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { uploadSlot } from "../services/uploadSlots.js";
 import busboy from "busboy";
 import { Router, type Request, type Response } from "express";
 import { nanoid } from "nanoid";
@@ -257,6 +258,7 @@ export function createOnboardingRouter(deps: OnboardingDeps): Router {
   router.post(
     "/onboarding/documents",
     requireAuth,
+    uploadSlot,
     asyncRoute(async (req: AuthedRequest, res: Response) => {
       const loaded = await loadEditable(req, res);
       if (!loaded) return;

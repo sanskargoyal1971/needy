@@ -1,3 +1,4 @@
+import { uploadSlot } from "../services/uploadSlots.js";
 import busboy from "busboy";
 import { Router, type Request, type Response } from "express";
 import { nanoid } from "nanoid";
@@ -9,7 +10,7 @@ import {
   pairingDecision,
 } from "@needy/shared";
 import type { AuditLogger } from "../audit/log.js";
-import { requireAuth, requireRole, type AuthedRequest } from "../auth/middleware.js";
+import { requireAuth, requireStaff, type AuthedRequest } from "../auth/middleware.js";
 import { requireOnboarded } from "../auth/onboardingGate.js";
 import type { UserRepository } from "../auth/repos.js";
 import { validateBody } from "../auth/validation.js";
@@ -122,7 +123,7 @@ function readVideo(
 export function createExceptionRouter(deps: ExceptionRouterDeps): Router {
   const router = Router();
   const gate = requireOnboarded({ users: deps.users });
-  const adminOnly = [requireAuth, requireRole("admin")] as const;
+  const adminOnly = [requireAuth, requireStaff(deps.users, "admin")] as const;
   const ip = (req: Request) => req.ip ?? req.socket?.remoteAddress ?? null;
 
   // ── open a request ─────────────────────────────────────────────────────────
@@ -200,6 +201,7 @@ export function createExceptionRouter(deps: ExceptionRouterDeps): Router {
     "/exceptions/:id/video",
     requireAuth,
     gate,
+    uploadSlot,
     asyncRoute(async (req: AuthedRequest, res: Response) => {
       const userId = req.user!.sub;
       const exception = await deps.exceptions.getById(req.params.id);

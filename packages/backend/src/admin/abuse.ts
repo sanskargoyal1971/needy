@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { ABUSE_WINDOW_MS, type AbuseRollup } from "@needy/shared";
-import { requireAuth, requireRole, type AuthedRequest } from "../auth/middleware.js";
+import { requireAuth, requireStaff, type AuthedRequest } from "../auth/middleware.js";
 import { validateBody } from "../auth/validation.js";
 import type { Deps } from "../domain/deps.js";
 import { asyncRoute } from "../http/asyncRoute.js";
@@ -35,7 +35,7 @@ const reviewSchema = z.object({
 
 export function createAbuseRouter(deps: Deps): Router {
   const router = Router();
-  const adminOnly = [requireAuth, requireRole("admin")] as const;
+  const adminOnly = [requireAuth, requireStaff(deps.users, "admin")] as const;
   const ip = (req: Request) => req.ip ?? req.socket?.remoteAddress ?? null;
 
   // ── the queue ──────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { NS, type SosAlert, type SosStatus } from "@needy/shared";
-import { requireAuth, requireRole, type AuthedRequest } from "../auth/middleware.js";
+import { requireAuth, requireStaff, type AuthedRequest } from "../auth/middleware.js";
 import { validateBody } from "../auth/validation.js";
 import type { Deps } from "../domain/deps.js";
 import { asyncRoute } from "../http/asyncRoute.js";
@@ -67,7 +67,7 @@ interface PartyView {
 
 export function createSosAdminRouter(deps: Deps): Router {
   const router = Router();
-  const adminOnly = [requireAuth, requireRole("admin")] as const;
+  const adminOnly = [requireAuth, requireStaff(deps.users, "admin")] as const;
   const ip = (req: Request) => req.ip ?? req.socket?.remoteAddress ?? null;
 
   /** Hydrate alerts with their task and both participants.

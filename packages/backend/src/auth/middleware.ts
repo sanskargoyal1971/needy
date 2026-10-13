@@ -1,4 +1,4 @@
-import type { NextFunction, Request, Response } from "express";
+import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { verifyAccessToken, type AuthClaims } from "./jwt.js";
 import { ACCESS_COOKIE, parseCookies } from "./cookies.js";
 import type { Role } from "./types.js";
@@ -61,5 +61,48 @@ export function requireRole(required: Role) {
       return;
     }
     next();
+  };
+}
+
+/**
+ * Require a member of staff, decided by the DATABASE.
+ *
+ * `requireRole` reads the role out of the access token, which stays valid for its whole
+ * lifetime. For participant routes that is a small window on a small privilege. For the admin
+ * surface it meant an operator who had just been demoted or deactivated kept the verification
+ * console — every applicant's ID, the SOS feed — until their token happened to expire. Staff
+ * authority is the one thing that must be withdrawn the moment someone withdraws it, so it is
+ * read from the row each time. One primary-key lookup per admin request.
+ *
+ * Chain AFTER `requireAuth`. Fails closed: no account, a blocked account, or a role below
+ * `required` are all refused.
+ */
+export function requireStaff(
+  users: { getById(id: string): Promise<{ role: Role; blockedAt: number | null } | null> },
+  required: "admin" | "super_admin" = "admin",
+): RequestHandler {
+  return (req, res, next) => {
+    const claims = (req as AuthedRequest).user;
+    if (!claims) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    users
+      .getById(claims.sub)
+      .then((user) => {
+        if (!user || user.blockedAt != null) {
+          res.status(401).json({ error: "unauthorized" });
+          return;
+        }
+        const isStaff = user.role === "admin" || user.role === "super_admin";
+        if (!isStaff || !satisfiesRole(user.role, required)) {
+          res.status(403).json({ error: "forbidden", required });
+          return;
+        }
+        // Downstream handlers read the role from here; make it the current one.
+        claims.role = user.role;
+        next();
+      })
+      .catch(next);
   };
 }

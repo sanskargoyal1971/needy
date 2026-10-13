@@ -102,6 +102,10 @@ const PASSWORD_LOGIN_IP_LIMIT: RateLimit = { capacity: 20, ratePerSec: 1 / 30 };
  *  a standing ticket. */
 const MFA_PENDING_TTL_MS = 5 * 60 * 1000;
 
+/** Verification attempts from one address. Generous for a household or an office behind one
+ *  NAT — thirty in a burst — and useless for a script. */
+const OTP_VERIFY_IP_LIMIT: RateLimit = { capacity: 30, ratePerSec: 30 / 3600 };
+
 /** How long a started verification stays claimable. A provider may take a while (document
  *  review, manual escalation), but an unbounded nonce is a permanently valid ticket. */
 const KYC_NONCE_TTL_SECONDS = 86_400;
@@ -241,12 +245,43 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
     validateBody(otpVerifySchema),
     asyncRoute(async (req, res) => {
       const { phone, code } = req.body as { phone: string; code: string };
+
+      // Guessing is bounded per code, but nothing bounded one source walking many numbers —
+      // or burning other people's attempt budgets one phone at a time.
+      const withinIp = await consumeToken(
+        deps.redis,
+        keys.bucket("otp-verify-ip", clientIp(req)),
+        OTP_VERIFY_IP_LIMIT,
+        deps.now(),
+      );
+      if (!withinIp) {
+        logger.warn("otp verify rate-limited", { scope: "ip" });
+        res.status(429).json({ error: "too-many-attempts" });
+        return;
+      }
+
       try {
         const check = await deps.otp.verify(phone, code);
         if (!check.ok) {
           res.status(401).json({ error: "otp-invalid", reason: check.reason });
           return;
         }
+
+        // ── staff do not sign in on a one-time code alone ──────────────────────
+        // The password route makes an admin present a password AND a code. This route then
+        // issued the same session for the code by itself, to any role — so the second factor
+        // was optional for exactly the accounts it exists to protect, and a SIM swap on one
+        // operator's number was the whole verification console.
+        //
+        // Checked AFTER the code verifies, not before: refusing up front would tell anyone
+        // who types a number whether it belongs to a member of staff.
+        const existing = await deps.users.getByPhone(phone);
+        if (existing && (existing.role === "admin" || existing.role === "super_admin")) {
+          logger.warn("otp-only sign-in refused for a staff account", { userId: existing.id });
+          res.status(403).json({ error: "password-required" });
+          return;
+        }
+
         const issued = await deps.auth.loginWithPhone(phone, ua(req));
         setAuthCookies(res, issued.accessToken, issued.refreshToken);
         // Rotate the CSRF token as part of establishing the session, and return it so the

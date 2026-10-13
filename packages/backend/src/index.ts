@@ -11,6 +11,7 @@ import { logger } from "./logger.js";
 import { createRedisClients, type RedisClient } from "./redis.js";
 import { authMiddleware } from "./socket/auth.js";
 import { createSocketOnboardingGate } from "./socket/onboardingGate.js";
+import { disconnectUserSockets } from "./socket/disconnect.js";
 import { registerPresence } from "./socket/presence.js";
 import { registerTracking } from "./socket/tracking.js";
 import { registerMatching } from "./socket/matching.js";
@@ -227,6 +228,10 @@ async function main(): Promise<void> {
     now,
   };
 
+  // Reads `deps.io` when CALLED, not when defined: the routers that use this are built before
+  // the Socket.io server exists, and can only be reached after it does.
+  const disconnectUser = (userId: string) => disconnectUserSockets(deps.io, userId);
+
   // ── HTTP ───────────────────────────────────────────────────────────────────
   const app = express();
   // ── security headers ──────────────────────────────────────────────────────
@@ -328,6 +333,7 @@ async function main(): Promise<void> {
       auth: authService,
       pool,
       now,
+      disconnectUser,
     }),
   );
   app.use(
@@ -337,6 +343,7 @@ async function main(): Promise<void> {
       audit,
       listStaff,
       now,
+      disconnectUser,
     }),
   );
   app.use(
@@ -374,6 +381,18 @@ async function main(): Promise<void> {
   // ── Socket.io ────────────────────────────────────────────────────────────
   const io = new IOServer(httpServer, {
     cors: { origin: config.corsOrigins },
+    // CORS does not apply to a WebSocket upgrade — a browser will open one to any origin and
+    // attach whatever cookies it is allowed to. SameSite=Strict is what currently stops a
+    // hostile page riding a signed-in user's session; this is the second lock, so that
+    // protection does not rest on one cookie attribute. A request with NO Origin is not a
+    // browser (the dev scripts, tests, a future native app) and carries no ambient cookie.
+    allowRequest: (req, callback) => {
+      const origin = req.headers.origin;
+      const allowed = origin == null || config.corsOrigins.includes(origin);
+      if (!allowed)
+        logger.warn("refused a socket handshake from an unrecognised origin", { origin });
+      callback(null, allowed);
+    },
   });
   deps.io = io;
 

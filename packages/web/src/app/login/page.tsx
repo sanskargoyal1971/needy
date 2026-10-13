@@ -426,6 +426,12 @@ function describe(err: unknown): string {
     switch (err.code) {
       case "too-many-requests":
         return "Too many attempts. Please wait a while before trying again.";
+      case "too-many-attempts":
+        return "Too many attempts. Please wait a while before trying again.";
+      case "password-required":
+        // Staff accounts need a password as well as a code. Said only after the code was
+        // correct, so it reveals nothing to someone who is merely guessing numbers.
+        return "This account signs in with a password. Choose “Use my password instead”, or “Staff sign-in” below.";
       case "phone-blocked":
         return "This number can no longer be used on Needy. Contact support if you believe this is a mistake.";
       case "network-unreachable":

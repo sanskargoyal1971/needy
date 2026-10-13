@@ -41,7 +41,9 @@ export interface UserRepository {
 export interface SessionRepository {
   create(session: Session): Promise<Session>;
   getByHash(hash: string): Promise<Session | null>;
-  revoke(id: string, at: number): Promise<void>;
+  /** Revoke one session. Resolves `true` only for the call that actually flipped it, so two
+   *  concurrent rotations of the same refresh token cannot both proceed. */
+  revoke(id: string, at: number): Promise<boolean>;
   revokeAllForUser(userId: string, at: number): Promise<void>;
 }
 
@@ -123,7 +125,9 @@ export function createInMemorySessionRepo(): SessionRepository {
     },
     async revoke(id, at) {
       const s = byId.get(id);
-      if (s && s.revokedAt == null) byId.set(id, { ...s, revokedAt: at });
+      if (!s || s.revokedAt != null) return false;
+      byId.set(id, { ...s, revokedAt: at });
+      return true;
     },
     async revokeAllForUser(userId, at) {
       for (const [id, s] of byId) {
@@ -370,10 +374,11 @@ export function createPgSessionRepo(pool: DbPool): SessionRepository {
       return rows[0] ? rowToSession(rows[0]) : null;
     },
     async revoke(id, at) {
-      await pool.query(`UPDATE sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL`, [
-        id,
-        at,
-      ]);
+      const res = await pool.query(
+        `UPDATE sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL`,
+        [id, at],
+      );
+      return (res.rowCount ?? 0) > 0;
     },
     async revokeAllForUser(userId, at) {
       await pool.query(

@@ -254,6 +254,15 @@ describe("matching: radius escalation, eligibility and service filters", () => {
     // refusal rather than the whole city racing for a job next door to someone else.
     await sleep(150);
     expect(nearOffers.length, "near should be offered immediately").toBeGreaterThan(0);
+
+    // An offer goes to people who will mostly never take the task, so it carries a rough
+    // place and a rounded distance — not the requester's coordinates. ORIGIN has four decimal
+    // places; an offer that echoed it would compare equal here.
+    const offered = nearOffers[0]!;
+    expect(offered.origin).not.toEqual(ORIGIN);
+    expect(offered.origin.lat).toBeCloseTo(ORIGIN.lat, 2);
+    expect(offered.origin.lat).toBe(Math.round(ORIGIN.lat * 1000) / 1000);
+    expect(offered.distanceMeters % 100).toBe(0);
     expect(midOffers, "mid is outside 1km on wave 0").toHaveLength(0);
     expect(farOffers).toHaveLength(0);
 

@@ -2,7 +2,7 @@ import { Router, type Response } from "express";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { CATEGORY_PRICING, HELPER_SHARE_PERCENT, type HelperApplication } from "@needy/shared";
-import { requireAuth, requireRole, type AuthedRequest } from "../auth/middleware.js";
+import { requireAuth, requireRole, requireStaff, type AuthedRequest } from "../auth/middleware.js";
 import type { UserRepository } from "../auth/repos.js";
 import type { HelperApplicationRepository } from "./repos.js";
 import type { HelperProfileRepository, TaskRepository } from "../domain/stores.js";
@@ -136,7 +136,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   router.get(
     "/admin/applications",
     requireAuth,
-    requireRole("admin"),
+    requireStaff(deps.users, "admin"),
     asyncRoute(async (_req: AuthedRequest, res: Response) => {
       const applications = await deps.applications.listAll();
       res.json({ applications });
@@ -147,7 +147,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   router.get(
     "/admin/applications/:id",
     requireAuth,
-    requireRole("admin"),
+    requireStaff(deps.users, "admin"),
     asyncRoute(async (req: AuthedRequest, res: Response) => {
       const app = await deps.applications.getById(req.params.id);
       if (!app) {
@@ -162,7 +162,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   router.post(
     "/admin/applications/:id/review",
     requireAuth,
-    requireRole("admin"),
+    requireStaff(deps.users, "admin"),
     validateBody(reviewSchema),
     asyncRoute(async (req: AuthedRequest, res: Response) => {
       const adminId = req.user!.sub;
@@ -228,7 +228,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   router.get(
     "/admin/users",
     requireAuth,
-    requireRole("admin"),
+    requireStaff(deps.users, "admin"),
     asyncRoute(async (_req: AuthedRequest, res: Response) => {
       try {
         if (deps.pool) {
@@ -259,7 +259,7 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
   router.get(
     "/admin/stats",
     requireAuth,
-    requireRole("admin"),
+    requireStaff(deps.users, "admin"),
     asyncRoute(async (_req: AuthedRequest, res: Response) => {
       try {
         if (deps.pool) {
