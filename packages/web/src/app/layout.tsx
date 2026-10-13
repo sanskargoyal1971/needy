@@ -19,7 +19,7 @@ const merriweather = Merriweather({
 
 export const metadata: Metadata = {
   title: "Needy | Immediate, verified assistance",
-  description: "A hyperlocal trust platform that connects people who need immediate, verified assistance with background-verified local helpers.",
+  description: "A hyperlocal trust platform that connects people who need immediate, verified assistance with ID-verified local helpers.",
 };
 
 export default function RootLayout({

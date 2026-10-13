@@ -384,7 +384,7 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
                     title, description, price, created_at, updated_at
              FROM tasks
              WHERE (requester_id = $1 OR helper_id = $1)
-               AND state IN ('completed', 'cancelled')
+               AND state IN ('completed', 'cancelled', 'unmatched')
              ORDER BY updated_at DESC
              LIMIT 50`,
             [userId],

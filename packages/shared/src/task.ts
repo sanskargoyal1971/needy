@@ -10,7 +10,11 @@ export type TaskState =
   | "arrived" //          Stage 5 — arrival moment
   | "in-progress" //      Stage 6 — in-task (chat / SOS)
   | "completed" //        Stage 7 — warm close
-  | "cancelled";
+  | "cancelled"
+  /** The search ran every ring and nobody accepted. Set only by the server when the last
+   *  offer window lapses — distinct from `cancelled` so the requester is told what actually
+   *  happened rather than shown a request they never withdrew. */
+  | "unmatched";
 
 /** Categories change matching weights: social-service tasks factor volunteer standing. */
 export type TaskCategory = "errand" | "companionship" | "social-service" | "urgent";
@@ -144,6 +148,7 @@ export function publicTask(task: Task): PublicTask {
 export const TERMINAL_TASK_STATES: readonly TaskState[] = [
   "completed",
   "cancelled",
+  "unmatched",
 ];
 
 export function isTerminal(state: TaskState): boolean {
@@ -158,7 +163,7 @@ export function isTerminal(state: TaskState): boolean {
  * free-form state change.
  */
 export const TASK_TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
-  searching: ["matched", "cancelled"],
+  searching: ["matched", "cancelled", "unmatched"],
   matched: ["verifying", "en-route", "cancelled"],
   verifying: ["en-route", "cancelled"],
   "en-route": ["arrived", "cancelled"],
@@ -166,6 +171,7 @@ export const TASK_TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   "in-progress": ["completed", "cancelled"],
   completed: [],
   cancelled: [],
+  unmatched: [],
 };
 
 /** States a participant may drive a task INTO via the `advance-task` action. Excludes

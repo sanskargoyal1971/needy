@@ -301,6 +301,14 @@ describe("/matching offer-expiry claim under a real clock (C19)", () => {
     const firstClosures = closures.filter((c) => c.taskId === T).length;
     expect(firstClosures).toBe(1);
 
+    // An exhausted search is now terminal: the task is `unmatched`, and a person who asks
+    // again gets a new task. Put this one back to `searching` by hand so the same id can
+    // carry a second window — the guard under test is what protects ANY new window for a
+    // task id from a stale timer, which is still exactly the situation each escalation
+    // re-arm creates.
+    expect((await tasks.get(T))?.state).toBe("unmatched");
+    await tasks.update(T, { state: "searching", updatedAt: now() });
+
     // Second search for the same task. Note this must be a NEW window, not an extension: the
     // handler's ZADD NX sees no entry (the closure removed it) and writes a fresh score.
     await resetRequestHelpLimit();

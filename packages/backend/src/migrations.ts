@@ -464,6 +464,34 @@ export const MIGRATIONS: readonly Migration[] = [
          (role <> 'super_admin' OR username IS NOT NULL)`,
     ],
   },
+  {
+    id: 8,
+    name: "unmatched-task-state",
+    statements: [
+      // ── a search that ends ──────────────────────────────────────────────────────────────
+      //
+      // When the outermost ring lapsed with no acceptor, the offer was closed for the helpers
+      // and nothing at all happened to the task: it stayed `searching` for ever, and the
+      // requester's screen kept saying "we'll keep looking" over a search that had stopped.
+      // `unmatched` is the terminal state the sweep now moves it to.
+      //
+      // IF EXISTS because migration 1 adds this constraint tolerantly — a database that had
+      // dirty rows at the time never got it, and must not fail here for lacking it.
+      `ALTER TABLE tasks DROP CONSTRAINT IF EXISTS chk_tasks_state`,
+      `ALTER TABLE tasks ADD CONSTRAINT chk_tasks_state CHECK (state IN
+         ('searching','matched','verifying','en-route','arrived','in-progress','completed',
+          'cancelled','unmatched'))`,
+      // Close the searches the old behaviour orphaned. A day is far beyond the whole ladder
+      // (three rings of under a minute each), so nothing live is touched. Bookings held for a
+      // named helper are `searching` with a helper assigned and are deliberately left alone.
+      `UPDATE tasks
+          SET state = 'unmatched',
+              updated_at = (EXTRACT(EPOCH FROM now()) * 1000)::bigint
+        WHERE state = 'searching'
+          AND helper_id IS NULL
+          AND created_at < (EXTRACT(EPOCH FROM now()) * 1000)::bigint - 86400000`,
+    ],
+  },
 ];
 
 /** Single-quote a string for inline SQL.

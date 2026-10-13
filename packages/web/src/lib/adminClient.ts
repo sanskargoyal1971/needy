@@ -188,7 +188,9 @@ export const adminClient = {
     if (params.subjectId) q.set("subjectId", params.subjectId);
     if (params.actorId) q.set("actorId", params.actorId);
     q.set("limit", String(params.limit ?? 100));
-    return call<{ entries: AuditRow[]; durable: boolean }>(`/admin/audit?${q}`);
+    return call<{ entries: AuditRow[]; names?: Record<string, string>; durable: boolean }>(
+      `/admin/audit?${q}`,
+    );
   },
 
   // ── SOS ───────────────────────────────────────────────────────────────────

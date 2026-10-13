@@ -285,6 +285,8 @@ describe("matching: radius escalation, eligibility and service filters", () => {
     const s = await openSockets([R, H]);
     const closed: { taskId: string; reason: string }[] = [];
     s[H]!.on("offer-closed", (p) => closed.push(p as { taskId: string; reason: string }));
+    const requesterSaw: string[] = [];
+    s[R]!.on("task-updated", (p) => requesterSaw.push(p.task.state));
 
     const taskId = "esc-task-close";
     await tasks.create(
@@ -314,6 +316,18 @@ describe("matching: radius escalation, eligibility and service filters", () => {
     // still widening must never be told it ended.
     expect(closed.filter((c) => c.taskId === taskId)).toHaveLength(1);
     expect(closed[0]?.reason).toBe("expired");
+
+    // And the search ends for the requester as well. It used to stay `searching` for ever:
+    // the helpers were told the offer had closed and the person who asked was told nothing.
+    await sleep(100);
+    expect((await tasks.get(taskId))?.state).toBe("unmatched");
+    expect(requesterSaw).toEqual(["unmatched"]);
+
+    // A closed search cannot be reopened by re-sending request-help.
+    const again = await new Promise<{ ok: boolean }>((r) =>
+      s[R]!.emit("request-help", { taskId }, (res) => r(res)),
+    );
+    expect(again.ok).toBe(false);
   }, 25_000);
 
   it("does not offer a task to a helper who does not provide that service", async () => {

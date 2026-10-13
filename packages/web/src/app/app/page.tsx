@@ -147,7 +147,12 @@ export default function RequesterHome() {
                   <p className="mt-0.5 text-sm text-gray-500">
                     {/* Cancelled is named rather than dressed up. A list where every row says
                         "completed" regardless of what happened is not a history. */}
-                    {t.state === "cancelled" ? "Cancelled" : "Completed"} ·{" "}
+                    {t.state === "cancelled"
+                      ? "Cancelled"
+                      : t.state === "unmatched"
+                        ? "Nobody was available"
+                        : "Completed"}{" "}
+                    ·{" "}
                     {relativeTime(t.updatedAt)}
                   </p>
                 </div>

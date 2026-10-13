@@ -283,7 +283,9 @@ function NewRequest() {
               {selected ? selected.name : "Nothing selected yet"}
             </span>
             <span className="font-display text-xl font-bold text-gray-900">
-              {price > 0 ? `₹${price}` : "Free"}
+              {/* No figure until something is chosen: a price beside "Nothing selected yet"
+                  is a price for nothing. */}
+              {!selected ? "—" : price > 0 ? `₹${price}` : "Free"}
             </span>
           </div>
           {/* Stated before they commit, not after. A flat price is one of the few honest

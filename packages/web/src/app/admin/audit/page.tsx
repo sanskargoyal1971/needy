@@ -21,6 +21,8 @@ const STYLE: Record<string, { icon: typeof Eye; tone: string; label: string }> =
 
 export default function AuditLog() {
   const [entries, setEntries] = useState<AuditRow[]>([]);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const who = (id: string | null): string => (id ? (names[id] ?? id) : "system");
   const [durable, setDurable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +33,7 @@ export default function AuditLog() {
     try {
       const res = await adminClient.audit({ limit: 200 });
       setEntries(res.entries);
+      setNames(res.names ?? {});
       setDurable(res.durable);
     } catch (err) {
       setError(describeAdminError(err));
@@ -84,8 +87,14 @@ export default function AuditLog() {
                     )}
                   </p>
                   <p className="mt-0.5 text-xs text-gray-500">
-                    {e.actorId ? `by ${e.actorId}` : "by system"}
-                    {e.subjectId && ` · subject ${e.subjectId}`}
+                    {/* The name for reading, the id on hover for looking the record up. */}
+                    by <span title={e.actorId ?? undefined}>{who(e.actorId)}</span>
+                    {e.subjectId && (
+                      <>
+                        {" · "}
+                        <span title={e.subjectId}>{who(e.subjectId)}</span>
+                      </>
+                    )}
                   </p>
                   {typeof e.metadata?.reason === "string" && (
                     <p className="mt-1 text-xs text-gray-600">“{e.metadata.reason}”</p>

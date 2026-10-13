@@ -148,7 +148,7 @@ export function createPgTaskRepo(pool: DbPool): TaskRepository {
       const { rows } = await pool.query<TaskRow>(
         `SELECT * FROM tasks
          WHERE (requester_id = $1 OR helper_id = $1)
-           AND state NOT IN ('completed', 'cancelled')
+           AND state NOT IN ('completed', 'cancelled', 'unmatched')
          ORDER BY created_at DESC`,
         [userId],
       );

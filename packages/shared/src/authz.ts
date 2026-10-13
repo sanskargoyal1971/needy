@@ -50,6 +50,8 @@ export const TRANSITION_ACTORS: Record<TaskState, readonly TaskRole[]> = {
   "in-progress": [],
   completed: ["requester"],
   cancelled: ["requester", "helper"],
+  // Nobody. Only the matching sweep closes an exhausted search.
+  unmatched: [],
 };
 
 /** True if `role` is permitted to drive a task into `to`. Pair with `canTransition`

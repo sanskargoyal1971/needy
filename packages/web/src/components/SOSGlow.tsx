@@ -3,6 +3,10 @@
 import { motion } from "framer-motion";
 import { ReactNode } from "react";
 
+/** DOM id of the alarm control on a task screen. The header's emergency button looks for it
+ *  so that, on a task, it leads to the real alarm rather than to instructions. */
+export const TASK_ALARM_ID = "task-alarm";
+
 export function SOSGlow({ children, onClick }: { children: ReactNode, onClick?: () => void }) {
   return (
     <div className="relative inline-flex items-center justify-center">

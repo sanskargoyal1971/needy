@@ -272,7 +272,7 @@ export function EnRouteStage({
           </h2>
           <p className="mt-1 text-gray-600">
             {eta
-              ? `About ${Math.max(1, Math.round(eta.etaSeconds / 60))} minutes away`
+              ? aboutMinutes(eta.etaSeconds)
               : // Said plainly rather than shown as a stale number. An ETA that silently
                 // keeps displaying its last value while the phone is in a dead zone is worse
                 // than none, because it is indistinguishable from a live one.
@@ -487,6 +487,37 @@ export function CompletedStage({ helper }: { helper: MatchedHelper | null }) {
           : "Your request is complete."}
       </p>
     </SoftScaleReveal>
+  );
+}
+
+/** "About a minute away" / "About 7 minutes away" — never "1 minutes". */
+function aboutMinutes(etaSeconds: number): string {
+  const minutes = Math.max(1, Math.round(etaSeconds / 60));
+  return minutes === 1 ? "About a minute away" : `About ${minutes} minutes away`;
+}
+
+/** The search ran every ring and nobody accepted. Said plainly, with the next step in reach:
+ *  a person who needed help still needs it, and "try again" is the honest offer. */
+export function UnmatchedStage() {
+  return (
+    <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center">
+      <h2 className="font-display text-2xl font-bold text-gray-900">
+        Nobody was available this time
+      </h2>
+      <p className="mt-2 text-gray-600">
+        We asked the verified helpers near you, widening the search each time, and no one could take it. Nothing was
+        charged. Helpers come and go through the day, so it is worth asking again.
+      </p>
+      <Link
+        href={paths.newRequest}
+        className="mt-6 inline-flex items-center justify-center rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-dark"
+      >
+        Ask again
+      </Link>
+      <p className="mt-4 text-sm text-gray-500">
+        If this is an emergency, call 112.
+      </p>
+    </div>
   );
 }
 

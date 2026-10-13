@@ -77,8 +77,10 @@ export default function AdminUsers() {
                   )}
                 </p>
                 <p className="mt-0.5 text-sm text-gray-500">
-                  {u.phoneMasked} · {u.role} · {u.onboardingStatus} · joined{" "}
-                  {relativeTime(u.createdAt)}
+                  {u.phoneMasked} · {u.role} · {u.onboardingStatus} ·{" "}
+                  {/* Fixture accounts carry no creation time; "joined 20,000 days ago" is the
+                      epoch showing through. */}
+                  {u.createdAt > 0 ? `joined ${relativeTime(u.createdAt)}` : "seeded account"}
                 </p>
               </div>
               {u.blockedAt != null ? (

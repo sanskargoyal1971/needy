@@ -46,12 +46,6 @@ export function Footer() {
           <p className="text-sm text-gray-500">
             &copy; {new Date().getFullYear()} Needy Platform. All rights reserved.
           </p>
-          <div className="mt-4 md:mt-0">
-            {/* Language toggle placeholder */}
-            <button className="text-sm text-gray-500 hover:text-primary transition-colors font-medium">
-              English / हिन्दी
-            </button>
-          </div>
         </div>
       </div>
     </footer>

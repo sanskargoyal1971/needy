@@ -19,9 +19,9 @@ export default function BecomeAHelper() {
             <div className="space-y-4 mb-8">
               {[
                 "Flexible hours - you choose when and where to help.",
-                "Safe environment with mandatory video introductions.",
+                "Every requester is verified too, and an alarm button is on every task.",
                 "Choose between commercial tasks or volunteering.",
-                "Transparent payouts directly to your account."
+                "A one-time doorstep code confirms every job before it starts."
               ].map((benefit, idx) => (
                 <div key={idx} className="flex items-start gap-3">
                   <CheckCircle2 className="text-primary mt-1" size={20} />

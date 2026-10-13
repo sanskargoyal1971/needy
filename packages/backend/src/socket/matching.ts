@@ -1,8 +1,10 @@
 import type { DefaultEventsMap, Namespace } from "socket.io";
+import { nanoid } from "nanoid";
 import {
   AVAILABILITY_TTL_MS,
   canActorTransition,
   canTransition,
+  HELPER_SHARE_PERCENT,
   isLiveDispatchable,
   NS,
   pairingDecision,
@@ -577,9 +579,9 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
         }
 
         // Credit the helper their share of the task price on completion.
-        if (updated.state === "completed" && updated.helperId != null && (updated as any).price > 0) {
+        if (updated.state === "completed" && updated.helperId != null && updated.price > 0) {
           // Calculate helper share: Math.floor prevents fractional paisa issues
-          const helperEarns = Math.floor((updated as any).price * (80 / 100));
+          const helperEarns = Math.floor(updated.price * (HELPER_SHARE_PERCENT / 100));
           await deps.helpers.addEarnings(updated.helperId, helperEarns);
         }
       } catch (err) {
@@ -1171,10 +1173,38 @@ async function expireOffer(
     }
 
     // Outermost ring lapsed, or the task is no longer searching: close for real.
-    if (stillSearching) {
+    if (task && stillSearching) {
+      // End the search on the requester's side too. Closing the offer for the helpers and
+      // leaving the task `searching` meant the requester watched a radar over a search that
+      // had already stopped, with no way to learn that nobody was coming.
+      //
+      // Re-read under the same per-task lock `accept` takes, so a helper who wins in the last
+      // instant of the window is never overwritten by this.
+      const outcome = await withLock(client, keys.matchLock(taskId), nanoid(), async () => {
+        const fresh = await deps.tasks.get(taskId);
+        if (!fresh || fresh.state !== "searching" || fresh.helperId != null) {
+          return { closed: null };
+        }
+        return {
+          closed: await deps.tasks.update(taskId, { state: "unmatched", updatedAt: deps.now() }),
+        };
+      });
+      if (outcome === null) {
+        // The lock is held: an accept is mid-flight. Come back shortly rather than closing
+        // over it — if that accept fails, the task must not be left searching unscheduled.
+        await client.zadd(keys.offerExpiryQueue(), deps.now() + 2_000, taskId);
+        return;
+      }
+
       const audience = await client.smembers(keys.offerAudience(taskId));
       for (const helperId of audience) {
         nsp.to(personalRoom(helperId)).emit("offer-closed", { taskId, reason: "expired" });
+      }
+      if (outcome.closed) {
+        nsp
+          .to(personalRoom(outcome.closed.requesterId))
+          .emit("task-updated", { task: publicTask(outcome.closed) });
+        deps.logger.info("matching search ended with no helper", { taskId });
       }
     }
     await client.del(keys.offerAudience(taskId));

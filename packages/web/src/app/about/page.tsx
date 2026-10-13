@@ -18,7 +18,7 @@ export default function About() {
               Generic gig-economy platforms often treat these sensitive tasks just like delivering a package. But when you are trusting someone with your loved ones or your home, the standard of care needs to be fundamentally higher.
             </p>
             <p>
-              That's why Needy was created. We are a hyperlocal trust platform first, and a service marketplace second. Every single helper on our platform is rigorously verified through government ID checks and live video introductions. We've built in 24/7 SOS features, live tracking, and strict privacy controls.
+              That's why Needy was created. We are a hyperlocal trust platform first, and a service marketplace second. Every single helper on our platform is verified with a government ID, a live selfie and a short video, each reviewed by a person. We've built in an in-app alarm, live tracking, a one-time code at the door, and strict privacy controls.
             </p>
             <p className="font-bold text-gray-900 pt-4">
               Our mission is simple: to connect those in need with verified, compassionate helpers in their community, ensuring that everyone feels safe, respected, and supported.

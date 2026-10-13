@@ -17,6 +17,7 @@ import { taskClient, type ParticipantException } from "@/lib/taskClient";
 import { Chat } from "./Chat";
 import { HelperTask } from "./HelperTask";
 import { OfferCard } from "./OfferCard";
+import { TASK_ALARM_ID } from "@/components/SOSGlow";
 import { SosButton } from "./SosButton";
 import { usePositionReporting } from "./usePositionReporting";
 
@@ -116,12 +117,14 @@ export function HelperExperience() {
 
           {/* The helper gets the same alarm as the requester, and for the same reason: a
               helper alone in a stranger's home can be the one who is not safe. */}
-          <SosButton
-            alert={state.sos}
-            userId={state.userId}
-            onRaise={onRaise}
-            onCancel={onCancelSos}
-          />
+          <div id={TASK_ALARM_ID}>
+            <SosButton
+              alert={state.sos}
+              userId={state.userId}
+              onRaise={onRaise}
+              onCancel={onCancelSos}
+            />
+          </div>
         </>
       ) : (
         <>
@@ -246,12 +249,25 @@ function AvailabilityCard({
       }`}
     >
       <h1 className="font-display text-2xl font-bold text-gray-900">
-        {available ? "You're available" : "You're off duty"}
+        {!available
+          ? "You're off duty"
+          : blind
+            ? "You can't be matched yet"
+            : waiting
+              ? "Almost ready"
+              : "You're available"}
       </h1>
       <p className="mt-1 text-gray-600">
-        {available
-          ? "People nearby can be matched with you. Keep this page open."
-          : "Turn this on when you're ready to help someone nearby."}
+        {/* "People nearby can be matched with you" is only true once the server has a position
+            to index. Until then the toggle is on and nothing can arrive, so the headline must
+            not say otherwise. */}
+        {!available
+          ? "Turn this on when you're ready to help someone nearby."
+          : blind
+            ? "We need your location before anyone can be matched with you."
+            : waiting
+              ? "You'll be available as soon as we know where you are. Keep this page open."
+              : "People nearby can be matched with you. Keep this page open."}
       </p>
 
       <button

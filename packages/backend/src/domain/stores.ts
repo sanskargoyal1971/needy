@@ -1,4 +1,4 @@
-import type { ChatMessage, Task, MatchedHelper } from "@needy/shared";
+import { isTerminal, type ChatMessage, type Task, type MatchedHelper } from "@needy/shared";
 
 /** Durable data lives behind these interfaces so Phase 1 can run on in-memory impls and
  *  later swap to Postgres without touching any namespace/service code. */
@@ -59,8 +59,7 @@ export function createInMemoryTaskRepo(): TaskRepository {
       return [...tasks.values()].filter(
         (t) =>
           (t.requesterId === userId || t.helperId === userId) &&
-          t.state !== "completed" &&
-          t.state !== "cancelled",
+          !isTerminal(t.state),
       );
     },
   };

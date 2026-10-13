@@ -7,11 +7,13 @@ import { isTerminal } from "@needy/shared";
 import { useDriver, useTaskExperience } from "@/realtime";
 import { paths } from "@/lib/paths";
 import { Chat } from "./Chat";
+import { TASK_ALARM_ID } from "@/components/SOSGlow";
 import { SosButton } from "./SosButton";
 import {
   ArrivedStage,
   BookedStage,
   CancelledStage,
+  UnmatchedStage,
   CompletedStage,
   EnRouteStage,
   InProgressStage,
@@ -138,6 +140,7 @@ export function TaskExperience({ taskId }: { taskId: string }) {
       )}
       {task.state === "completed" && <CompletedStage helper={helper} />}
       {task.state === "cancelled" && <CancelledStage />}
+      {task.state === "unmatched" && <UnmatchedStage />}
 
       {hasCompanion && !isTerminal(task.state) && (
         <Chat
@@ -154,12 +157,14 @@ export function TaskExperience({ taskId }: { taskId: string }) {
       {/* The alarm sits below the stage rather than floating over it: a control that overlaps
           the map is a control someone hits while pinching to zoom. */}
       {hasCompanion && (
-        <SosButton
-          alert={state.sos}
-          userId={state.userId}
-          onRaise={onRaise}
-          onCancel={onCancelSos}
-        />
+        <div id={TASK_ALARM_ID}>
+          <SosButton
+            alert={state.sos}
+            userId={state.userId}
+            onRaise={onRaise}
+            onCancel={onCancelSos}
+          />
+        </div>
       )}
 
       {/* Cancelling is offered while a search is still open — before anyone has committed to

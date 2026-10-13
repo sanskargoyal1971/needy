@@ -17,6 +17,8 @@ export const paths = {
   pricing: "/pricing",
   privacy: "/privacy",
   terms: "/terms",
+  faq: "/faq",
+  contact: "/contact",
 
   // ── onboarding ────────────────────────────────────────────────────────────
   /** The wizard. `?step=` selects the pane; the server's onboardingStatus is authoritative. */

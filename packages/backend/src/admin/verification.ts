@@ -480,7 +480,22 @@ export function createVerificationRouter(deps: VerificationRouterDeps): Router {
         actorId: typeof req.query.actorId === "string" ? req.query.actorId : undefined,
         limit: Number(req.query.limit ?? 100) || 100,
       });
-      res.json({ entries, durable: true });
+      // Names for the ids in view, so a reviewer reads "Kavya Rao approved Sherry" rather than
+      // two opaque ids. Display names only — never a phone number — and resolved at read time
+      // so the stored entries stay exactly as they were written.
+      const ids = new Set<string>();
+      for (const e of entries) {
+        if (e.actorId) ids.add(e.actorId);
+        if (e.subjectId && e.subjectType === "user") ids.add(e.subjectId);
+      }
+      const names: Record<string, string> = {};
+      await Promise.all(
+        [...ids].map(async (id) => {
+          const user = await deps.users.getById(id);
+          if (user) names[id] = user.displayName;
+        }),
+      );
+      res.json({ entries, names, durable: true });
     }),
   );
 

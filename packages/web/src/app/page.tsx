@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ShieldCheck, Video, MapPin, Heart, Clock, Star, PhoneCall } from "lucide-react";
+import { ShieldCheck, KeyRound, MapPin, Heart, Clock, Star, PhoneCall } from "lucide-react";
 import { BreathingBackground } from "@/components/BreathingBackground";
 
 export default function Home() {
@@ -19,7 +19,7 @@ export default function Home() {
                 Someone’s ready to <span className="text-primary relative inline-block">help you<svg className="absolute -bottom-2 w-full h-3 text-accent/30" viewBox="0 0 100 10" preserveAspectRatio="none"><path d="M0 5 Q 50 10 100 5" stroke="currentColor" strokeWidth="8" fill="none" /></svg></span> right now.
               </h1>
               <p className="text-lg text-gray-700 mb-8 max-w-xl font-medium drop-shadow-sm">
-                A hyperlocal platform connecting you with background-verified, trustworthy local helpers for errands, companionship, and immediate assistance.
+                A hyperlocal platform connecting you with ID-verified, human-reviewed local helpers for errands, companionship, and immediate assistance.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 pt-2">
                 <Link href="/signup" className="inline-flex justify-center items-center rounded-2xl bg-primary px-8 py-4 text-lg font-bold text-white transition-all transform shadow-3d-button hover:translate-y-1 hover:shadow-3d-button-hover hover:bg-primary-dark">
@@ -34,7 +34,7 @@ export default function Home() {
               <div className="mt-12 flex flex-wrap items-center gap-6 text-sm font-bold text-gray-700 bg-white/60 backdrop-blur-md p-4 rounded-2xl shadow-sm border border-white">
                 <div className="flex items-center gap-2">
                   <div className="p-2 bg-primary/10 rounded-lg"><ShieldCheck className="text-primary" size={20} /></div>
-                  Aadhaar-verified helpers
+                  ID-verified helpers
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="p-2 bg-primary/10 rounded-lg"><MapPin className="text-primary" size={20} /></div>
@@ -42,7 +42,7 @@ export default function Home() {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="p-2 bg-accent/10 rounded-lg animate-pulse-slow"><PhoneCall className="text-accent" size={20} /></div>
-                  24/7 SOS
+                  In-app SOS
                 </div>
               </div>
             </div>
@@ -94,8 +94,8 @@ export default function Home() {
             <div className="hidden md:block absolute top-12 left-1/8 right-1/8 h-1 bg-gradient-to-r from-primary-100 via-primary to-primary-100 rounded-full -z-10 shadow-sm" />
             
             {[
-              { title: "Post a need", desc: "Select what you need help with and set a time window.", icon: <Clock size={28} className="text-white" />, color: "bg-primary" },
-              { title: "Meet on video", desc: "Have a quick video call with your matched helper before they arrive.", icon: <Video size={28} className="text-white" />, color: "bg-primary" },
+              { title: "Post a need", desc: "Choose what you need help with and where you are.", icon: <Clock size={28} className="text-white" />, color: "bg-primary" },
+              { title: "See who is coming", desc: "You see your helper's name and rating as soon as they accept, and can message them.", icon: <ShieldCheck size={28} className="text-white" />, color: "bg-primary" },
               { title: "Track live", desc: "See exactly where they are. You're never in the dark.", icon: <MapPin size={28} className="text-white" />, color: "bg-primary" },
               { title: "Rate & done", desc: "Leave a rating to help keep our community safe.", icon: <Star size={28} className="text-white" />, color: "bg-accent" },
             ].map((step, idx) => (
@@ -136,15 +136,15 @@ export default function Home() {
                 <div className="h-16 w-16 bg-white/10 rounded-2xl flex items-center justify-center mb-6 shadow-inner">
                   <ShieldCheck size={32} className="text-accent" />
                 </div>
-                <h3 className="text-2xl font-black mb-3">100% Aadhaar Verified</h3>
-                <p className="text-primary-100 font-medium leading-relaxed">Every helper undergoes rigorous government ID verification and a liveness check before they can see any tasks.</p>
+                <h3 className="text-2xl font-black mb-3">Every helper is verified</h3>
+                <p className="text-primary-100 font-medium leading-relaxed">Every helper submits a government ID, a live selfie and a short video, and a person on our safety team reviews them before they can accept any task.</p>
               </div>
               <div className="bg-gradient-to-br from-primary-dark/80 to-primary/80 p-8 rounded-3xl backdrop-blur-xl border border-white/20 shadow-3d-card hover:shadow-3d-card-hover transition-all transform hover:-translate-y-2 hover:-rotate-1">
                 <div className="h-16 w-16 bg-white/10 rounded-2xl flex items-center justify-center mb-6 shadow-inner">
-                  <Video size={32} className="text-accent" />
+                  <KeyRound size={32} className="text-accent" />
                 </div>
-                <h3 className="text-2xl font-black mb-3">Pre-task Video Intro</h3>
-                <p className="text-primary-100 font-medium leading-relaxed">Never open your door to a stranger. Meet your helper face-to-face via an in-app secure video call before they arrive.</p>
+                <h3 className="text-2xl font-black mb-3">A code at your door</h3>
+                <p className="text-primary-100 font-medium leading-relaxed">Nothing starts until you say so. Your helper tells you what they will do, and the job only begins when you share a one-time code with them at your door.</p>
               </div>
             </div>
           </div>
@@ -221,7 +221,7 @@ export default function Home() {
                 {[...Array(5)].map((_, i) => <Star key={i} size={24} fill="currentColor" />)}
               </div>
               <p className="text-xl text-gray-800 italic mb-8 font-medium leading-relaxed relative z-10">
-                "This platform gives me a dignified way to earn while genuinely helping people in my community. The video verification before every task makes me feel safe, too."
+                "This platform gives me a dignified way to earn while genuinely helping people in my community. The doorstep code before every task makes me feel safe, too."
               </p>
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-full bg-accent/20 flex items-center justify-center font-bold text-accent">RM</div>
@@ -251,7 +251,7 @@ export default function Home() {
             </div>
             <h2 className="text-4xl font-black font-display text-gray-900 mb-6 drop-shadow-sm">Give back to your community</h2>
             <p className="text-xl text-gray-800 mb-10 font-medium leading-relaxed">
-              Needy isn't just a commercial platform. You can toggle into Volunteer Mode anytime to help those who can't afford to pay. Log volunteer hours, build community trust, and make a real difference.
+              Needy isn't just a commercial platform. As a helper you can choose to offer Social Service — free help for people who can't afford to pay — alongside paid work, or instead of it.
             </p>
             <Link href="/become-a-helper" className="inline-flex justify-center rounded-2xl bg-accent px-8 py-4 text-lg font-bold text-white shadow-3d-button transition-transform hover:translate-y-1 hover:shadow-3d-button-hover hover:bg-orange-600 active:translate-y-2 active:shadow-none">
               Join as a Volunteer
@@ -268,8 +268,8 @@ export default function Home() {
           </div>
           <div className="space-y-6">
             {[
-              { q: "How are helpers verified?", a: "Every helper must complete a rigorous Aadhaar-based KYC process and a live selfie check before their account is approved. We do not compromise on identity verification." },
-              { q: "What happens if I press the SOS button?", a: "The SOS button immediately sends your live location to your emergency contacts, alerts our 24/7 Trust & Safety team, and initiates a callback to your phone." },
+              { q: "How are helpers verified?", a: "Every helper submits a government ID, a live selfie and a short video. A person on our safety team reviews all three before the account is approved, and every review is recorded." },
+              { q: "What happens if I press the SOS button?", a: "During an active task, the alarm button sends an alert with your task and address to our Trust & Safety team, who see it immediately on their console. It does not contact the police or your family for you — in an emergency, call 112." },
               { q: "Can I use Needy for free?", a: "Yes, you can request help under the 'Social Service' category. These requests are routed to our community of volunteers." }
             ].map((faq, idx) => (
               <div key={idx} className="bg-white rounded-3xl p-8 shadow-3d-card border border-gray-100 hover:shadow-3d-card-hover transition-all transform hover:-translate-y-1">

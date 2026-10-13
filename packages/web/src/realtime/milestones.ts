@@ -6,7 +6,9 @@ import type { MatchedHelper } from "@needy/shared";
 const THRESHOLDS = [600, 300, 120, 60] as const;
 
 function label(seconds: number, name: string): string {
-  if (seconds <= 60) return `${name} has arrived at your gate`;
+  // Not "has arrived": this fires from an ETA, while the helper is still on the way. Arrival
+  // is a state the helper declares, and it has its own screen.
+  if (seconds <= 60) return `${name} is about a minute away`;
   return `${name} is ${Math.round(seconds / 60)} min away`;
 }
 
@@ -20,9 +22,13 @@ export function nextMilestone(
   helper: MatchedHelper | null,
 ): string | null {
   const name = helper?.displayName ?? "Your helper";
+  // The NEAREST threshold crossed, not the first in the list. Walking high→low and returning
+  // on the first hit announced "10 min away" for a helper whose first ETA was two minutes —
+  // which is every reload mid-journey, since `prev` starts null.
+  let nearest: number | null = null;
   for (const t of THRESHOLDS) {
     const crossed = nextEtaSeconds <= t && (prevEtaSeconds === null || prevEtaSeconds > t);
-    if (crossed) return label(t, name);
+    if (crossed) nearest = t;
   }
-  return null;
+  return nearest === null ? null : label(nearest, name);
 }

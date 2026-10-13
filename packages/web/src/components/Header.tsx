@@ -1,13 +1,32 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ShieldAlert } from "lucide-react";
-import { SOSGlow } from "./SOSGlow";
+import { SOSGlow, TASK_ALARM_ID } from "./SOSGlow";
 import { useAuth } from "@/auth/AuthProvider";
 import { homeFor, paths } from "@/lib/paths";
 
 export function Header() {
   const { state, logout } = useAuth();
+  const router = useRouter();
+
+  /**
+   * The red button in the header used to have no handler at all — the most alarming control
+   * on the page, on every page, doing nothing. An alarm belongs to a task (it is what tells
+   * the safety team who and where), so this does one of two honest things: on a task screen
+   * it takes you to that task's alarm; anywhere else it takes you to the emergency
+   * instructions, which lead with the number to call.
+   */
+  const onSos = () => {
+    const alarm = document.getElementById(TASK_ALARM_ID);
+    if (alarm) {
+      alarm.scrollIntoView({ behavior: "smooth", block: "center" });
+      alarm.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+      return;
+    }
+    router.push(`${paths.safety}#emergency`);
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/40 bg-background/60 backdrop-blur-xl shadow-glass">
@@ -81,8 +100,9 @@ export function Header() {
           )}
 
           <div className="ml-2 transform hover:scale-110 transition-transform">
-            <SOSGlow>
-              <ShieldAlert size={24} />
+            <SOSGlow onClick={onSos}>
+              <ShieldAlert size={24} aria-hidden />
+              <span className="sr-only">Emergency help</span>
             </SOSGlow>
           </div>
         </div>
