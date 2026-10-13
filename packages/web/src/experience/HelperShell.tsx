@@ -30,7 +30,7 @@ export function HelperShell({ children }: { children: ReactNode }) {
   );
 
   return (
-    <AppGate>
+    <AppGate audience="helper">
       {driver ? (
         // `MotionPreferencesProvider` wraps the experience because its context default is
         // `reduced: false` — without a provider the OS's prefers-reduced-motion setting is

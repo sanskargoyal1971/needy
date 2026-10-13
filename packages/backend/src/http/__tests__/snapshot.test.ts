@@ -308,3 +308,58 @@ describe("GET /snapshot (§2.1 reconnect)", () => {
     expect(badToken.status).toBe(401);
   });
 });
+
+describe("POST /tasks — who may ask for help", () => {
+  const origin = { lat: 12.9611, lng: 77.6387 };
+  const body = { category: "errand", title: "Pick up medicine", description: "test", origin };
+
+  /** The token claims `requester` in every case. The refusal has to come from the account's
+   *  stored role, not from a claim the caller's token happens to carry. */
+  const tokenFor = async (userId: string): Promise<string> => {
+    const res = await request(app)
+      .post("/dev/token")
+      .send({ userId, role: "requester", displayName: userId });
+    return res.body.token as string;
+  };
+
+  it.each([
+    ["helper", "role-helper-only"],
+    ["admin", "role-admin"],
+    ["super_admin", "role-super-admin"],
+  ] as const)("refuses an approved %s account", async (role, id) => {
+    await users.create(
+      makeUser({
+        id,
+        phone: `+9190000009${id.length}${role.length}`,
+        displayName: id,
+        role,
+        onboardingStatus: "approved",
+        ...(role === "super_admin" ? { username: "root-test" } : {}),
+      }),
+    );
+    const res = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${await tokenFor(id)}`)
+      .send(body);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("forbidden");
+    expect(await deps.tasks.activeForUser(id)).toHaveLength(0);
+  });
+
+  it("allows an account that is both a requester and a helper", async () => {
+    await users.create(
+      makeUser({
+        id: "role-both",
+        phone: "+919000000955",
+        displayName: "Both",
+        role: "both",
+        onboardingStatus: "approved",
+      }),
+    );
+    const res = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${await tokenFor("role-both")}`)
+      .send(body);
+    expect(res.status).toBe(201);
+  });
+});

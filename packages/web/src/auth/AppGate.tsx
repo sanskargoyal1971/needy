@@ -29,13 +29,24 @@ import type { Role } from "@/lib/authClient";
  *  drift apart. */
 const isStaff = (role: Role): boolean => role === "admin" || role === "super_admin";
 
+/** Which participant a surface is for. Mirrors `REQUESTER_ROLES` / `HELPER_ROLES` on the API,
+ *  which is where this is actually enforced — the gate only saves someone a screen whose
+ *  every action would be refused. */
+export type Audience = "requester" | "helper";
+const inAudience = (role: Role, audience: Audience | undefined): boolean =>
+  audience === undefined || role === "both" || role === audience;
+
 export function AppGate({
   children,
   /** Require the admin role as well. Admin screens compose both checks. */
   requireAdmin = false,
+  /** Require an account of this kind. A helper-only account has no requester home, and the
+   *  other way round; each is sent to its own. */
+  audience,
 }: {
   children: ReactNode;
   requireAdmin?: boolean;
+  audience?: Audience;
 }) {
   const router = useRouter();
   const { state } = useAuth();
@@ -63,13 +74,18 @@ export function AppGate({
     // a new role silently loses access to surfaces it outranks.
     if (requireAdmin && !isStaff(role)) {
       router.replace(homeFor(role, onboardingStatus));
+      return;
     }
-  }, [state, router, requireAdmin]);
+    if (!inAudience(role, audience)) {
+      router.replace(homeFor(role, onboardingStatus));
+    }
+  }, [state, router, requireAdmin, audience]);
 
   const allowed =
     state.status === "authenticated" &&
     canTransact(state.user.onboardingStatus) &&
-    (!requireAdmin || isStaff(state.user.role));
+    (!requireAdmin || isStaff(state.user.role)) &&
+    inAudience(state.user.role, audience);
 
   if (!allowed) {
     // Render the spinner rather than the children while deciding. Flashing a dashboard for one

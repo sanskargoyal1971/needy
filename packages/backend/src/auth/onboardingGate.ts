@@ -3,6 +3,12 @@ import { canTransact, type OnboardingStatus } from "@needy/shared";
 import { asyncRoute } from "../http/asyncRoute.js";
 import type { AuthedRequest } from "./middleware.js";
 import type { UserRepository } from "./repos.js";
+import type { Role } from "./types.js";
+
+/** Accounts that may ask for help. */
+export const REQUESTER_ROLES: readonly Role[] = ["requester", "both"];
+/** Accounts that may give it. */
+export const HELPER_ROLES: readonly Role[] = ["helper", "both"];
 
 /** ── The transaction gate ──────────────────────────────────────────────────
  *  Being signed in is not permission to transact. A user who has submitted their packet can
@@ -22,6 +28,20 @@ export interface OnboardingGateDeps {
   users: UserRepository;
 }
 
+export interface OnboardingGateOptions {
+  /**
+   * The participant roles this route is for. Omitted means "any approved account".
+   *
+   * An exact list, deliberately NOT `satisfiesRole`: that helper treats staff as satisfying
+   * every role, which is right for admin surfaces and wrong here. An operator has no business
+   * opening a help request or advertising as a helper from a staff account — and a helper-only
+   * account asking for help is not something the product offers. Read from the same database
+   * row as the approval check, so a role change takes effect immediately rather than at the
+   * end of a token's life.
+   */
+  roles?: readonly Role[];
+}
+
 /** Reasons, kept machine-readable so the client can route to the right screen rather than
  *  parsing prose: `under_review` → the waiting screen, `rejected` → the terminal screen,
  *  anything else → back into the wizard. */
@@ -35,9 +55,13 @@ export interface GateRefusal {
  * Require an approved account. Chain AFTER `requireAuth`.
  *
  * Fails closed in every direction: no claims → 401; user vanished → 401 (their session
- * outlived their account); not approved → 403 with the status so the UI can redirect.
+ * outlived their account); not approved → 403 with the status so the UI can redirect; approved
+ * but the wrong kind of account for this route → 403.
  */
-export function requireOnboarded(deps: OnboardingGateDeps): RequestHandler {
+export function requireOnboarded(
+  deps: OnboardingGateDeps,
+  options: OnboardingGateOptions = {},
+): RequestHandler {
   // Wrapped in asyncRoute for the reason that module documents at length: Express 4 ignores a
   // handler's return value, so a rejection here (a database blip on the user lookup) would
   // otherwise send NO response at all and leave the client hanging until its own timeout. For
@@ -64,6 +88,10 @@ export function requireOnboarded(deps: OnboardingGateDeps): RequestHandler {
         reason: user.rejectionReason,
       };
       res.status(403).json(body);
+      return;
+    }
+    if (options.roles && !options.roles.includes(user.role)) {
+      res.status(403).json({ error: "forbidden", required: options.roles });
       return;
     }
     next();

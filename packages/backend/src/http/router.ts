@@ -22,7 +22,7 @@ import { getTaskLocation } from "../domain/location-store.js";
 import { readPresence } from "../domain/presence-store.js";
 import { signAccessToken, type AuthClaims } from "../auth/jwt.js";
 import { readAccessClaims } from "../auth/middleware.js";
-import { requireOnboarded } from "../auth/onboardingGate.js";
+import { requireOnboarded, REQUESTER_ROLES } from "../auth/onboardingGate.js";
 import { computeEta } from "../services/eta.js";
 import { consumeToken, type RateLimit } from "../services/ratelimit.js";
 import { asyncRoute } from "./asyncRoute.js";
@@ -249,7 +249,10 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
     // Creating a task is transacting, and an unapproved account may not. Placed BEFORE body
     // validation deliberately: an unapproved caller should be told they are not approved, not
     // handed a field-by-field critique of a request that was never going to be accepted.
-    requireOnboarded({ users: deps.users }),
+    // And only an account that asks for help may ask for it. "Signed in and approved" let a
+    // helper-only or staff account open a request; AGENTS.md is explicit that being logged
+    // in is not a role check.
+    requireOnboarded({ users: deps.users }, { roles: REQUESTER_ROLES }),
     asyncRoute(async (req: AuthedRequest, res: Response) => {
       const requesterId = req.userId!;
 
