@@ -100,7 +100,7 @@ export function Button({
       // connection submits the form twice, which for an OTP request means two SMS charges and
       // a user holding two valid codes.
       disabled={props.disabled || loading}
-      className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed ${styles}`}
+      className={`inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black transition-all transform hover:translate-y-1 active:translate-y-2 active:shadow-none disabled:cursor-not-allowed ${variant === "primary" ? "shadow-3d-button hover:shadow-3d-button-hover" : "shadow-sm hover:shadow-md"} ${styles}`}
     >
       {loading && <Loader2 size={16} className="animate-spin" aria-hidden />}
       {children}
@@ -148,8 +148,10 @@ export function AuthCard({
   children: ReactNode;
 }) {
   return (
-    <div className="flex min-h-[calc(100vh-16rem)] items-center justify-center bg-background px-4 py-12 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md space-y-6 rounded-3xl border border-gray-100 bg-white p-8 shadow-sm">
+    <div className="flex min-h-[calc(100vh-16rem)] items-center justify-center bg-background px-4 py-12 sm:px-6 lg:px-8 relative overflow-hidden">
+      <div className="absolute top-20 -left-20 w-64 h-64 bg-primary-100 rounded-full mix-blend-multiply filter blur-3xl opacity-50 animate-float"></div>
+      <div className="absolute bottom-20 -right-20 w-72 h-72 bg-accent-light/20 rounded-full mix-blend-multiply filter blur-3xl opacity-50 animate-float-delayed"></div>
+      <div className="w-full max-w-md space-y-6 rounded-3xl border border-white/40 bg-white/60 backdrop-blur-xl p-8 shadow-3d-card relative z-10 transform perspective-1000 transition-all hover:shadow-3d-card-hover hover:-translate-y-1">
         <div className="text-center">
           <h1 className="font-display text-3xl font-black tracking-tight text-gray-900">{title}</h1>
           {subtitle && <p className="mt-2 text-sm text-gray-600">{subtitle}</p>}

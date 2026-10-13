@@ -5,7 +5,7 @@ import "leaflet/dist/leaflet.css";
 import { animate, useMotionValue } from "framer-motion";
 import { useEffect, useRef } from "react";
 import type { LatLng } from "@needy/shared";
-import { color, duration as D, ease as E } from "../motion/index.js";
+import { duration as D, ease as E } from "../motion/index.js";
 import { useReducedMotionPref } from "../motion/preferences.js";
 
 const TILE_URL =
@@ -67,8 +67,17 @@ export function LiveMap({
       zoom: 15,
       zoomControl: false,
       attributionControl: true,
+      // The page scrolls past this map; a wheel that zooms it instead traps the scroll.
+      scrollWheelZoom: false,
     });
-    L.tileLayer(TILE_URL, { attribution: ATTRIBUTION, maxZoom: 19 }).addTo(map);
+    L.tileLayer(TILE_URL, {
+      attribution: ATTRIBUTION,
+      maxZoom: 19,
+      // The document policy is `no-referrer` (see middleware.ts), and OpenStreetMap refuses
+      // tile requests that carry no Referer at all. Scoped to the tile images so every other
+      // outbound request still sends nothing; `origin` never includes a path.
+      referrerPolicy: "origin",
+    }).addTo(map);
     L.marker([originRef.current.lat, originRef.current.lng], {
       icon: destinationIcon(),
       interactive: false,
@@ -78,6 +87,9 @@ export function LiveMap({
     // Leaflet needs a size recalc if the container animated in.
     setTimeout(() => map.invalidateSize(), 0);
     return () => {
+      // Halt any pan/zoom in flight first: Leaflet's transition-end handlers otherwise fire
+      // against panes that `remove()` has already torn down.
+      map.stop();
       map.remove();
       mapRef.current = null;
       helperMarkerRef.current = null;
@@ -145,15 +157,8 @@ export function LiveMap({
   return (
     <div
       ref={containerRef}
-      style={{
-        width: "100%",
-        height,
-        borderRadius: 18,
-        overflow: "hidden",
-        border: "1px solid var(--needy-border)",
-        // Keep map chrome legible on both themes.
-        background: "var(--needy-surface-2)",
-      }}
+      className="w-full rounded-[24px] overflow-hidden border border-white/50 shadow-[0_20px_50px_rgba(15,92,92,0.2)] bg-white/20 backdrop-blur-xl relative z-10"
+      style={{ height }}
       aria-label="Live map showing your helper's location"
     />
   );
@@ -162,22 +167,32 @@ export function LiveMap({
 function destinationIcon(): L.DivIcon {
   return L.divIcon({
     className: "",
-    iconSize: [16, 16],
-    iconAnchor: [8, 8],
-    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color.presence};box-shadow:0 0 0 6px ${color.presence}33;"></div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    html: `<div class="relative w-6 h-6 rounded-full bg-[#0F5C5C] shadow-[0_4px_12px_rgba(15,92,92,0.6)] flex items-center justify-center animate-pulse-slow border-[3px] border-white">
+             <div class="absolute inset-0 rounded-full animate-ping bg-[#0F5C5C]/40"></div>
+             <div class="w-1.5 h-1.5 rounded-full bg-white shadow-inner"></div>
+           </div>`,
   });
 }
 
 function silhouetteIcon(heading: number): L.DivIcon {
   return L.divIcon({
     className: "",
-    iconSize: [34, 34],
-    iconAnchor: [17, 17],
-    html: `<div class="needy-silhouette" style="transition:transform .4s ease;will-change:transform;transform:rotate(${heading}deg);">
-      <svg width="34" height="34" viewBox="0 0 24 24" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))">
-        <path d="M12 1 L15 6 L9 6 Z" fill="${color.warm}" opacity="0.9"/>
-        <circle cx="12" cy="9.5" r="3" fill="${color.warm}"/>
-        <path d="M6.5 20c0-3.6 2.5-6 5.5-6s5.5 2.4 5.5 6z" fill="${color.warm}"/>
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+    html: `<div class="needy-silhouette relative" style="transition:transform .4s ease;will-change:transform;transform:rotate(${heading}deg);">
+      <div class="absolute inset-0 rounded-full bg-[#FF7A59]/30 animate-glow filter blur-md"></div>
+      <svg width="40" height="40" viewBox="0 0 24 24" class="relative drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)]">
+        <path d="M12 1 L16 8 L8 8 Z" fill="url(#helper-grad)" />
+        <circle cx="12" cy="11" r="3.5" fill="url(#helper-grad)"/>
+        <path d="M5.5 22c0-4 2.5-7 6.5-7s6.5 3 6.5 7z" fill="url(#helper-grad)"/>
+        <defs>
+          <linearGradient id="helper-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#FF7A59"/>
+            <stop offset="100%" stop-color="#E05A39"/>
+          </linearGradient>
+        </defs>
       </svg></div>`,
   });
 }

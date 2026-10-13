@@ -120,10 +120,23 @@ export function OriginPicker({
           attribution:
             process.env.NEXT_PUBLIC_MAP_ATTRIBUTION ?? "&copy; OpenStreetMap contributors",
           maxZoom: 19,
+          // OpenStreetMap refuses tile requests with no Referer, and the document policy is
+          // `no-referrer`. Scoped to the tiles; `origin` never includes a path.
+          referrerPolicy: "origin",
         },
       ).addTo(map);
 
-      const marker = L.marker([value.lat, value.lng], { draggable: true }).addTo(map);
+      const customIcon = L.divIcon({
+        className: "",
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+        html: `<div class="relative w-8 h-8 rounded-full bg-[#0F5C5C] shadow-[0_4px_12px_rgba(15,92,92,0.6)] flex items-center justify-center animate-pulse-slow border-[3px] border-white cursor-grab active:cursor-grabbing">
+                 <div class="absolute inset-0 rounded-full animate-ping bg-[#0F5C5C]/40"></div>
+                 <div class="w-2 h-2 rounded-full bg-white shadow-inner"></div>
+               </div>`,
+      });
+
+      const marker = L.marker([value.lat, value.lng], { draggable: true, icon: customIcon }).addTo(map);
       marker.on("dragend", () => {
         const { lat, lng } = marker.getLatLng();
         onChange({ lat, lng });
@@ -152,7 +165,7 @@ export function OriginPicker({
 
   return (
     <div>
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
+      <div className="overflow-hidden rounded-[24px] border border-white/50 bg-white/20 backdrop-blur-xl shadow-[0_20px_50px_rgba(15,92,92,0.2)] transform perspective-1000 rotate-x-1 relative z-10">
         {locating ? (
           <div className="flex h-56 flex-col items-center justify-center gap-2 text-gray-500">
             <Loader2 className="animate-spin text-primary" aria-hidden />

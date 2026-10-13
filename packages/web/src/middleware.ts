@@ -105,7 +105,9 @@ export function middleware(request: NextRequest) {
   response.headers.set("X-Content-Type-Options", "nosniff");
   // `strict-origin-when-cross-origin` would still leak the origin; there is nothing on an
   // outbound link that benefits from knowing which page of this app someone came from, and
-  // some of those paths contain a user id.
+  // some of those paths contain a user id. Map tiles are the one exception and opt in to
+  // `origin` on their own <img> elements (see LiveMap / OriginPicker), because the tile
+  // provider refuses requests that carry no Referer.
   response.headers.set("Referrer-Policy", "no-referrer");
   // Nothing here needs a camera or microphone except the onboarding capture, which is
   // same-origin and therefore unaffected by denying them to embedded content.

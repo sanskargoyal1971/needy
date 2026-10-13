@@ -257,15 +257,16 @@ export function EnRouteStage({
   milestones: string[];
 }) {
   return (
-    <div className="space-y-4">
-      <div className="overflow-hidden rounded-3xl border border-gray-100 bg-white">
+    <div className="space-y-6">
+      <div className="relative z-10 drop-shadow-2xl">
         <LiveMap
           origin={task.origin}
           helper={location ? { lat: location.lat, lng: location.lng } : null}
           heading={location?.heading ?? 0}
           height={300}
         />
-        <div className="p-5">
+      </div>
+      <div className="rounded-3xl border border-white/40 bg-white/40 p-5 backdrop-blur-xl shadow-3d-card transform perspective-1000 rotate-x-1">
           <h2 className="font-display text-xl font-bold text-gray-900">
             {helper?.displayName ?? "Your helper"} is on the way
           </h2>
@@ -277,7 +278,6 @@ export function EnRouteStage({
                 // than none, because it is indistinguishable from a live one.
                 "Working out how long they'll be"}
           </p>
-        </div>
       </div>
 
       {/* The warmth of this screen comes from milestones crossed on a real journey, not from
