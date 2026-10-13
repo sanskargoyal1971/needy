@@ -72,7 +72,7 @@ export function LiveMap({
     L.tileLayer(TILE_URL, {
       attribution: ATTRIBUTION,
       maxZoom: 19,
-      // The document policy is `no-referrer` (see middleware.ts), and OpenStreetMap refuses
+      // The document policy is `no-referrer` (see proxy.ts), and OpenStreetMap refuses
       // tile requests that carry no Referer at all. Scoped to the tile images so every other
       // outbound request still sends nothing; `origin` never includes a path.
       referrerPolicy: "origin",

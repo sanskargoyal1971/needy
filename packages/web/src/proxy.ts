@@ -37,7 +37,7 @@ function connectOrigins(): string[] {
     origins.add(`${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}`);
   } catch {
     // A malformed API URL is a configuration error the app will hit anyway; the policy just
-    // omits it rather than throwing inside middleware on every request.
+    // omits it rather than throwing inside the proxy on every request.
   }
   return [...origins];
 }
@@ -56,7 +56,13 @@ function tileOrigin(): string | null {
   }
 }
 
-export function middleware(request: NextRequest) {
+/**
+ * `proxy`, formerly `middleware`. Next 16 renamed the file convention and the export; the
+ * behaviour this file relies on is unchanged, with one difference worth knowing: a proxy always
+ * runs on the Node.js runtime, never the edge one. Nothing here depended on the edge — `crypto`
+ * and `Buffer` are both Node globals — so the rename is the whole migration.
+ */
+export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
   const isDev = process.env.NODE_ENV === "development";
 
@@ -129,7 +135,7 @@ export const config = {
      * Everything except Next's own build output and static files.
      *
      * `_next/static` is immutable hashed content and `_next/image` is the image optimiser;
-     * neither is a document, so neither needs a policy, and running middleware on them costs
+     * neither is a document, so neither needs a policy, and running the proxy on them costs
      * a function invocation per asset.
      */
     {

@@ -20,6 +20,9 @@ import { TaskExperience } from "@/experience/TaskExperience";
  * the `use(params)` spelling from 15 throws at render — and it TYPECHECKS, because the prop
  * type is whatever the page declares it to be. `next build` was perfectly happy; the screen
  * crashed into the error boundary the first time it was opened in a browser.
+ *
+ * Now on Next 16 `params` IS a promise and `use(params)` would work. `useParams` is kept
+ * anyway: it is correct on both sides of the upgrade and needs no prop type to get wrong.
  */
 export default function TaskPage() {
   const { id } = useParams<{ id: string }>();

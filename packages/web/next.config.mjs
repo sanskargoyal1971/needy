@@ -2,22 +2,19 @@
 const nextConfig = {
   output: "standalone",
 
-  experimental: {
-    // The monorepo root is two levels up; without this Next infers the workspace root from
-    // the nearest lockfile and traces the wrong files into the standalone bundle. Lives under
-    // `experimental` in Next 14 — top-level is the Next 15 spelling and is silently ignored
-    // here (it warns as an unrecognized key rather than failing).
-    outputFileTracingRoot: new URL("../../", import.meta.url).pathname,
-  },
+  // The monorepo root is two levels up; without this Next infers the workspace root from
+  // the nearest lockfile and traces the wrong files into the standalone bundle. Top-level
+  // since Next 15 — it lived under `experimental` on 14, and the old spelling is now the one
+  // that is ignored. Turbopack reads its own root from the same value.
+  outputFileTracingRoot: new URL("../../", import.meta.url).pathname,
 
-  eslint: {
-    // Linting is owned by the root flat config (`npm run lint`), which already covers
-    // packages/web/src. Running `next lint` here as well loads eslint 8 alongside the root's
-    // eslint 9 and typescript-eslint 8, and the two resolve different copies of the same rule
-    // modules — which fails as "Cannot read properties of undefined (reading
-    // 'allowShortCircuit')". One linter, one config; the build does not need a second.
-    ignoreDuringBuilds: true,
-  },
+  // No `eslint` key: Next 16 removed both `next lint` and lint-during-build, so there is
+  // nothing left here to switch off. Linting is owned by the root flat config (`npm run lint`).
+
+  // `next dev` on 16 writes an AGENTS.md beside this file on every start. The repo already has
+  // one at the root that carries the project's security and design rules; a second, generated
+  // one in the package would sit closer to the code and so be read in preference to it.
+  agentRules: false,
 
   typescript: {
     // Deliberately NOT ignored. `next build` typechecking is a real gate and must stay one.
@@ -38,6 +35,17 @@ const nextConfig = {
      * The alternative was rewriting every relative import in those files to drop the
      * extension, which would make them inconsistent with the rest of the monorepo to work
      * around a bundler default. This is the same mapping tsc already performs.
+     *
+     * WHY THE SCRIPTS SAY `--webpack`. Next 16 builds with Turbopack unless told otherwise,
+     * and Turbopack has no equivalent of this option: `turbopack.resolveExtensions` only adds
+     * extensions to try on an extensionless import, `turbopack.resolveAlias` maps one
+     * specifier at a time, and `experimental.extensionAlias` is on Next's own list of options
+     * Turbopack ignores. Tried, not assumed — `next build --turbopack` on this tree fails with
+     * "Can't resolve './types.js'" at `src/realtime/index.ts`. So `dev` and `build` both opt
+     * into webpack explicitly, which keeps one resolver for development and production. The
+     * flag is load-bearing in a second way: without it Next 16 refuses to build at all when
+     * it finds a `webpack` function and no Turbopack config, precisely so that a block like
+     * this one cannot be silently skipped. Revisit when Turbopack grows the mapping.
      */
     config.resolve.extensionAlias = {
       ".js": [".ts", ".tsx", ".js"],
