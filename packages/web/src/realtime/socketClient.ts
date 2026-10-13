@@ -431,7 +431,11 @@ export class RealNeedyClient implements NeedyDriver {
     });
     this.tracking.on("eta", ({ taskId, etaSeconds, distanceMeters }) => {
       if (taskId !== this.taskId) return;
-      const milestone = nextMilestone(this.state.eta?.etaSeconds ?? null, etaSeconds, this.state.helper);
+      const milestone = nextMilestone(
+        this.state.eta?.etaSeconds ?? null,
+        etaSeconds,
+        this.state.helper,
+      );
       this.patch({
         eta: { etaSeconds, distanceMeters },
         milestones: milestone ? [...this.state.milestones, milestone] : this.state.milestones,
@@ -448,9 +452,7 @@ export class RealNeedyClient implements NeedyDriver {
     });
     this.chat.on("receipt-changed", ({ messageId, status }) => {
       this.patch({
-        messages: this.state.messages.map((m) =>
-          m.id === messageId ? { ...m, status } : m,
-        ),
+        messages: this.state.messages.map((m) => (m.id === messageId ? { ...m, status } : m)),
       });
     });
     this.chat.on("helper-typing", ({ taskId, userId, isTyping }) => {

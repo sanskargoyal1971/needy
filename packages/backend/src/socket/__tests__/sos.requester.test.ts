@@ -102,9 +102,7 @@ function raise(
   kind: SosAlert["kind"],
   extras: { at?: { lat: number; lng: number }; note?: string } = {},
 ): Promise<RaiseAck> {
-  return new Promise((resolve) =>
-    socket.emit("raise", { taskId, kind, ...extras }, resolve),
-  );
+  return new Promise((resolve) => socket.emit("raise", { taskId, kind, ...extras }, resolve));
 }
 
 function cancel(socket: SosSocketClient, alertId: string): Promise<CancelAck> {
@@ -119,10 +117,7 @@ function nextEvent<K extends "sos-raised" | "sos-updated">(
   ms = 3_000,
 ): Promise<SosAlert> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`timed out waiting for ${event}`)),
-      ms,
-    );
+    const timer = setTimeout(() => reject(new Error(`timed out waiting for ${event}`)), ms);
     (socket as any).once(event, (alert: any) => {
       clearTimeout(timer);
       resolve(alert as SosAlert);
@@ -132,10 +127,7 @@ function nextEvent<K extends "sos-raised" | "sos-updated">(
 
 function nextError(socket: SosSocketClient, ms = 3_000): Promise<SocketErrorPayload> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("timed out waiting for an error event")),
-      ms,
-    );
+    const timer = setTimeout(() => reject(new Error("timed out waiting for an error event")), ms);
     socket.once("error", (payload) => {
       clearTimeout(timer);
       resolve(payload as SocketErrorPayload);
@@ -172,7 +164,15 @@ describe("requester SOS reaches a real server (frontend audit: the button called
       state: "in-progress",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
+      description: "test",
+      price: 100,
+      serviceCode: null,
+      scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
+      createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
 

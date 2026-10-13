@@ -60,9 +60,7 @@ function Security() {
   }, [load]);
 
   const home =
-    state.status === "authenticated"
-      ? homeFor(state.user.role, state.user.onboardingStatus)
-      : "/";
+    state.status === "authenticated" ? homeFor(state.user.role, state.user.onboardingStatus) : "/";
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -76,7 +74,9 @@ function Security() {
       return;
     }
     if (next.length < MIN_LENGTH) {
-      setError(`Please use at least ${MIN_LENGTH} characters. A few words you'll remember is ideal.`);
+      setError(
+        `Please use at least ${MIN_LENGTH} characters. A few words you'll remember is ideal.`,
+      );
       return;
     }
 
@@ -128,8 +128,8 @@ function Security() {
         Signing in to your account
       </h1>
       <p className="mt-2 text-gray-600">
-        We&apos;ll always text you a code if you want one. A password is an extra way in — handy
-        if you don&apos;t have your phone with you, or if texts aren&apos;t arriving.
+        We&apos;ll always text you a code if you want one. A password is an extra way in — handy if
+        you don&apos;t have your phone with you, or if texts aren&apos;t arriving.
       </p>
 
       {hasPassword == null ? (

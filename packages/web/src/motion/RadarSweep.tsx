@@ -2,12 +2,7 @@
 
 import { motion } from "framer-motion";
 import type { CSSProperties } from "react";
-import {
-  duration as D,
-  ease as E,
-  resolveColor,
-  type MotionColor,
-} from "./motion.config.js";
+import { duration as D, ease as E, resolveColor, type MotionColor } from "./motion.config.js";
 import { useReducedMotionPref } from "./preferences.js";
 
 /** A helper found nearby, placed on the radar by normalized offset from center.
@@ -134,7 +129,10 @@ export function RadarSweep({
           />
         );
         return reduced ? (
-          <div key={b.id} style={{ position: "absolute", left, top, transform: "translate(-50%,-50%)" }}>
+          <div
+            key={b.id}
+            style={{ position: "absolute", left, top, transform: "translate(-50%,-50%)" }}
+          >
             {dot}
           </div>
         ) : (

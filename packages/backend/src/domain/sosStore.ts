@@ -34,12 +34,7 @@ export interface SosRepository {
    * Close an alert with an account of what happened. Guarded to the open statuses, so
    * resolving twice is a no-op rather than a silent overwrite of the first operator's note.
    */
-  resolve(
-    alertId: string,
-    operatorId: string,
-    note: string,
-    at: number,
-  ): Promise<SosAlert | null>;
+  resolve(alertId: string, operatorId: string, note: string, at: number): Promise<SosAlert | null>;
 
   /** The console's queue: everything still owed an answer, OLDEST FIRST. The person waiting
    *  longest is the one to answer next — see the index comment in migration 5. */
@@ -116,8 +111,7 @@ export function createInMemorySosRepo(): SosRepository {
         .slice(0, limit);
     },
     async countRaisedBySince(userId, since) {
-      return [...byId.values()].filter((a) => a.raisedBy === userId && a.createdAt >= since)
-        .length;
+      return [...byId.values()].filter((a) => a.raisedBy === userId && a.createdAt >= since).length;
     },
   };
 }
@@ -185,10 +179,9 @@ export function createPgSosRepo(pool: DbPool): SosRepository {
       return alert;
     },
     async get(alertId) {
-      const { rows } = await pool.query<SosRow>(
-        `SELECT * FROM sos_alerts WHERE id = $1`,
-        [alertId],
-      );
+      const { rows } = await pool.query<SosRow>(`SELECT * FROM sos_alerts WHERE id = $1`, [
+        alertId,
+      ]);
       return rows[0] ? rowToAlert(rows[0]) : null;
     },
     async setStatus(alertId, status, at) {

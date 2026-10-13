@@ -2,7 +2,13 @@
 
 import { motion } from "framer-motion";
 
-export function BreathingBackground({ children, className = "" }: { children?: React.ReactNode, className?: string }) {
+export function BreathingBackground({
+  children,
+  className = "",
+}: {
+  children?: React.ReactNode;
+  className?: string;
+}) {
   return (
     <div className={`relative overflow-hidden ${className}`}>
       <motion.div
@@ -18,9 +24,7 @@ export function BreathingBackground({ children, className = "" }: { children?: R
           ease: "easeInOut",
         }}
       />
-      <div className="relative z-10 h-full w-full">
-        {children}
-      </div>
+      <div className="relative z-10 h-full w-full">{children}</div>
     </div>
   );
 }

@@ -8,11 +8,7 @@ import type {
   Task,
   TaskState,
 } from "@needy/shared";
-import {
-  initialTaskState,
-  type NeedyDriver,
-  type TaskExperienceState,
-} from "./types.js";
+import { initialTaskState, type NeedyDriver, type TaskExperienceState } from "./types.js";
 import { nextMilestone } from "./milestones.js";
 
 const ORIGIN: LatLng = { lat: 12.9716, lng: 77.5946 };
@@ -113,7 +109,12 @@ export class MockNeedyClient implements NeedyDriver {
       this.patch({
         task: this.makeTask("matched", HELPER.id),
         helper: HELPER,
-        presence: { userId: HELPER.id, state: "online-available", activity: "just-finished-nearby", lastActiveAt: 0 },
+        presence: {
+          userId: HELPER.id,
+          state: "online-available",
+          activity: "just-finished-nearby",
+          lastActiveAt: 0,
+        },
       }),
     );
 
@@ -124,7 +125,12 @@ export class MockNeedyClient implements NeedyDriver {
     this.at(9200, () => {
       this.patch({
         task: this.makeTask("en-route", HELPER.id),
-        presence: { userId: HELPER.id, state: "online-busy", activity: "heading-to-task", lastActiveAt: 0 },
+        presence: {
+          userId: HELPER.id,
+          state: "online-busy",
+          activity: "heading-to-task",
+          lastActiveAt: 0,
+        },
       });
       this.driveApproach();
     });

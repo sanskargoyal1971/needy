@@ -8,11 +8,7 @@ import {
 } from "@needy/shared";
 import type { NamespaceRegistrar } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
-import {
-  removeHelperGeo,
-  sweepStaleHelperGeo,
-  upsertHelperGeo,
-} from "../domain/location-store.js";
+import { removeHelperGeo, sweepStaleHelperGeo, upsertHelperGeo } from "../domain/location-store.js";
 import {
   addPresenceSub,
   decrSocketCount,
@@ -89,8 +85,7 @@ export const registerPresence: NamespaceRegistrar = (deps) => {
         try {
           const current = await readPresence(client, userId);
           // A heartbeat proves the user is back; lift a prior away flip.
-          const state =
-            current?.state === "away" ? "online-available" : current?.state;
+          const state = current?.state === "away" ? "online-available" : current?.state;
           const presence = await patchPresence(client, userId, {
             lastActiveAt: deps.now(),
             ...(state ? { state } : {}),

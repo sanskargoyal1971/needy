@@ -6,10 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { HOSPITAL_SERVICE_CODE } from "@needy/shared";
 import { signAccessToken } from "../../auth/jwt.js";
-import {
-  createInMemoryPhoneBlockRepo,
-  type PhoneBlockRepository,
-} from "../../auth/phoneBlocks.js";
+import { createInMemoryPhoneBlockRepo, type PhoneBlockRepository } from "../../auth/phoneBlocks.js";
 import {
   createInMemorySessionRepo,
   createInMemoryUserRepo,
@@ -26,10 +23,7 @@ import {
 import { LocalDiskStorage } from "../../services/storage.js";
 import { createVerificationRouter } from "../verification.js";
 import { createInMemoryAdminUserQueries } from "../verificationRepo.js";
-import {
-  createInMemoryServiceCatalog,
-  type ServiceCatalog,
-} from "../../services/catalog.js";
+import { createInMemoryServiceCatalog, type ServiceCatalog } from "../../services/catalog.js";
 
 const NOW = Date.UTC(2026, 7, 9);
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(60)]);
@@ -49,8 +43,7 @@ describe("admin verification surface", () => {
 
   const ADMIN = "admin-1";
   const adminToken = signAccessToken({ sub: ADMIN, role: "admin", displayName: "Ops" });
-  const userToken = (sub: string) =>
-    signAccessToken({ sub, role: "requester", displayName: sub });
+  const userToken = (sub: string) => signAccessToken({ sub, role: "requester", displayName: sub });
 
   beforeAll(async () => {
     storageRoot = await mkdtemp(join(tmpdir(), "needy-admin-"));
@@ -320,7 +313,7 @@ describe("admin verification surface", () => {
           documents,
           phoneBlocks,
           queries: createInMemoryAdminUserQueries(() => users.all()),
-        services,
+          services,
           storage,
           audit: createLoggingAuditLogger(),
 
@@ -458,7 +451,9 @@ describe("admin verification surface", () => {
 
     it("serves bytes for a valid signature and admin session", async () => {
       await seedApplicant("u1", "+919000000001");
-      const res = await asAdmin(request(app).get(`/admin/documents/raw${await signedUrlFor("u1")}`));
+      const res = await asAdmin(
+        request(app).get(`/admin/documents/raw${await signedUrlFor("u1")}`),
+      );
 
       expect(res.status).toBe(200);
       expect(res.headers["content-type"]).toContain("image/jpeg");
@@ -488,9 +483,9 @@ describe("admin verification surface", () => {
 
       const tampered = new URLSearchParams(qs);
       tampered.set("key", "kyc/u2/gov_id.jpg");
-      expect(
-        (await asAdmin(request(app).get(`/admin/documents/raw?${tampered}`))).status,
-      ).toBe(403);
+      expect((await asAdmin(request(app).get(`/admin/documents/raw?${tampered}`))).status).toBe(
+        403,
+      );
 
       const noSig = new URLSearchParams(qs);
       noSig.delete("sig");
@@ -510,7 +505,7 @@ describe("admin verification surface", () => {
           documents,
           phoneBlocks,
           queries: createInMemoryAdminUserQueries(() => users.all()),
-        services,
+          services,
           storage,
           audit: createLoggingAuditLogger(),
 

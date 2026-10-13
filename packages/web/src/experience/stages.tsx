@@ -76,18 +76,14 @@ export function SearchingStage({
   helpersNearby: { count: number; approxPoints: LatLng[]; restrictedNearby: number };
 }) {
   const blips =
-    helpersNearby.approxPoints.length > 0
-      ? blipsFrom(origin, helpersNearby.approxPoints)
-      : [];
+    helpersNearby.approxPoints.length > 0 ? blipsFrom(origin, helpersNearby.approxPoints) : [];
 
   return (
     <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center">
       <div className="mx-auto mb-6 flex justify-center">
         <RadarSweep size={180} blips={blips} />
       </div>
-      <h2 className="font-display text-2xl font-bold text-gray-900">
-        Looking for someone nearby
-      </h2>
+      <h2 className="font-display text-2xl font-bold text-gray-900">Looking for someone nearby</h2>
       {/* The count is the honest thing to show, and it is a real count — the server sends
           `helpers-nearby` with coarsened pins as each ring of the escalation ladder is
           offered. "Searching…" with a spinner would be the same screen carrying no
@@ -118,9 +114,9 @@ export function SearchingStage({
               : `${helpersNearby.restrictedNearby} people are nearby, but we can't match you automatically`}
           </p>
           <p className="mt-1 text-sm text-amber-900">
-            For safety we don&apos;t automatically pair two adults under 36 of different
-            genders. It isn&apos;t about you — it applies to everyone, both ways round.
-            We&apos;re still widening the search for someone else.
+            For safety we don&apos;t automatically pair two adults under 36 of different genders. It
+            isn&apos;t about you — it applies to everyone, both ways round. We&apos;re still
+            widening the search for someone else.
           </p>
           <Link
             href={paths.exceptions()}
@@ -131,8 +127,7 @@ export function SearchingStage({
         </div>
       )}
       <p className="mt-4 text-sm text-gray-500">
-        You can close this page — we&apos;ll keep looking and it will be here when you come
-        back.
+        You can close this page — we&apos;ll keep looking and it will be here when you come back.
       </p>
     </div>
   );
@@ -174,9 +169,9 @@ export function BookedStage({ task }: { task: PublicTask }) {
       </p>
       <div className="mt-6">
         <SandboxNote>
-          Automatic dispatch at the booked time is not built yet. This booking is recorded and
-          held for your helper, but nothing will notify them when the time comes — for now, a
-          member of our team has to set it going.
+          Automatic dispatch at the booked time is not built yet. This booking is recorded and held
+          for your helper, but nothing will notify them when the time comes — for now, a member of
+          our team has to set it going.
         </SandboxNote>
       </div>
     </div>
@@ -222,9 +217,7 @@ export function VerifyingStage({ helper }: { helper: MatchedHelper | null }) {
   return (
     <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center">
       <Video size={28} className="mx-auto mb-3 text-primary" aria-hidden />
-      <h2 className="font-display text-2xl font-bold text-gray-900">
-        A quick look at each other
-      </h2>
+      <h2 className="font-display text-2xl font-bold text-gray-900">A quick look at each other</h2>
       <p className="mx-auto mt-2 max-w-md text-gray-600">
         {helper?.displayName ?? "Your helper"} is confirming who they are before setting off.
       </p>
@@ -233,8 +226,8 @@ export function VerifyingStage({ helper }: { helper: MatchedHelper | null }) {
           here would be exactly the kind of lie the whole platform is built to avoid. */}
       <div className="mt-6">
         <SandboxNote>
-          The live video call is not built yet. This step currently just marks the task as
-          verified — no camera is opened and no call takes place.
+          The live video call is not built yet. This step currently just marks the task as verified
+          — no camera is opened and no call takes place.
         </SandboxNote>
       </div>
     </div>
@@ -267,17 +260,17 @@ export function EnRouteStage({
         />
       </div>
       <div className="rounded-3xl border border-white/40 bg-white/40 p-5 backdrop-blur-xl shadow-3d-card transform perspective-1000 rotate-x-1">
-          <h2 className="font-display text-xl font-bold text-gray-900">
-            {helper?.displayName ?? "Your helper"} is on the way
-          </h2>
-          <p className="mt-1 text-gray-600">
-            {eta
-              ? aboutMinutes(eta.etaSeconds)
-              : // Said plainly rather than shown as a stale number. An ETA that silently
-                // keeps displaying its last value while the phone is in a dead zone is worse
-                // than none, because it is indistinguishable from a live one.
-                "Working out how long they'll be"}
-          </p>
+        <h2 className="font-display text-xl font-bold text-gray-900">
+          {helper?.displayName ?? "Your helper"} is on the way
+        </h2>
+        <p className="mt-1 text-gray-600">
+          {eta
+            ? aboutMinutes(eta.etaSeconds)
+            : // Said plainly rather than shown as a stale number. An ETA that silently
+              // keeps displaying its last value while the phone is in a dead zone is worse
+              // than none, because it is indistinguishable from a live one.
+              "Working out how long they'll be"}
+        </p>
       </div>
 
       {/* The warmth of this screen comes from milestones crossed on a real journey, not from
@@ -298,13 +291,7 @@ export function EnRouteStage({
 
 // ── Stage 5: arrived — and the requester's half of the handoff ───────────────
 
-export function ArrivedStage({
-  task,
-  helper,
-}: {
-  task: PublicTask;
-  helper: MatchedHelper | null;
-}) {
+export function ArrivedStage({ task, helper }: { task: PublicTask; helper: MatchedHelper | null }) {
   const [code, setCode] = useState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -344,9 +331,7 @@ export function ArrivedStage({
         <h2 className="font-display text-2xl font-bold text-gray-900">
           {helper?.displayName ?? "Your helper"} is at your door
         </h2>
-        <p className="mt-2 text-gray-600">
-          Take a moment. Nothing starts until you say so.
-        </p>
+        <p className="mt-2 text-gray-600">Take a moment. Nothing starts until you say so.</p>
       </div>
 
       {/* What they say they will do, BEFORE the code exists. The order is the point: the code
@@ -427,9 +412,7 @@ export function InProgressStage({
 
   return (
     <div className="rounded-3xl border border-gray-100 bg-white p-6">
-      <h2 className="font-display text-xl font-bold text-gray-900">
-        {helperName} is helping you
-      </h2>
+      <h2 className="font-display text-xl font-bold text-gray-900">{helperName} is helping you</h2>
       <p className="mt-1 text-gray-600">
         Message them if you need to. Press the red button if anything feels wrong.
       </p>
@@ -440,8 +423,8 @@ export function InProgressStage({
           {/* Says what ends, rather than only what happens. Someone about to lose the alarm
               and the chat deserves to be told that is what they are agreeing to. */}
           <p className="mt-1 text-sm text-gray-600">
-            This ends the visit. You will no longer be able to message {helperName} or raise
-            an alarm from this screen.
+            This ends the visit. You will no longer be able to message {helperName} or raise an
+            alarm from this screen.
           </p>
           <div className="mt-4 flex gap-3">
             <button
@@ -505,8 +488,8 @@ export function UnmatchedStage() {
         Nobody was available this time
       </h2>
       <p className="mt-2 text-gray-600">
-        We asked the verified helpers near you, widening the search each time, and no one could take it. Nothing was
-        charged. Helpers come and go through the day, so it is worth asking again.
+        We asked the verified helpers near you, widening the search each time, and no one could take
+        it. Nothing was charged. Helpers come and go through the day, so it is worth asking again.
       </p>
       <Link
         href={paths.newRequest}
@@ -514,9 +497,7 @@ export function UnmatchedStage() {
       >
         Ask again
       </Link>
-      <p className="mt-4 text-sm text-gray-500">
-        If this is an emergency, call 112.
-      </p>
+      <p className="mt-4 text-sm text-gray-500">If this is an emergency, call 112.</p>
     </div>
   );
 }

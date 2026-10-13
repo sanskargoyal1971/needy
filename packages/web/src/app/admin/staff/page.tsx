@@ -52,9 +52,8 @@ export default function StaffPage() {
       <div className="rounded-2xl border border-gray-200 bg-white p-6">
         <h2 className="font-display text-lg font-bold text-gray-900">Not your surface</h2>
         <p className="mt-1 text-sm text-gray-600">
-          Only a super admin can add or remove operators. That separation is deliberate: an
-          operator who could create operators could review their own decisions under a second
-          account.
+          Only a super admin can add or remove operators. That separation is deliberate: an operator
+          who could create operators could review their own decisions under a second account.
         </p>
       </div>
     );
@@ -202,9 +201,7 @@ export default function StaffPage() {
                     {m.phone} · added {absoluteTime(m.createdAt)}
                   </p>
                   {!m.active && m.deactivatedReason && (
-                    <p className="mt-0.5 text-sm text-gray-500">
-                      Reason: {m.deactivatedReason}
-                    </p>
+                    <p className="mt-0.5 text-sm text-gray-500">Reason: {m.deactivatedReason}</p>
                   )}
                 </div>
 

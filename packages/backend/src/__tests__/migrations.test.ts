@@ -98,9 +98,7 @@ describe("versioned migration runner", () => {
     try {
       // Five simultaneous boots against one empty database — the scenario that made the old
       // "run the DDL every time" approach raise duplicate-table errors in the losers.
-      const results = await Promise.all(
-        Array.from({ length: 5 }, () => migrate(pool, silent)),
-      );
+      const results = await Promise.all(Array.from({ length: 5 }, () => migrate(pool, silent)));
 
       // Exactly one migrator did the work; the rest waited on the advisory lock and then found
       // the ledger already populated.
@@ -146,13 +144,9 @@ describe("versioned migration runner", () => {
   it("reports pending migrations without applying them", async () => {
     const pool = await freshDb("pending");
     try {
-      expect((await pendingMigrations(pool)).map((m) => m.id)).toEqual(
-        MIGRATIONS.map((m) => m.id),
-      );
+      expect((await pendingMigrations(pool)).map((m) => m.id)).toEqual(MIGRATIONS.map((m) => m.id));
       // Still pending: asking must not have applied anything.
-      expect((await pendingMigrations(pool)).map((m) => m.id)).toEqual(
-        MIGRATIONS.map((m) => m.id),
-      );
+      expect((await pendingMigrations(pool)).map((m) => m.id)).toEqual(MIGRATIONS.map((m) => m.id));
 
       await migrate(pool, silent);
       expect(await pendingMigrations(pool)).toEqual([]);
@@ -187,9 +181,7 @@ describe("versioned migration runner", () => {
       );
       expect(tables).toHaveLength(0);
 
-      const { rows: ledger } = await pool.query(
-        "SELECT id FROM schema_migrations WHERE id = 9001",
-      );
+      const { rows: ledger } = await pool.query("SELECT id FROM schema_migrations WHERE id = 9001");
       expect(ledger).toHaveLength(0);
 
       // And the lock must still have been released, or the failure would wedge every retry.

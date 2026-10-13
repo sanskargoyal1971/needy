@@ -14,7 +14,10 @@ function num(name: string, fallback: number): number {
 function numList(name: string, fallback: number[]): number[] {
   const raw = process.env[name];
   if (raw == null || raw === "") return fallback;
-  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const parts = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const nums = parts.map((p) => {
     const n = Number(p);
     if (Number.isNaN(n) || n <= 0) throw new Error(`env ${name} has a non-positive entry: ${p}`);
@@ -161,10 +164,7 @@ export const config = {
     /** Secure cookies require HTTPS; disable for local http dev via env. */
     cookieSecure: (process.env.COOKIE_SECURE ?? "false") === "true",
     /** Cross-site strategy. Strict is safest; the SPA is same-site in prod. */
-    cookieSameSite: (process.env.COOKIE_SAMESITE ?? "strict") as
-      | "strict"
-      | "lax"
-      | "none",
+    cookieSameSite: (process.env.COOKIE_SAMESITE ?? "strict") as "strict" | "lax" | "none",
     otp: {
       length: num("OTP_LENGTH", 6),
       ttlSeconds: num("OTP_TTL_SECONDS", 300),

@@ -67,11 +67,7 @@ export const TERMINAL_ONBOARDING_STATES: readonly OnboardingStatus[] = ["rejecte
  *  identity judgement the packet exists to support. */
 export type DocumentKind = "gov_id" | "selfie" | "video_testimony";
 
-export const REQUIRED_DOCUMENTS: readonly DocumentKind[] = [
-  "gov_id",
-  "selfie",
-  "video_testimony",
-];
+export const REQUIRED_DOCUMENTS: readonly DocumentKind[] = ["gov_id", "selfie", "video_testimony"];
 
 export function isDocumentKind(v: unknown): v is DocumentKind {
   return typeof v === "string" && (REQUIRED_DOCUMENTS as readonly string[]).includes(v);

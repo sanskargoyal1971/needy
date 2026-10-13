@@ -1,10 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import {
-  DOCUMENT_LABELS,
-  isOnboardingStatus,
-  REQUIRED_DOCUMENTS,
-} from "@needy/shared";
+import { DOCUMENT_LABELS, isOnboardingStatus, REQUIRED_DOCUMENTS } from "@needy/shared";
 import type { AuditLogger } from "../audit/log.js";
 import { readAuditLog } from "../audit/log.js";
 import { requireAuth, requireRole, type AuthedRequest } from "../auth/middleware.js";
@@ -457,7 +453,8 @@ export function createVerificationRouter(deps: VerificationRouterDeps): Router {
     "/admin/users",
     ...adminOnly,
     asyncRoute(async (req: AuthedRequest, res: Response) => {
-      const search = typeof req.query.q === "string" && req.query.q.trim() ? req.query.q.trim() : undefined;
+      const search =
+        typeof req.query.q === "string" && req.query.q.trim() ? req.query.q.trim() : undefined;
       const limit = Math.min(Math.max(Number(req.query.limit ?? 50) || 50, 1), 200);
       res.json({ users: await deps.queries.listUsers({ search, limit }) });
     }),

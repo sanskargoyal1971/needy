@@ -55,8 +55,7 @@ type AppClient = ClientSocket<ServerToClient, ClientToServer>;
 
 /** The accept ack shape, mirrored from MatchingClientEvents["accept"]. */
 type AcceptAck =
-  | { won: true; task: PublicTask }
-  | { won: false; reason: "already-taken" | "expired" };
+  { won: true; task: PublicTask } | { won: false; reason: "already-taken" | "expired" };
 type RequestHelpAck = { ok: true } | { ok: false; error: string };
 
 const ORIGIN = { lat: 12.9716, lng: 77.5946 };
@@ -84,12 +83,7 @@ function installGeoShim(mock: MockRedis): void {
     return 2 * R * Math.asin(Math.sqrt(s));
   };
 
-  mock.geoadd = async (
-    _key: string,
-    lng: number,
-    lat: number,
-    member: string,
-  ): Promise<number> => {
+  mock.geoadd = async (_key: string, lng: number, lat: number, member: string): Promise<number> => {
     points.set(member, { lng: Number(lng), lat: Number(lat) });
     return 1;
   };
@@ -241,7 +235,15 @@ describe("/matching double-accept race (§2.4)", () => {
       state: "searching",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
+      description: "test",
+      price: 100,
+      serviceCode: null,
+      scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
+      createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
 
@@ -273,8 +275,8 @@ describe("/matching double-accept race (§2.4)", () => {
       });
       await users.create(
         makeUser({
-        dateOfBirth: "1985-06-15",
-        gender: "male",
+          dateOfBirth: "1985-06-15",
+          gender: "male",
           id: helperId,
           phone: `+9199990${helperId.slice(-1)}`,
           displayName: helperId,

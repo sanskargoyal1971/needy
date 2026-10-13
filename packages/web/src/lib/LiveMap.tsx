@@ -9,8 +9,7 @@ import { duration as D, ease as E } from "../motion/index.js";
 import { useReducedMotionPref } from "../motion/preferences.js";
 
 const TILE_URL =
-  process.env.NEXT_PUBLIC_MAP_TILE_URL ??
-  "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+  process.env.NEXT_PUBLIC_MAP_TILE_URL ?? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const ATTRIBUTION =
   process.env.NEXT_PUBLIC_MAP_ATTRIBUTION ??
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
@@ -134,10 +133,9 @@ export function LiveMap({
     // Frame both origin and helper the first time we have a fix.
     if (!fittedRef.current) {
       fittedRef.current = true;
-      map.fitBounds(
-        L.latLngBounds([origin.lat, origin.lng], [helper.lat, helper.lng]).pad(0.4),
-        { animate: false },
-      );
+      map.fitBounds(L.latLngBounds([origin.lat, origin.lng], [helper.lat, helper.lng]).pad(0.4), {
+        animate: false,
+      });
     }
     firstPointRef.current = false;
 
@@ -150,7 +148,9 @@ export function LiveMap({
 
   // ── heading: rotate the silhouette to face travel ──────────────────────────
   useEffect(() => {
-    const el = helperMarkerRef.current?.getElement()?.querySelector<HTMLElement>(".needy-silhouette");
+    const el = helperMarkerRef.current
+      ?.getElement()
+      ?.querySelector<HTMLElement>(".needy-silhouette");
     if (el) el.style.transform = `rotate(${heading}deg)`;
   }, [heading]);
 

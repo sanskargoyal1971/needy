@@ -20,12 +20,12 @@ packages/
 
 ## Build phases (following the companion spec's own order)
 
-| Phase | Scope | Spec | Status |
-|------|-------|------|--------|
-| **0** | Monorepo scaffold, frozen event contracts, infra compose | — | ✅ |
-| **1** | Realtime backend: presence, tracking, matching, chat — **no animation** | §2 | ✅ typecheck + 3 tests |
-| **2** | Motion vocabulary library in isolation + playground | §4, §5.2 | ✅ typecheck + build |
-| **3** | Wire Stage 1–7 animations to real socket events | §3, §5.3 | ✅ typecheck + build + runtime smoke |
+| Phase | Scope                                                                   | Spec     | Status                               |
+| ----- | ----------------------------------------------------------------------- | -------- | ------------------------------------ |
+| **0** | Monorepo scaffold, frozen event contracts, infra compose                | —        | ✅                                   |
+| **1** | Realtime backend: presence, tracking, matching, chat — **no animation** | §2       | ✅ typecheck + 3 tests               |
+| **2** | Motion vocabulary library in isolation + playground                     | §4, §5.2 | ✅ typecheck + build                 |
+| **3** | Wire Stage 1–7 animations to real socket events                         | §3, §5.3 | ✅ typecheck + build + runtime smoke |
 
 ## Frontend (Phases 2–3)
 
@@ -69,7 +69,7 @@ with the same short-lived JWT as REST.
   Flips to `away` only after 2 missed heartbeats (dead-zone flicker guard), and
   broadcasts changes **only** to a helper's subscribers, never globally.
 - **Tracking** (`/tracking`) — helper posts location every 3–5s; server stores only
-  the *current* point in Redis (TTL'd, no trail) and recomputes real-road ETA. Smooth
+  the _current_ point in Redis (TTL'd, no trail) and recomputes real-road ETA. Smooth
   marker interpolation is the client's job.
 - **Matching** (`/matching`) — Redis `GEOSEARCH` over online-available helpers, offers
   broadcast to all eligible helpers **simultaneously** with an accept window;

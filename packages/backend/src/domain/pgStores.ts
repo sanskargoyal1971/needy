@@ -1,10 +1,6 @@
 import type { ChatMessage, MatchedHelper, Task } from "@needy/shared";
 import type { DbPool } from "../db.js";
-import type {
-  HelperProfileRepository,
-  MessageRepository,
-  TaskRepository,
-} from "./stores.js";
+import type { HelperProfileRepository, MessageRepository, TaskRepository } from "./stores.js";
 
 /**
  * Postgres implementations of the durable repositories (§2.5). They satisfy exactly the same
@@ -51,8 +47,7 @@ function rowToTask(r: TaskRow): Task {
     scheduledFor: r.scheduled_for == null ? null : Number(r.scheduled_for),
     serviceBrief: r.service_brief ?? null,
     handoffOtpHash: r.handoff_otp_hash ?? null,
-    handoffOtpExpiresAt:
-      r.handoff_otp_expires_at == null ? null : Number(r.handoff_otp_expires_at),
+    handoffOtpExpiresAt: r.handoff_otp_expires_at == null ? null : Number(r.handoff_otp_expires_at),
     handoffVerifiedAt: r.handoff_verified_at == null ? null : Number(r.handoff_verified_at),
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
@@ -183,7 +178,14 @@ export function createPgMessageRepo(pool: DbPool): MessageRepository {
       await pool.query(
         `INSERT INTO messages (id, task_id, sender_id, body, created_at, status)
          VALUES ($1,$2,$3,$4,$5,$6)`,
-        [message.id, message.taskId, message.senderId, message.body, message.createdAt, message.status],
+        [
+          message.id,
+          message.taskId,
+          message.senderId,
+          message.body,
+          message.createdAt,
+          message.status,
+        ],
       );
       return message;
     },
@@ -217,10 +219,9 @@ export function createPgMessageRepo(pool: DbPool): MessageRepository {
     },
 
     async get(messageId) {
-      const { rows } = await pool.query<MessageRow>(
-        `SELECT * FROM messages WHERE id = $1`,
-        [messageId],
-      );
+      const { rows } = await pool.query<MessageRow>(`SELECT * FROM messages WHERE id = $1`, [
+        messageId,
+      ]);
       return rows[0] ? rowToMessage(rows[0]) : null;
     },
   };

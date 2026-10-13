@@ -77,8 +77,11 @@ describe("staff administration", () => {
     );
   });
 
-  const create = (body: Record<string, unknown>, who = "root", role: "admin" | "super_admin" = "super_admin") =>
-    as(request(app).post("/admin/staff"), who, role).send(body);
+  const create = (
+    body: Record<string, unknown>,
+    who = "root",
+    role: "admin" | "super_admin" = "super_admin",
+  ) => as(request(app).post("/admin/staff"), who, role).send(body);
 
   const NEW_STAFF = {
     phone: "+919000000055",
@@ -97,9 +100,11 @@ describe("staff administration", () => {
     expect((await create(NEW_STAFF, "ops", "admin")).status).toBe(403);
     expect((await as(request(app).get("/admin/staff"), "ops", "admin")).status).toBe(403);
     expect(
-      (await as(request(app).post("/admin/staff/ops/deactivate"), "ops", "admin").send({
-        reason: "x",
-      })).status,
+      (
+        await as(request(app).post("/admin/staff/ops/deactivate"), "ops", "admin").send({
+          reason: "x",
+        })
+      ).status,
     ).toBe(403);
   });
 
@@ -170,8 +175,11 @@ describe("staff administration", () => {
       revokedAt: null,
     });
 
-    const res = await as(request(app).post("/admin/staff/ops/deactivate"), "root", "super_admin")
-      .send({ reason: "left the team" });
+    const res = await as(
+      request(app).post("/admin/staff/ops/deactivate"),
+      "root",
+      "super_admin",
+    ).send({ reason: "left the team" });
     expect(res.status).toBe(200);
     expect(res.body.staff.active).toBe(false);
 
@@ -194,8 +202,11 @@ describe("staff administration", () => {
   /** Locking yourself out of the only account that can unlock accounts is unrecoverable
    *  without a database console. */
   it("refuses to deactivate yourself", async () => {
-    const res = await as(request(app).post("/admin/staff/root/deactivate"), "root", "super_admin")
-      .send({ reason: "oops" });
+    const res = await as(
+      request(app).post("/admin/staff/root/deactivate"),
+      "root",
+      "super_admin",
+    ).send({ reason: "oops" });
     expect(res.status).toBe(403);
     expect(res.body.error).toBe("cannot-deactivate-self");
   });
@@ -211,16 +222,17 @@ describe("staff administration", () => {
         onboardingStatus: "approved",
       }),
     );
-    const res = await as(request(app).post("/admin/staff/root2/deactivate"), "root", "super_admin")
-      .send({ reason: "no" });
+    const res = await as(
+      request(app).post("/admin/staff/root2/deactivate"),
+      "root",
+      "super_admin",
+    ).send({ reason: "no" });
     expect(res.status).toBe(403);
     expect(res.body.error).toBe("cannot-deactivate-super-admin");
   });
 
   it("lists operators and nobody else", async () => {
-    await users.create(
-      makeUser({ id: "asha", phone: "+919000000077", displayName: "Asha" }),
-    );
+    await users.create(makeUser({ id: "asha", phone: "+919000000077", displayName: "Asha" }));
     const res = await as(request(app).get("/admin/staff"), "root", "super_admin");
     expect(res.status).toBe(200);
     expect(res.body.staff.map((s: { id: string }) => s.id).sort()).toEqual(["ops", "root"]);

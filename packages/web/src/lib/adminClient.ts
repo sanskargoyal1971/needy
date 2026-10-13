@@ -6,7 +6,13 @@
 
 import type { AbuseRollup, AbuseSignal, SosAlert } from "@needy/shared";
 import { csrfFetch } from "./csrf";
-import { AuthError, type DocumentKind, type Gender, type OnboardingStatus, type Role } from "./authClient";
+import {
+  AuthError,
+  type DocumentKind,
+  type Gender,
+  type OnboardingStatus,
+  type Role,
+} from "./authClient";
 
 export interface QueueEntry {
   id: string;
@@ -163,11 +169,14 @@ export const adminClient = {
       `/admin/verifications/${encodeURIComponent(userId)}`,
     ),
 
-  decide: (userId: string, body: { decision: "approve" | "reject"; reason?: string; role?: Role }) =>
-    call<{ user: PacketUser }>(
-      `/admin/verifications/${encodeURIComponent(userId)}/decision`,
-      { method: "POST", body: JSON.stringify(body) },
-    ),
+  decide: (
+    userId: string,
+    body: { decision: "approve" | "reject"; reason?: string; role?: Role },
+  ) =>
+    call<{ user: PacketUser }>(`/admin/verifications/${encodeURIComponent(userId)}/decision`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   users: (q?: string) =>
     call<{ users: QueueEntry[] }>(`/admin/users${q ? `?q=${encodeURIComponent(q)}` : ""}`),
@@ -196,9 +205,7 @@ export const adminClient = {
   // ── SOS ───────────────────────────────────────────────────────────────────
 
   sosQueue: (scope: "open" | "all" | "resolved" | "cancelled" = "open") =>
-    call<{ alerts: AlertView[]; scope: string }>(
-      `/admin/sos?scope=${encodeURIComponent(scope)}`,
-    ),
+    call<{ alerts: AlertView[]; scope: string }>(`/admin/sos?scope=${encodeURIComponent(scope)}`),
 
   /** Takes ownership AND tells the raiser a person has their alarm. Deliberately a separate
    *  call from opening the queue — see the note on the route. */

@@ -164,10 +164,7 @@ export const authClient = {
    * platform already had. The caller must handle both; treating a successful response as "I am
    * signed in" would leave an admin looking at a logged-out app.
    */
-  passwordLogin: async (
-    identifier: { phone: string } | { username: string },
-    password: string,
-  ) => {
+  passwordLogin: async (identifier: { phone: string } | { username: string }, password: string) => {
     const res = await call<
       | { user: PublicUser; csrfToken?: string; mfaRequired?: undefined }
       | { mfaRequired: true; pendingToken: string; expiresInMs: number }
@@ -243,6 +240,5 @@ export const authClient = {
 
   /** Final step: hand the packet to the review queue. Fails unless all three documents
    *  are present — the server re-checks rather than trusting the wizard's own state. */
-  submitForReview: () =>
-    call<{ user: PublicUser }>("/onboarding/submit", { method: "POST" }),
+  submitForReview: () => call<{ user: PublicUser }>("/onboarding/submit", { method: "POST" }),
 };

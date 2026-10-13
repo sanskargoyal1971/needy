@@ -9,7 +9,9 @@ export default function Safety() {
       <div className="container mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
         <h1 className="text-4xl font-black text-gray-900 font-display mb-8">Trust & Safety</h1>
         <p className="text-xl text-gray-700 mb-12">
-          Your safety is not an afterthought—it is the foundation of Needy. We have engineered multiple layers of security to ensure that you and your loved ones are protected at all times.
+          Your safety is not an afterthought—it is the foundation of Needy. We have engineered
+          multiple layers of security to ensure that you and your loved ones are protected at all
+          times.
         </p>
 
         <section
@@ -51,10 +53,14 @@ export default function Safety() {
               <div className="p-3 bg-primary/10 rounded-full text-primary">
                 <ShieldCheck size={32} />
               </div>
-              <h2 className="text-2xl font-bold text-gray-900">Every helper is verified by a person</h2>
+              <h2 className="text-2xl font-bold text-gray-900">
+                Every helper is verified by a person
+              </h2>
             </div>
             <p className="text-gray-600">
-              Every helper submits a government ID, a live selfie and a short video. A person on our safety team reviews all three before the helper can see or accept any task, and every document view and decision is recorded in an audit log that cannot be edited.
+              Every helper submits a government ID, a live selfie and a short video. A person on our
+              safety team reviews all three before the helper can see or accept any task, and every
+              document view and decision is recorded in an audit log that cannot be edited.
             </p>
           </section>
 
@@ -66,7 +72,10 @@ export default function Safety() {
               <h2 className="text-2xl font-bold text-gray-900">A one-time code at your door</h2>
             </div>
             <p className="text-gray-600">
-              Nothing starts until you say so. When your helper arrives they send you what they plan to do; the job only begins once you read it and share a one-time code with them in person. A video introduction before the helper sets off is planned and is not available yet.
+              Nothing starts until you say so. When your helper arrives they send you what they plan
+              to do; the job only begins once you read it and share a one-time code with them in
+              person. A video introduction before the helper sets off is planned and is not
+              available yet.
             </p>
           </section>
 
@@ -78,7 +87,9 @@ export default function Safety() {
               <h2 className="text-2xl font-bold text-gray-900">Live Location Tracking</h2>
             </div>
             <p className="text-gray-600">
-              From the moment the helper is on their way until the task is marked complete, you can track their live location on a map. Location sharing is strictly scoped to the duration of the active task to protect privacy.
+              From the moment the helper is on their way until the task is marked complete, you can
+              track their live location on a map. Location sharing is strictly scoped to the
+              duration of the active task to protect privacy.
             </p>
           </section>
 
@@ -90,7 +101,10 @@ export default function Safety() {
               <h2 className="text-2xl font-bold text-gray-900">An alarm on every task</h2>
             </div>
             <p className="text-gray-600">
-              An alarm button is always visible during an active task, for both the requester and the helper. Pressing it sends an alert with your task and address to our Trust & Safety team, who see it immediately on their console and record every action they take. It does not contact your family or the emergency services — for those, call 112.
+              An alarm button is always visible during an active task, for both the requester and
+              the helper. Pressing it sends an alert with your task and address to our Trust &
+              Safety team, who see it immediately on their console and record every action they
+              take. It does not contact your family or the emergency services — for those, call 112.
             </p>
           </section>
         </div>

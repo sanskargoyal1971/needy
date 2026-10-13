@@ -90,7 +90,9 @@ const toException = (r: Row): BookingException => ({
 export function createPgExceptionRepo(pool: DbPool): ExceptionRepository {
   return {
     async getById(id) {
-      const { rows } = await pool.query<Row>(`SELECT * FROM booking_exceptions WHERE id = $1`, [id]);
+      const { rows } = await pool.query<Row>(`SELECT * FROM booking_exceptions WHERE id = $1`, [
+        id,
+      ]);
       return rows[0] ? toException(rows[0]) : null;
     },
     async findForPair(requesterId, helperId) {
@@ -124,8 +126,18 @@ export function createPgExceptionRepo(pool: DbPool): ExceptionRepository {
             reviewed_by, review_note, created_at, submitted_at, decided_at, expires_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [
-          e.id, e.requesterId, e.helperId, e.status, e.requesterVideoKey, e.helperVideoKey,
-          e.reviewedBy, e.reviewNote, e.createdAt, e.submittedAt, e.decidedAt, e.expiresAt,
+          e.id,
+          e.requesterId,
+          e.helperId,
+          e.status,
+          e.requesterVideoKey,
+          e.helperVideoKey,
+          e.reviewedBy,
+          e.reviewNote,
+          e.createdAt,
+          e.submittedAt,
+          e.decidedAt,
+          e.expiresAt,
         ],
       );
       return e;
@@ -140,8 +152,15 @@ export function createPgExceptionRepo(pool: DbPool): ExceptionRepository {
                 review_note=$6, submitted_at=$7, decided_at=$8, expires_at=$9
           WHERE id=$1`,
         [
-          next.id, next.status, next.requesterVideoKey, next.helperVideoKey, next.reviewedBy,
-          next.reviewNote, next.submittedAt, next.decidedAt, next.expiresAt,
+          next.id,
+          next.status,
+          next.requesterVideoKey,
+          next.helperVideoKey,
+          next.reviewedBy,
+          next.reviewNote,
+          next.submittedAt,
+          next.decidedAt,
+          next.expiresAt,
         ],
       );
       return next;

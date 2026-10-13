@@ -2,16 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Task } from "@needy/shared";
 import { seedHelperProfiles } from "../../db.js";
 import { PgHarness } from "../../test/pgHarness.js";
-import {
-  createPgHelperProfileRepo,
-  createPgMessageRepo,
-  createPgTaskRepo,
-} from "../pgStores.js";
-import type {
-  HelperProfileRepository,
-  MessageRepository,
-  TaskRepository,
-} from "../stores.js";
+import { createPgHelperProfileRepo, createPgMessageRepo, createPgTaskRepo } from "../pgStores.js";
+import type { HelperProfileRepository, MessageRepository, TaskRepository } from "../stores.js";
 
 /**
  * Runs the real repository SQL against a real Postgres with every migration applied.
@@ -36,7 +28,15 @@ describe("postgres repositories", () => {
     state: "searching",
     origin: { lat: 12.9716, lng: 77.5946 },
     title: "Pick up medicine",
-    description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: 1_700_000_000_000,
+    description: "test",
+    price: 100,
+    serviceCode: null,
+    scheduledFor: null,
+    serviceBrief: null,
+    handoffOtpHash: null,
+    handoffOtpExpiresAt: null,
+    handoffVerifiedAt: null,
+    createdAt: 1_700_000_000_000,
     updatedAt: 1_700_000_000_000,
   };
 

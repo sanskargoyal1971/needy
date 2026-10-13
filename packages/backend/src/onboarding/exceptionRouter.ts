@@ -80,7 +80,9 @@ function participantView(e: BookingException) {
 function readVideo(
   req: Request,
   maxBytes: number,
-): Promise<{ ok: true; bytes: Buffer } | { ok: false; reason: "no-file" | "too-large" | "malformed" }> {
+): Promise<
+  { ok: true; bytes: Buffer } | { ok: false; reason: "no-file" | "too-large" | "malformed" }
+> {
   return new Promise((resolve) => {
     let bb: ReturnType<typeof busboy>;
     try {
@@ -240,8 +242,7 @@ export function createExceptionRouter(deps: ExceptionRouterDeps): Router {
       const key = newStorageKey(userId, `exception-${side}`, check.extension);
       await deps.storage.put(key, upload.bytes, check.mime);
 
-      const patch =
-        side === "requester" ? { requesterVideoKey: key } : { helperVideoKey: key };
+      const patch = side === "requester" ? { requesterVideoKey: key } : { helperVideoKey: key };
       let updated = await deps.exceptions.update(exception.id, patch);
 
       // Both present → the packet enters the queue and the SLA clock starts.

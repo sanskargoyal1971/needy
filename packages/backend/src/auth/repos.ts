@@ -235,10 +235,26 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
                             username)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
         [
-          user.id, user.phone, user.email, user.displayName, user.role, user.kycStatus,
-          user.createdAt, user.updatedAt, user.onboardingStatus, user.dateOfBirth, user.gender,
-          user.areaLabel, user.areaLat, user.areaLng, user.rejectionReason, user.blockedAt,
-          user.reviewedBy, user.reviewedAt, user.submittedAt, user.username,
+          user.id,
+          user.phone,
+          user.email,
+          user.displayName,
+          user.role,
+          user.kycStatus,
+          user.createdAt,
+          user.updatedAt,
+          user.onboardingStatus,
+          user.dateOfBirth,
+          user.gender,
+          user.areaLabel,
+          user.areaLat,
+          user.areaLng,
+          user.rejectionReason,
+          user.blockedAt,
+          user.reviewedBy,
+          user.reviewedAt,
+          user.submittedAt,
+          user.username,
         ],
       );
       return user;
@@ -254,10 +270,25 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
                           reviewed_by=$16, reviewed_at=$17, submitted_at=$18, username=$19
          WHERE id=$1`,
         [
-          next.id, next.phone, next.email, next.displayName, next.role, next.kycStatus,
-          next.updatedAt, next.onboardingStatus, next.dateOfBirth, next.gender, next.areaLabel,
-          next.areaLat, next.areaLng, next.rejectionReason, next.blockedAt, next.reviewedBy,
-          next.reviewedAt, next.submittedAt, next.username,
+          next.id,
+          next.phone,
+          next.email,
+          next.displayName,
+          next.role,
+          next.kycStatus,
+          next.updatedAt,
+          next.onboardingStatus,
+          next.dateOfBirth,
+          next.gender,
+          next.areaLabel,
+          next.areaLat,
+          next.areaLng,
+          next.rejectionReason,
+          next.blockedAt,
+          next.reviewedBy,
+          next.reviewedAt,
+          next.submittedAt,
+          next.username,
         ],
       );
       return next;
@@ -319,7 +350,15 @@ export function createPgSessionRepo(pool: DbPool): SessionRepository {
       await pool.query(
         `INSERT INTO sessions (id, user_id, refresh_token_hash, user_agent, created_at, expires_at, revoked_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [session.id, session.userId, session.refreshTokenHash, session.userAgent, session.createdAt, session.expiresAt, session.revokedAt],
+        [
+          session.id,
+          session.userId,
+          session.refreshTokenHash,
+          session.userAgent,
+          session.createdAt,
+          session.expiresAt,
+          session.revokedAt,
+        ],
       );
       return session;
     },
@@ -331,10 +370,16 @@ export function createPgSessionRepo(pool: DbPool): SessionRepository {
       return rows[0] ? rowToSession(rows[0]) : null;
     },
     async revoke(id, at) {
-      await pool.query(`UPDATE sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL`, [id, at]);
+      await pool.query(`UPDATE sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL`, [
+        id,
+        at,
+      ]);
     },
     async revokeAllForUser(userId, at) {
-      await pool.query(`UPDATE sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL`, [userId, at]);
+      await pool.query(
+        `UPDATE sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL`,
+        [userId, at],
+      );
     },
   };
 }

@@ -14,9 +14,21 @@ const STYLE: Record<string, { icon: typeof Eye; tone: string; label: string }> =
   "onboarding.rejected": { icon: ShieldX, tone: "text-red-600", label: "Rejected" },
   "admin.user_blocked": { icon: ShieldBan, tone: "text-red-600", label: "Blocked user" },
   "admin.user_unblocked": { icon: ShieldCheck, tone: "text-primary", label: "Unblocked user" },
-  "onboarding.identity_submitted": { icon: UserCheck, tone: "text-gray-500", label: "Submitted identity" },
-  "onboarding.document_uploaded": { icon: Upload, tone: "text-gray-500", label: "Uploaded document" },
-  "onboarding.submitted_for_review": { icon: UserCheck, tone: "text-gray-500", label: "Submitted for review" },
+  "onboarding.identity_submitted": {
+    icon: UserCheck,
+    tone: "text-gray-500",
+    label: "Submitted identity",
+  },
+  "onboarding.document_uploaded": {
+    icon: Upload,
+    tone: "text-gray-500",
+    label: "Uploaded document",
+  },
+  "onboarding.submitted_for_review": {
+    icon: UserCheck,
+    tone: "text-gray-500",
+    label: "Submitted for review",
+  },
 };
 
 export default function AuditLog() {

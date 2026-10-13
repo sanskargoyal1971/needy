@@ -45,10 +45,7 @@ export const ABUSE_SIGNAL_KINDS = [
 export type AbuseSignalKind = (typeof ABUSE_SIGNAL_KINDS)[number];
 
 export function isAbuseSignalKind(value: unknown): value is AbuseSignalKind {
-  return (
-    typeof value === "string" &&
-    (ABUSE_SIGNAL_KINDS as readonly string[]).includes(value)
-  );
+  return typeof value === "string" && (ABUSE_SIGNAL_KINDS as readonly string[]).includes(value);
 }
 
 /**

@@ -176,9 +176,7 @@ export function createSosAdminRouter(deps: Deps): Router {
         return;
       }
       res.json({
-        alerts: await hydrate(
-          await deps.sos.listRecent({ statuses: [scope as SosStatus], limit }),
-        ),
+        alerts: await hydrate(await deps.sos.listRecent({ statuses: [scope as SosStatus], limit })),
         scope,
       });
     }),

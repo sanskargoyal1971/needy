@@ -75,8 +75,8 @@ export class ExperienceErrorBoundary extends Component<ExperienceErrorBoundaryPr
       >
         <div style={{ fontSize: 20, fontWeight: 800 }}>Let's try that again</div>
         <div style={{ fontSize: 15, color: "var(--needy-text-soft)", lineHeight: 1.6 }}>
-          This screen stopped loading properly. Nothing you asked for has been lost — your
-          request and your helper are safe on our side.
+          This screen stopped loading properly. Nothing you asked for has been lost — your request
+          and your helper are safe on our side.
         </div>
         <button
           onClick={this.retry}
@@ -98,7 +98,10 @@ export class ExperienceErrorBoundary extends Component<ExperienceErrorBoundaryPr
           {supportPhone ? (
             <>
               If it happens again, call us on{" "}
-              <a href={`tel:${supportPhone.replace(/\s+/g, "")}`} style={{ color: "var(--needy-warm)", fontWeight: 700 }}>
+              <a
+                href={`tel:${supportPhone.replace(/\s+/g, "")}`}
+                style={{ color: "var(--needy-warm)", fontWeight: 700 }}
+              >
                 {supportPhone}
               </a>{" "}
               and a person will help you.

@@ -362,13 +362,13 @@ function LoginForm() {
           {/* Says why, rather than making an operator wonder whether something went wrong.
               This account can see every live emergency; a password alone is not enough. */}
           <p className="text-center text-xs text-gray-500">
-            Your password was accepted. Because this account can see people&apos;s emergencies,
-            it needs both.
+            Your password was accepted. Because this account can see people&apos;s emergencies, it
+            needs both.
           </p>
           <SandboxNote>
             No SMS provider is connected yet, so every account accepts the same code:{" "}
-            <strong>{DEV_FIXED_OTP}</strong>. This is a development stand-in — the server refuses
-            to start with a fixed code in production.
+            <strong>{DEV_FIXED_OTP}</strong>. This is a development stand-in — the server refuses to
+            start with a fixed code in production.
           </SandboxNote>
         </form>
       </AuthCard>

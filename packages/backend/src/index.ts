@@ -35,7 +35,11 @@ import {
 import { createAdminRouter } from "./admin/router.js";
 import { createSosAdminRouter } from "./admin/sos.js";
 import { createAbuseRouter } from "./admin/abuse.js";
-import { createInMemoryApplicationRepo, createPgApplicationRepo, type HelperApplicationRepository } from "./admin/repos.js";
+import {
+  createInMemoryApplicationRepo,
+  createPgApplicationRepo,
+  type HelperApplicationRepository,
+} from "./admin/repos.js";
 import { createPool, seedHelperProfiles, type DbPool } from "./db.js";
 import { migrate } from "./migrations.js";
 import { createAuthRouter, KYC_CALLBACK_PATH, kycRawBodyParser } from "./auth/router.js";
@@ -69,11 +73,7 @@ import {
   createPgKycDocumentRepo,
   type KycDocumentRepository,
 } from "./onboarding/repos.js";
-import {
-  createLoggingAuditLogger,
-  createPgAuditLogger,
-  type AuditLogger,
-} from "./audit/log.js";
+import { createLoggingAuditLogger, createPgAuditLogger, type AuditLogger } from "./audit/log.js";
 import { createStorageProvider } from "./services/storage.js";
 import {
   createInMemoryServiceCatalog,
@@ -347,7 +347,7 @@ async function main(): Promise<void> {
       tasks: repos.tasks,
       now,
       pool,
-    })
+    }),
   );
   // Pass the pool so GET /health actually probes Postgres. `pool` is null in in-memory mode,
   // which the router reports as "not-configured" rather than treating as a failure.
@@ -480,9 +480,7 @@ function createOtpService(redis: RedisClient, sms: SmsProvider): OtpService {
     );
   }
   if (!new RegExp(`^\\d{${config.auth.otp.length}}$`).test(fixed)) {
-    throw new Error(
-      `DEV_FIXED_OTP must be ${config.auth.otp.length} digits, got "${fixed}".`,
-    );
+    throw new Error(`DEV_FIXED_OTP must be ${config.auth.otp.length} digits, got "${fixed}".`);
   }
 
   // Loud, every boot, and at warn so it survives a log level that hides info. Someone reading

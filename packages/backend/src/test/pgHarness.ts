@@ -61,7 +61,9 @@ export class PgHarness {
     // WITH (FORCE) is the belt-and-braces for a connection that outlived its pool.
     for (const p of this.pools) await p.end().catch(() => undefined);
     for (const name of this.created) {
-      await this.admin?.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`).catch(() => undefined);
+      await this.admin
+        ?.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
+        .catch(() => undefined);
     }
     await this.admin?.end().catch(() => undefined);
   }

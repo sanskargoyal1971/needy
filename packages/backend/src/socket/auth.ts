@@ -9,10 +9,7 @@ export interface SocketData {
   user: AuthClaims;
 }
 
-export function authMiddleware(
-  socket: Socket,
-  next: (err?: ExtendedError) => void,
-): void {
+export function authMiddleware(socket: Socket, next: (err?: ExtendedError) => void): void {
   // Prefer the httpOnly access cookie (real auth); fall back to handshake.auth / Bearer
   // header (dev tokens, tests, non-browser clients).
   const cookieToken = parseCookies(socket.handshake.headers.cookie)[ACCESS_COOKIE];

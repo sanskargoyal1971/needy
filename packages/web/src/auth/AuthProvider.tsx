@@ -23,9 +23,7 @@ import { authClient, AuthError, type PublicUser } from "@/lib/authClient";
  *  app feel broken.
  */
 export type AuthState =
-  | { status: "loading" }
-  | { status: "anonymous" }
-  | { status: "authenticated"; user: PublicUser };
+  { status: "loading" } | { status: "anonymous" } | { status: "authenticated"; user: PublicUser };
 
 interface AuthContextValue {
   state: AuthState;

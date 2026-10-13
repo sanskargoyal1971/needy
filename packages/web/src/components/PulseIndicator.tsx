@@ -2,9 +2,18 @@
 
 import { motion } from "framer-motion";
 
-export function PulseIndicator({ size = 12, color = "bg-accent" }: { size?: number, color?: string }) {
+export function PulseIndicator({
+  size = 12,
+  color = "bg-accent",
+}: {
+  size?: number;
+  color?: string;
+}) {
   return (
-    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+    <div
+      className="relative flex items-center justify-center"
+      style={{ width: size, height: size }}
+    >
       <motion.div
         className={`absolute rounded-full ${color}`}
         style={{ width: size, height: size }}
@@ -18,7 +27,10 @@ export function PulseIndicator({ size = 12, color = "bg-accent" }: { size?: numb
           ease: "easeOut",
         }}
       />
-      <div className={`relative rounded-full ${color}`} style={{ width: size * 0.75, height: size * 0.75 }} />
+      <div
+        className={`relative rounded-full ${color}`}
+        style={{ width: size * 0.75, height: size * 0.75 }}
+      />
     </div>
   );
 }

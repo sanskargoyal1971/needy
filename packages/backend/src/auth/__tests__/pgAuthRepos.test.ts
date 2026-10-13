@@ -41,7 +41,11 @@ describe("postgres auth repositories", () => {
     expect((await users.getById("u1"))?.phone).toBe("+919876543210");
     expect((await users.getByPhone("+919876543210"))?.id).toBe("u1");
 
-    const upgraded = await users.update("u1", { role: "helper", kycStatus: "verified", updatedAt: 1_700_000_050_000 });
+    const upgraded = await users.update("u1", {
+      role: "helper",
+      kycStatus: "verified",
+      updatedAt: 1_700_000_050_000,
+    });
     expect(upgraded.role).toBe("helper");
     expect(upgraded.kycStatus).toBe("verified");
     expect((await users.getById("u1"))?.role).toBe("helper");

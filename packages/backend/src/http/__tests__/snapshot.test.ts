@@ -6,12 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createInMemoryServiceCatalog } from "../../services/catalog.js";
 import { createInMemoryExceptionRepo } from "../../domain/exceptions.js";
 import { safetyDeps } from "../../test/safetyDeps.js";
-import {
-  makeSosAlert,
-  makeTask,
-  type LocationUpdate,
-  type SessionSnapshot,
-} from "@needy/shared";
+import { makeSosAlert, makeTask, type LocationUpdate, type SessionSnapshot } from "@needy/shared";
 import { config } from "../../config.js";
 import { logger } from "../../logger.js";
 import type { Deps } from "../../domain/deps.js";
@@ -63,8 +58,8 @@ const helpers = createInMemoryHelperProfileRepo({
 beforeAll(async () => {
   await users.create(
     makeUser({
-        dateOfBirth: "1985-06-15",
-        gender: "male",
+      dateOfBirth: "1985-06-15",
+      gender: "male",
       id: "requester-1",
       phone: "+919000000900",
       displayName: "Alex",
@@ -92,8 +87,8 @@ beforeAll(async () => {
     sos: createInMemorySosRepo(),
     users,
     services: createInMemoryServiceCatalog(),
-      exceptions: createInMemoryExceptionRepo(),
-      ...safetyDeps(),
+    exceptions: createInMemoryExceptionRepo(),
+    ...safetyDeps(),
     now: () => NOW,
   };
 
@@ -141,9 +136,7 @@ describe("GET /snapshot (§2.1 reconnect)", () => {
     await setTaskLocation(redis.client, taskId, location);
 
     // 5. Re-sync exactly as a reconnecting client would.
-    const res = await request(app)
-      .get("/snapshot")
-      .set("Authorization", `Bearer ${token}`);
+    const res = await request(app).get("/snapshot").set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(200);
 
     const snapshot = res.body as SessionSnapshot;

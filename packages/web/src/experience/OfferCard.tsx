@@ -92,7 +92,5 @@ export function OfferCard({
 /** Metres under a kilometre, then one decimal. A helper deciding whether to walk needs "400 m"
  *  and "1.2 km"; "1247 metres" is the same fact in a form nobody converts in their head. */
 function formatDistance(meters: number): string {
-  return meters < 1000
-    ? `${Math.round(meters / 10) * 10} m`
-    : `${(meters / 1000).toFixed(1)} km`;
+  return meters < 1000 ? `${Math.round(meters / 10) * 10} m` : `${(meters / 1000).toFixed(1)} km`;
 }

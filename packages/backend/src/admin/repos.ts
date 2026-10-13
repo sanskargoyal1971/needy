@@ -84,7 +84,19 @@ export function createPgApplicationRepo(pool: DbPool): HelperApplicationReposito
       await pool.query(
         `INSERT INTO helper_applications (id, user_id, display_name, phone, aadhaar_last4, experience, status, reviewed_by, review_note, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [app.id, app.userId, app.displayName, app.phone, app.aadhaarLast4, app.experience, app.status, app.reviewedBy, app.reviewNote, app.createdAt, app.updatedAt],
+        [
+          app.id,
+          app.userId,
+          app.displayName,
+          app.phone,
+          app.aadhaarLast4,
+          app.experience,
+          app.status,
+          app.reviewedBy,
+          app.reviewNote,
+          app.createdAt,
+          app.updatedAt,
+        ],
       );
       return app;
     },
@@ -121,7 +133,17 @@ export function createPgApplicationRepo(pool: DbPool): HelperApplicationReposito
       const next: HelperApplication = { ...existing, ...patch, id: existing.id };
       await pool.query(
         `UPDATE helper_applications SET display_name=$2, phone=$3, aadhaar_last4=$4, experience=$5, status=$6, reviewed_by=$7, review_note=$8, updated_at=$9 WHERE id=$1`,
-        [next.id, next.displayName, next.phone, next.aadhaarLast4, next.experience, next.status, next.reviewedBy, next.reviewNote, next.updatedAt],
+        [
+          next.id,
+          next.displayName,
+          next.phone,
+          next.aadhaarLast4,
+          next.experience,
+          next.status,
+          next.reviewedBy,
+          next.reviewNote,
+          next.updatedAt,
+        ],
       );
       return next;
     },

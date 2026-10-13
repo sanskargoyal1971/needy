@@ -54,9 +54,7 @@ export function OriginPicker({
     let cancelled = false;
 
     const savedArea =
-      auth.status === "authenticated" &&
-      auth.user.areaLat != null &&
-      auth.user.areaLng != null
+      auth.status === "authenticated" && auth.user.areaLat != null && auth.user.areaLng != null
         ? { lat: auth.user.areaLat, lng: auth.user.areaLng }
         : null;
 
@@ -148,7 +146,9 @@ export function OriginPicker({
                </div>`,
       });
 
-      const marker = L.marker([value.lat, value.lng], { draggable: true, icon: customIcon }).addTo(map);
+      const marker = L.marker([value.lat, value.lng], { draggable: true, icon: customIcon }).addTo(
+        map,
+      );
       marker.on("dragend", () => {
         const { lat, lng } = marker.getLatLng();
         onChange({ lat, lng });

@@ -1,10 +1,5 @@
 import type { Socket } from "socket.io";
-import {
-  isTerminal,
-  taskRoleOf,
-  type Task,
-  type TaskRole,
-} from "@needy/shared";
+import { isTerminal, taskRoleOf, type Task, type TaskRole } from "@needy/shared";
 import type { Deps } from "../domain/deps.js";
 import type { AuthClaims } from "../auth/jwt.js";
 import { emitSocketError } from "./validation.js";

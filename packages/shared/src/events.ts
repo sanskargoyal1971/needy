@@ -66,7 +66,12 @@ export interface PresenceServerEvents {
 export interface TrackingClientEvents {
   join: (payload: { taskId: string }) => void;
   leave: (payload: { taskId: string }) => void;
-  location: (payload: { taskId: string; point: LatLng; heading?: number; speedMps?: number }) => void;
+  location: (payload: {
+    taskId: string;
+    point: LatLng;
+    heading?: number;
+    speedMps?: number;
+  }) => void;
 }
 export interface TrackingServerEvents {
   "helper-moved": (payload: { taskId: string; update: LocationUpdate }) => void;
@@ -98,7 +103,11 @@ export interface ChatClientEvents {
 export interface ChatServerEvents {
   message: (message: ChatMessage) => void;
   "helper-typing": (payload: { taskId: string; userId: string; isTyping: boolean }) => void;
-  "receipt-changed": (payload: { taskId: string; messageId: string; status: ReceiptStatus }) => void;
+  "receipt-changed": (payload: {
+    taskId: string;
+    messageId: string;
+    status: ReceiptStatus;
+  }) => void;
   error: (payload: SocketErrorPayload) => void;
 }
 
@@ -123,7 +132,9 @@ export interface MatchingClientEvents {
   /** helper accepts an offer; ack tells them whether they won the race. */
   accept: (
     payload: { taskId: string },
-    ack: (result: { won: true; task: PublicTask } | { won: false; reason: "already-taken" | "expired" }) => void,
+    ack: (
+      result: { won: true; task: PublicTask } | { won: false; reason: "already-taken" | "expired" },
+    ) => void,
   ) => void;
   decline: (payload: { taskId: string }) => void;
   /** Drive a matched task through its lifecycle (matched → verifying → … → completed, or
@@ -240,7 +251,10 @@ export interface MatchingServerEvents {
   /** delivered to eligible helpers when a nearby request opens. */
   offer: (offer: MatchOffer) => void;
   /** delivered to helpers who didn't win, so their UI can resolve gracefully. */
-  "offer-closed": (payload: { taskId: string; reason: "already-taken" | "expired" | "cancelled" }) => void;
+  "offer-closed": (payload: {
+    taskId: string;
+    reason: "already-taken" | "expired" | "cancelled";
+  }) => void;
   /** delivered to the requester as helpers are found / when matched. */
   /**
    * How the search is going, per wave.
@@ -312,7 +326,4 @@ export interface SessionSnapshot {
   activeTasks: TaskSnapshot[];
 }
 
-export const TASK_STATES_WITH_LIVE_TRACKING: readonly TaskState[] = [
-  "en-route",
-  "arrived",
-];
+export const TASK_STATES_WITH_LIVE_TRACKING: readonly TaskState[] = ["en-route", "arrived"];

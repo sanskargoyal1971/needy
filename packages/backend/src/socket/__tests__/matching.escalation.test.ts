@@ -260,7 +260,9 @@ describe("matching: radius escalation, eligibility and service filters", () => {
     // Let wave 0 lapse. The sweep escalates rather than closing.
     clock += OFFER_WINDOW_MS + 50;
     await sleep(1_400);
-    expect(midOffers.length, "mid should be reached once the search widens to 5km").toBeGreaterThan(0);
+    expect(midOffers.length, "mid should be reached once the search widens to 5km").toBeGreaterThan(
+      0,
+    );
     expect(farOffers, "far is still outside 5km").toHaveLength(0);
 
     // Wave 2 — out to the 10 km cap.
@@ -376,8 +378,14 @@ describe("matching: radius escalation, eligibility and service filters", () => {
     await new Promise<void>((r) => req[REQUESTER]!.emit("request-help", { taskId }, () => r()));
     await sleep(200);
 
-    expect(aOffers.some((o) => o.taskId === taskId), "A must get hospital work").toBe(true);
-    expect(bOffers.some((o) => o.taskId === taskId), "B must get hospital work").toBe(true);
+    expect(
+      aOffers.some((o) => o.taskId === taskId),
+      "A must get hospital work",
+    ).toBe(true);
+    expect(
+      bOffers.some((o) => o.taskId === taskId),
+      "B must get hospital work",
+    ).toBe(true);
   }, 15_000);
 
   /** The safety matrix, enforced where the offer is made. A young man's request must not be
@@ -388,16 +396,30 @@ describe("matching: radius escalation, eligibility and service filters", () => {
     const OLDER_F = "esc-older-f";
     await users.create(
       makeUser({
-        id: YOUNG_M, phone: "+919700000001", displayName: YOUNG_M, role: "both",
-        kycStatus: "verified", onboardingStatus: "approved",
-        dateOfBirth: "2001-01-01", gender: "male", createdAt: FIXED_NOW, updatedAt: FIXED_NOW,
+        id: YOUNG_M,
+        phone: "+919700000001",
+        displayName: YOUNG_M,
+        role: "both",
+        kycStatus: "verified",
+        onboardingStatus: "approved",
+        dateOfBirth: "2001-01-01",
+        gender: "male",
+        createdAt: FIXED_NOW,
+        updatedAt: FIXED_NOW,
       }),
     );
     await users.create(
       makeUser({
-        id: YOUNG_F, phone: "+919700000002", displayName: YOUNG_F, role: "both",
-        kycStatus: "verified", onboardingStatus: "approved",
-        dateOfBirth: "2001-01-01", gender: "female", createdAt: FIXED_NOW, updatedAt: FIXED_NOW,
+        id: YOUNG_F,
+        phone: "+919700000002",
+        displayName: YOUNG_F,
+        role: "both",
+        kycStatus: "verified",
+        onboardingStatus: "approved",
+        dateOfBirth: "2001-01-01",
+        gender: "female",
+        createdAt: FIXED_NOW,
+        updatedAt: FIXED_NOW,
       }),
     );
     await adult(OLDER_F, "female"); // 40s — outside the restricted band, so allowed
@@ -459,16 +481,30 @@ describe("matching: radius escalation, eligibility and service filters", () => {
     const YOUNG_F = "esc-nearby-f";
     await users.create(
       makeUser({
-        id: YOUNG_M, phone: "+919700000011", displayName: YOUNG_M, role: "both",
-        kycStatus: "verified", onboardingStatus: "approved",
-        dateOfBirth: "2001-01-01", gender: "male", createdAt: FIXED_NOW, updatedAt: FIXED_NOW,
+        id: YOUNG_M,
+        phone: "+919700000011",
+        displayName: YOUNG_M,
+        role: "both",
+        kycStatus: "verified",
+        onboardingStatus: "approved",
+        dateOfBirth: "2001-01-01",
+        gender: "male",
+        createdAt: FIXED_NOW,
+        updatedAt: FIXED_NOW,
       }),
     );
     await users.create(
       makeUser({
-        id: YOUNG_F, phone: "+919700000012", displayName: YOUNG_F, role: "both",
-        kycStatus: "verified", onboardingStatus: "approved",
-        dateOfBirth: "2001-01-01", gender: "female", createdAt: FIXED_NOW, updatedAt: FIXED_NOW,
+        id: YOUNG_F,
+        phone: "+919700000012",
+        displayName: YOUNG_F,
+        role: "both",
+        kycStatus: "verified",
+        onboardingStatus: "approved",
+        dateOfBirth: "2001-01-01",
+        gender: "female",
+        createdAt: FIXED_NOW,
+        updatedAt: FIXED_NOW,
       }),
     );
     // Earlier cases in this file leave their own helpers in the shared availability index, and

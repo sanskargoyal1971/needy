@@ -74,7 +74,15 @@ describe("socket acks are optional on the wire", () => {
       state: "in-progress",
       origin: { lat: 12.9716, lng: 77.5946 },
       title: "groceries",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: 1,
+      description: "test",
+      price: 100,
+      serviceCode: null,
+      scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
+      createdAt: 1,
       updatedAt: 1,
     });
 

@@ -88,8 +88,7 @@ export default tseslint.config(
       "no-restricted-syntax": [
         "error",
         {
-          selector:
-            "CallExpression[callee.object.name='Date'][callee.property.name='now']",
+          selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']",
           message:
             "Use the injected deps.now() clock instead of Date.now() so expiry and staleness logic is testable.",
         },

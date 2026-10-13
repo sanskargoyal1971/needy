@@ -9,11 +9,7 @@ import type { RedisClient } from "../redis.js";
 import { logger } from "../logger.js";
 import { asyncRoute } from "../http/asyncRoute.js";
 import { AuthService, PhoneBlockedError } from "./service.js";
-import {
-  passwordProblem,
-  verifyPassword,
-  PASSWORD_MIN_LENGTH,
-} from "./password.js";
+import { passwordProblem, verifyPassword, PASSWORD_MIN_LENGTH } from "./password.js";
 import { consumeToken, type RateLimit } from "../services/ratelimit.js";
 import type { OtpService } from "./otp.js";
 import { KYC_SIGNATURE_HEADER, verifyKycSignature, type KycProvider } from "./providers.js";
@@ -390,7 +386,9 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
           // Sent through the ordinary OTP path so it is rate-limited and delivered exactly as
           // every other code is.
           await deps.otp.request(target, ip);
-          logger.info("admin password accepted; second factor required", { userId: issued.user.id });
+          logger.info("admin password accepted; second factor required", {
+            userId: issued.user.id,
+          });
           res.json({ mfaRequired: true, pendingToken, expiresInMs: MFA_PENDING_TTL_MS });
           return;
         }
@@ -565,12 +563,9 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   // Handing a token to an unauthenticated caller costs nothing: it is worthless on its own.
   // It only ever authorises a request that ALSO carries the matching cookie, and a cross-site
   // attacker can neither read this response body (CORS) nor set the header.
-  router.get(
-    "/auth/csrf",
-    (_req: Request, res: Response) => {
-      res.json({ token: issueCsrfToken(res) });
-    },
-  );
+  router.get("/auth/csrf", (_req: Request, res: Response) => {
+    res.json({ token: issueCsrfToken(res) });
+  });
 
   // ── who am I ───────────────────────────────────────────────────────────────
   router.get(
@@ -585,7 +580,12 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
       // Documents come back with the session so the wizard can resume on a new device from
       // server truth rather than from whatever step localStorage last remembered.
       const docs = await deps.documents.listForUser(user.id);
-      res.json({ user: publicUser(user, docs.map((d) => d.kind)) });
+      res.json({
+        user: publicUser(
+          user,
+          docs.map((d) => d.kind),
+        ),
+      });
     }),
   );
 

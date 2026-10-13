@@ -90,10 +90,7 @@ function connect(port: number, userId: string): Promise<AppClient> {
  *  a timeout here means the server silently dropped the payload, which is itself the bug. */
 function nextError(socket: AppClient, ms = 3_000): Promise<SocketErrorPayload> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("timed out waiting for an error event")),
-      ms,
-    );
+    const timer = setTimeout(() => reject(new Error("timed out waiting for an error event")), ms);
     socket.once("error", (payload) => {
       clearTimeout(timer);
       resolve(payload as SocketErrorPayload);
@@ -107,8 +104,7 @@ function emitLocation(socket: AppClient, payload: unknown): void {
   (socket as unknown as { emit: (e: string, p: unknown) => void }).emit("location", payload);
 }
 
-const tick = (ms = 150): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const tick = (ms = 150): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("/tracking location guards (§2.3)", () => {
   let httpServer: HttpServer;
@@ -140,7 +136,15 @@ describe("/tracking location guards (§2.3)", () => {
       state: "en-route",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
+      description: "test",
+      price: 100,
+      serviceCode: null,
+      scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
+      createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
 

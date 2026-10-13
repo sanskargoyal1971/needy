@@ -21,11 +21,7 @@ import { createInMemoryAbuseRepo } from "../../domain/abuseStore.js";
 import { createInMemoryPhoneBlockRepo } from "../phoneBlocks.js";
 import { AuthService } from "../service.js";
 import { OtpService } from "../otp.js";
-import {
-  ConsoleSmsProvider,
-  SandboxKycProvider,
-  signKycCallback,
-} from "../providers.js";
+import { ConsoleSmsProvider, SandboxKycProvider, signKycCallback } from "../providers.js";
 
 /**
  * Authorization hardening regressions (audit A4, A5, B8, C15). Each test below pins a specific
@@ -61,8 +57,8 @@ function makeDeps(redisClient: RedisClient, config: Deps["config"]): Deps {
     sos: createInMemorySosRepo(),
     users: createInMemoryUserRepo(),
     services: createInMemoryServiceCatalog(),
-      exceptions: createInMemoryExceptionRepo(),
-      ...safetyDeps(),
+    exceptions: createInMemoryExceptionRepo(),
+    ...safetyDeps(),
     now: () => NOW,
   };
 }
@@ -247,14 +243,13 @@ describe("audit A5 — KYC callback authenticity", () => {
   /** POST a callback with an explicitly chosen signature, so a test can omit or corrupt it. */
   function postCallback(payload: unknown, signature?: string) {
     const raw = JSON.stringify(payload);
-    const req = request(app)
-      .post("/auth/kyc/callback")
-      .set("Content-Type", "application/json");
+    const req = request(app).post("/auth/kyc/callback").set("Content-Type", "application/json");
     if (signature !== undefined) req.set(KYC_SIGNATURE_HEADER_NAME, signature);
     return req.send(raw);
   }
 
-  const signed = (payload: unknown) => postCallback(payload, signKycCallback(JSON.stringify(payload), secret));
+  const signed = (payload: unknown) =>
+    postCallback(payload, signKycCallback(JSON.stringify(payload), secret));
 
   beforeEach(async () => {
     vi.resetModules();
@@ -456,7 +451,10 @@ describe("ConsoleSmsProvider does not log a usable credential at info", () => {
       infos.push(args);
     });
     try {
-      await new ConsoleSmsProvider().send("+919876543210", "Your Needy verification code is 424242.");
+      await new ConsoleSmsProvider().send(
+        "+919876543210",
+        "Your Needy verification code is 424242.",
+      );
     } finally {
       log.mockRestore();
     }

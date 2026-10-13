@@ -52,7 +52,12 @@ describe("password sign-in", () => {
     auth = new AuthService({ users, sessions, phoneBlocks, now });
 
     await users.create(
-      makeUser({ id: "u-pw", phone: USER_PHONE, displayName: "Asha", onboardingStatus: "approved" }),
+      makeUser({
+        id: "u-pw",
+        phone: USER_PHONE,
+        displayName: "Asha",
+        onboardingStatus: "approved",
+      }),
     );
     await users.create(
       makeUser({

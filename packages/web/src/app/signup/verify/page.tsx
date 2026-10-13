@@ -60,7 +60,8 @@ export default function VerifyWizard() {
     );
   }
 
-  const stepIndex = pane === "identity" ? 0 : pane === "review" ? 4 : REQUIRED_DOCUMENTS.indexOf(pane) + 1;
+  const stepIndex =
+    pane === "identity" ? 0 : pane === "review" ? 4 : REQUIRED_DOCUMENTS.indexOf(pane) + 1;
 
   async function uploadDocument(kind: DocumentKind, blob: Blob, filename: string) {
     setBusy(true);
@@ -103,9 +104,7 @@ export default function VerifyWizard() {
             />
           )}
 
-          {pane === "gov_id" && (
-            <DocumentPane kind="gov_id" busy={busy} onFile={uploadDocument} />
-          )}
+          {pane === "gov_id" && <DocumentPane kind="gov_id" busy={busy} onFile={uploadDocument} />}
           {pane === "selfie" && (
             <DocumentPane kind="selfie" busy={busy} onFile={uploadDocument} capture="photo" />
           )}
@@ -139,8 +138,8 @@ export default function VerifyWizard() {
 
         <p className="mt-6 flex items-center justify-center gap-2 text-center text-xs text-gray-500">
           <Lock size={14} aria-hidden />
-          Your documents are stored privately and are only ever seen by our verification team.
-          Every access is logged.
+          Your documents are stored privately and are only ever seen by our verification team. Every
+          access is logged.
         </p>
       </div>
     </div>
@@ -171,7 +170,8 @@ function IdentityPane({
 
   function validate(): boolean {
     const next: Record<string, string> = {};
-    if (displayName.trim().length < 2) next.displayName = "Enter your full name as it appears on your ID.";
+    if (displayName.trim().length < 2)
+      next.displayName = "Enter your full name as it appears on your ID.";
     if (!dateOfBirth) next.dateOfBirth = "Enter your date of birth.";
     if (!gender) next.gender = "Select an option.";
     if (areaLabel.trim().length < 2) next.areaLabel = "Tell us which area you're in.";
@@ -313,8 +313,8 @@ function DocumentPane({
           />
           {capture === "video" && (
             <SandboxNote>
-              This records a testimony for a human reviewer to watch. Automated liveness
-              detection is not implemented — a reviewer, not an algorithm, makes the call.
+              This records a testimony for a human reviewer to watch. Automated liveness detection
+              is not implemented — a reviewer, not an algorithm, makes the call.
             </SandboxNote>
           )}
         </>
@@ -354,8 +354,8 @@ function ReviewPane({ busy, onSubmit }: { busy: boolean; onSubmit: () => Promise
       <header>
         <h2 className="font-display text-2xl font-bold text-gray-900">Ready to submit</h2>
         <p className="mt-1 text-sm text-gray-600">
-          We have everything we need. A member of our verification team will review your
-          documents — this usually takes up to one working day.
+          We have everything we need. A member of our verification team will review your documents —
+          this usually takes up to one working day.
         </p>
       </header>
 
@@ -372,8 +372,8 @@ function ReviewPane({ busy, onSubmit }: { busy: boolean; onSubmit: () => Promise
         <p className="flex items-start gap-2">
           <FileText size={16} className="mt-0.5 shrink-0 text-primary" aria-hidden />
           <span>
-            You can browse Needy while you wait, but you won&apos;t be able to book or accept
-            help until you&apos;re approved.
+            You can browse Needy while you wait, but you won&apos;t be able to book or accept help
+            until you&apos;re approved.
           </span>
         </p>
       </div>

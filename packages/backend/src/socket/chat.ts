@@ -1,11 +1,6 @@
 import type { DefaultEventsMap, Namespace, Socket } from "socket.io";
 import { nanoid } from "nanoid";
-import {
-  NS,
-  type ChatClientEvents,
-  type ChatMessage,
-  type ChatServerEvents,
-} from "@needy/shared";
+import { NS, type ChatClientEvents, type ChatMessage, type ChatServerEvents } from "@needy/shared";
 import type { Deps, NamespaceRegistrar } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
 import { emitSignal } from "../domain/abuseStore.js";
@@ -41,12 +36,7 @@ import type { SocketData } from "./auth.js";
  *  every refusal surfaces as a typed `error` event (plus the ack where the contract has
  *  one) rather than a silent drop, so a misbehaving client is debuggable. */
 
-type ChatSocket = Socket<
-  ChatClientEvents,
-  ChatServerEvents,
-  DefaultEventsMap,
-  SocketData
->;
+type ChatSocket = Socket<ChatClientEvents, ChatServerEvents, DefaultEventsMap, SocketData>;
 
 const room = (taskId: string): string => `task:${taskId}`;
 
@@ -74,8 +64,7 @@ const TYPING_LIMIT: RateLimit = { capacity: 20, ratePerSec: 4 };
  *  a burst of 10 refilling at 2/s is invisible to it and caps the amplification. */
 const MARK_READ_LIMIT: RateLimit = { capacity: 10, ratePerSec: 2 };
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const registerChat: NamespaceRegistrar = (deps) => {
   const nsp = deps.io.of(NS.chat) as unknown as Namespace<
@@ -100,13 +89,7 @@ export const registerChat: NamespaceRegistrar = (deps) => {
         // `requireParticipant`, not `requireLiveParticipant`: joining is read-only, and a
         // client re-opening a completed task should still be able to sit in the room and
         // receive the final receipt changes. Only the mutating handlers demand a live task.
-        const participation = await requireParticipant(
-          deps,
-          socket,
-          "join",
-          userId,
-          p.taskId,
-        );
+        const participation = await requireParticipant(deps, socket, "join", userId, p.taskId);
         if (!participation) return;
         // A join that fails leaves the client OUT of the room while its UI shows an open chat:
         // messages would be sent successfully and never received. `joinRoom` reports it, and
@@ -142,12 +125,7 @@ export const registerChat: NamespaceRegistrar = (deps) => {
       try {
         // Rate limit BEFORE the authorization lookup: an unauthorized flood must also be
         // bounded, otherwise refusing it still costs a task read per message.
-        const allowed = await consumeToken(
-          client,
-          keys.chatBucket(userId),
-          CHAT_LIMIT,
-          deps.now(),
-        );
+        const allowed = await consumeToken(client, keys.chatBucket(userId), CHAT_LIMIT, deps.now());
         if (!allowed) {
           emitSocketError(socket, {
             event: "send",
@@ -195,13 +173,7 @@ export const registerChat: NamespaceRegistrar = (deps) => {
         // alone.
         const dedupKey = keys.chatDedup(taskId, clientMsgId);
         const messageId = nanoid();
-        const reserved = await client.set(
-          dedupKey,
-          messageId,
-          "PX",
-          CHAT_DEDUP_TTL_MS,
-          "NX",
-        );
+        const reserved = await client.set(dedupKey, messageId, "PX", CHAT_DEDUP_TTL_MS, "NX");
 
         if (reserved !== "OK") {
           const original = await resolveDuplicate(deps, client, taskId, dedupKey);
@@ -282,13 +254,7 @@ export const registerChat: NamespaceRegistrar = (deps) => {
 
         // ── A3: a stranger could previously push a typing indicator into any task room,
         // which both leaks that they know the task id and fakes the presence of a person.
-        const participation = await requireLiveParticipant(
-          deps,
-          socket,
-          "typing",
-          userId,
-          taskId,
-        );
+        const participation = await requireLiveParticipant(deps, socket, "typing", userId, taskId);
         if (!participation) return;
 
         // Relay to others only; the sender already knows it's typing.
@@ -366,9 +332,7 @@ export const registerChat: NamespaceRegistrar = (deps) => {
           }
           // Only broadcast receipts we actually wrote — a fan-out for a row we refused would
           // tell every client a lie.
-          nsp
-            .to(room(taskId))
-            .emit("receipt-changed", { taskId, messageId, status: "read" });
+          nsp.to(room(taskId)).emit("receipt-changed", { taskId, messageId, status: "read" });
         }
 
         // Ids that don't live in this task are refused loudly (one aggregate error, not one

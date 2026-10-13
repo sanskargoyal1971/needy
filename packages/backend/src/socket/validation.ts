@@ -81,14 +81,8 @@ export const sosCancelSchema = z.object({ alertId: id });
 
 /** Emit a typed refusal. Namespaces declare `error` in their ServerEvents, but the cast
  *  keeps this usable from handlers whose socket is typed to a specific namespace. */
-export function emitSocketError(
-  socket: Socket,
-  payload: SocketErrorPayload,
-): void {
-  (socket as unknown as { emit: (e: string, p: unknown) => void }).emit(
-    "error",
-    payload,
-  );
+export function emitSocketError(socket: Socket, payload: SocketErrorPayload): void {
+  (socket as unknown as { emit: (e: string, p: unknown) => void }).emit("error", payload);
 }
 
 /**

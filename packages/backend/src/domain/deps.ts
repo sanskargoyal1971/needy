@@ -8,11 +8,7 @@ import type { Logger } from "../logger.js";
 import type { RedisClients } from "../redis.js";
 import type { UserRepository } from "../auth/repos.js";
 import type { SosRepository } from "./sosStore.js";
-import type {
-  HelperProfileRepository,
-  MessageRepository,
-  TaskRepository,
-} from "./stores.js";
+import type { HelperProfileRepository, MessageRepository, TaskRepository } from "./stores.js";
 
 /** The single dependency container passed to every namespace registrar and the HTTP
  *  layer. Modules depend ONLY on this surface — never on each other — which is what lets

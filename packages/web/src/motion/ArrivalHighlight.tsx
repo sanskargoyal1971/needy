@@ -2,12 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import {
-  duration as D,
-  ease as E,
-  resolveColor,
-  type MotionColor,
-} from "./motion.config.js";
+import { duration as D, ease as E, resolveColor, type MotionColor } from "./motion.config.js";
 import { useReducedMotionPref } from "./preferences.js";
 
 export interface ArrivalHighlightProps {
@@ -62,10 +57,7 @@ export function ArrivalHighlight({
   };
 
   return (
-    <div
-      className={className}
-      style={{ position: "relative", borderRadius: 16, ...style }}
-    >
+    <div className={className} style={{ position: "relative", borderRadius: 16, ...style }}>
       {active &&
         (reduced ? (
           <div style={{ ...overlayBase, opacity: 0.16 }} />

@@ -9,10 +9,7 @@ import { signAccessToken } from "../../auth/jwt.js";
 import { createInMemoryUserRepo, type InMemoryUserRepository } from "../../auth/repos.js";
 import { makeUser } from "../../auth/types.js";
 import { createLoggingAuditLogger, type AuditEntry } from "../../audit/log.js";
-import {
-  createInMemoryExceptionRepo,
-  type ExceptionRepository,
-} from "../../domain/exceptions.js";
+import { createInMemoryExceptionRepo, type ExceptionRepository } from "../../domain/exceptions.js";
 import { LocalDiskStorage } from "../../services/storage.js";
 import { createExceptionRouter } from "../exceptionRouter.js";
 
@@ -353,10 +350,9 @@ describe("booking exceptions", () => {
       expect((await as(request(app).get(path), YOUNG_M)).status).toBe(403);
       expect((await request(app).get(path)).status).toBe(401);
     }
-    const decide = await as(
-      request(app).post(`/admin/exceptions/${id}/decision`),
-      YOUNG_M,
-    ).send({ decision: "approve" });
+    const decide = await as(request(app).post(`/admin/exceptions/${id}/decision`), YOUNG_M).send({
+      decision: "approve",
+    });
     expect(decide.status).toBe(403);
   });
 

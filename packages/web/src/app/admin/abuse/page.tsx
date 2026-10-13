@@ -160,8 +160,8 @@ function SubjectDetail({ userId }: { userId: string }) {
           {/* Says plainly what "Escalate" does and does not do, so nobody clicks it believing
               they have suspended an account. */}
           <p className="text-xs text-gray-500">
-            None of these restrict the account. To suspend someone, block them from the Users
-            page — that is a separate decision with its own reason.
+            None of these restrict the account. To suspend someone, block them from the Users page —
+            that is a separate decision with its own reason.
           </p>
         </div>
       )}
@@ -200,8 +200,8 @@ export default function AbuseQueue() {
       <div>
         <h2 className="font-display text-xl font-bold text-gray-900">Behaviour signals</h2>
         <p className="mt-0.5 text-sm text-gray-600">
-          Accounts whose behaviour tripped something, ranked by weight. These are questions for
-          a person, not findings — nothing here has restricted anybody.
+          Accounts whose behaviour tripped something, ranked by weight. These are questions for a
+          person, not findings — nothing here has restricted anybody.
         </p>
       </div>
 

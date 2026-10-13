@@ -48,7 +48,12 @@ function sign(key: string, expiresAt: number): string {
  * Constant-time compare, because a byte-by-byte `===` on an HMAC is a timing oracle that lets
  * an attacker recover a valid signature one character at a time.
  */
-export function verifyLocalSignature(key: string, expiresAt: number, sig: string, now: number): boolean {
+export function verifyLocalSignature(
+  key: string,
+  expiresAt: number,
+  sig: string,
+  now: number,
+): boolean {
   if (!Number.isFinite(expiresAt) || expiresAt < now) return false;
   const expected = Buffer.from(sign(key, expiresAt), "utf8");
   const given = Buffer.from(sig, "utf8");
@@ -257,7 +262,9 @@ export function createStorageProvider(now: () => number): StorageProvider {
   const s = config.storage;
   if (s.driver === "s3") {
     if (!s.bucket || !s.accessKeyId || !s.secretAccessKey) {
-      throw new Error("STORAGE_DRIVER=s3 requires S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY");
+      throw new Error(
+        "STORAGE_DRIVER=s3 requires S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY",
+      );
     }
     return new S3Storage(
       {

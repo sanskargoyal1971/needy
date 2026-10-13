@@ -125,8 +125,7 @@ export function createInMemoryAdminUserQueries(all: () => User[]): AdminUserQuer
       const q = search?.toLowerCase();
       return all()
         .filter(
-          (u) =>
-            !q || u.displayName.toLowerCase().includes(q) || u.phone.toLowerCase().includes(q),
+          (u) => !q || u.displayName.toLowerCase().includes(q) || u.phone.toLowerCase().includes(q),
         )
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, limit)

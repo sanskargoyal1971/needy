@@ -38,7 +38,12 @@ import {
  *  participation. When the question is "is somebody in danger", a false positive costs an
  *  operator a phone call; a false negative is the thing we are here to prevent. */
 
-type SosSocket = Socket<SosClientEvents, SosServerEvents, DefaultEventsMap, { user: { sub: string } }>;
+type SosSocket = Socket<
+  SosClientEvents,
+  SosServerEvents,
+  DefaultEventsMap,
+  { user: { sub: string } }
+>;
 
 /** Exported so the admin console's fan-out addresses the same rooms this namespace does —
  *  two hand-rolled `user:${id}` templates that drift apart would mean an operator's
@@ -194,10 +199,7 @@ export const registerSos: NamespaceRegistrar = (deps) => {
         });
 
         // A pattern worth a human's attention — never an automatic consequence.
-        const recentCount = await deps.sos.countRaisedBySince(
-          userId,
-          now - SOS_REPEAT_WINDOW_MS,
-        );
+        const recentCount = await deps.sos.countRaisedBySince(userId, now - SOS_REPEAT_WINDOW_MS);
         if (recentCount >= SOS_REPEAT_THRESHOLD) {
           await emitSignal(deps.abuse, "sos.repeated", userId, now, {
             taskId: alert.taskId,
@@ -316,9 +318,15 @@ export const registerSos: NamespaceRegistrar = (deps) => {
         // an event) rather than a MISS. A duplicate emergency is a redraw; a missed one is the
         // whole system failing at its one job. Consoles key alerts by id.
         const open = await deps.sos.listOpen(OPERATOR_BACKLOG_LIMIT);
-        const joined = await joinRoom(deps, socket as unknown as Socket, "watch", SOS_OPERATOR_ROOM, {
-          userId,
-        });
+        const joined = await joinRoom(
+          deps,
+          socket as unknown as Socket,
+          "watch",
+          SOS_OPERATOR_ROOM,
+          {
+            userId,
+          },
+        );
         if (!joined) return ack({ ok: false, error: "subscribe-failed" });
 
         deps.logger.info("operator watching the SOS feed", { userId, backlog: open.length });

@@ -14,12 +14,7 @@ export async function setTaskLocation(
   taskId: string,
   update: LocationUpdate,
 ): Promise<void> {
-  await redis.set(
-    keys.taskLocation(taskId),
-    JSON.stringify(update),
-    "EX",
-    LOCATION_TTL_SECONDS,
-  );
+  await redis.set(keys.taskLocation(taskId), JSON.stringify(update), "EX", LOCATION_TTL_SECONDS);
 }
 
 export async function getTaskLocation(
@@ -30,10 +25,7 @@ export async function getTaskLocation(
   return raw ? (JSON.parse(raw) as LocationUpdate) : null;
 }
 
-export async function clearTaskLocation(
-  redis: RedisClient,
-  taskId: string,
-): Promise<void> {
+export async function clearTaskLocation(redis: RedisClient, taskId: string): Promise<void> {
   await redis.del(keys.taskLocation(taskId));
 }
 
@@ -59,23 +51,13 @@ export async function upsertHelperGeo(
 
 /** Drop a helper from the availability index entirely — they went offline, went busy, or
  *  aged out. Removes from both the GEO set and the freshness index. */
-export async function removeHelperGeo(
-  redis: RedisClient,
-  helperId: string,
-): Promise<void> {
-  await redis
-    .multi()
-    .zrem(keys.helperGeo(), helperId)
-    .zrem(keys.helperGeoFresh(), helperId)
-    .exec();
+export async function removeHelperGeo(redis: RedisClient, helperId: string): Promise<void> {
+  await redis.multi().zrem(keys.helperGeo(), helperId).zrem(keys.helperGeoFresh(), helperId).exec();
 }
 
 /** helperIds whose availability publish is newer than `cutoff`. Matching intersects its
  *  GEOSEARCH hits with this so a stale position can never produce an offer. */
-export async function freshHelperIds(
-  redis: RedisClient,
-  cutoff: number,
-): Promise<Set<string>> {
+export async function freshHelperIds(redis: RedisClient, cutoff: number): Promise<Set<string>> {
   const ids = await redis.zrangebyscore(keys.helperGeoFresh(), cutoff, "+inf");
   return new Set(ids);
 }
@@ -83,10 +65,7 @@ export async function freshHelperIds(
 /** Evict everything that stopped publishing before `cutoff`. Run periodically so the GEO
  *  set stays bounded even for helpers who never cleanly disconnected. Returns the count
  *  removed, for logging. */
-export async function sweepStaleHelperGeo(
-  redis: RedisClient,
-  cutoff: number,
-): Promise<number> {
+export async function sweepStaleHelperGeo(redis: RedisClient, cutoff: number): Promise<number> {
   const stale = await redis.zrangebyscore(keys.helperGeoFresh(), "-inf", cutoff);
   if (stale.length === 0) return 0;
   await redis

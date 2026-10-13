@@ -58,7 +58,10 @@ const briefSchema = z.object({
 });
 
 const verifySchema = z.object({
-  code: z.string().trim().regex(/^\d{4,8}$/, "enter the code the requester read out"),
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{4,8}$/, "enter the code the requester read out"),
 });
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");

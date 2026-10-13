@@ -126,8 +126,8 @@ export default function Hold() {
         <div className="rounded-xl bg-background p-4 text-left text-sm text-gray-700">
           <p className="font-semibold text-gray-900">While you wait</p>
           <p className="mt-1">
-            You can look around Needy, but you won&apos;t be able to book help or accept
-            requests until you&apos;re approved. We&apos;ll update this page automatically.
+            You can look around Needy, but you won&apos;t be able to book help or accept requests
+            until you&apos;re approved. We&apos;ll update this page automatically.
           </p>
         </div>
 

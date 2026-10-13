@@ -133,10 +133,7 @@ export function TaskExperience({ taskId }: { taskId: string }) {
       )}
       {task.state === "arrived" && <ArrivedStage task={task} helper={helper} />}
       {task.state === "in-progress" && (
-        <InProgressStage
-          helperName={otherName}
-          onComplete={() => driver.advanceTo("completed")}
-        />
+        <InProgressStage helperName={otherName} onComplete={() => driver.advanceTo("completed")} />
       )}
       {task.state === "completed" && <CompletedStage helper={helper} />}
       {task.state === "cancelled" && <CancelledStage />}

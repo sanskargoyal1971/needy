@@ -62,16 +62,14 @@ export function ExceptionWizard({ helperId }: { helperId?: string }) {
     }
   }
 
-  const forThisHelper = helperId
-    ? (items ?? []).find((e) => e.helperId === helperId)
-    : undefined;
+  const forThisHelper = helperId ? (items ?? []).find((e) => e.helperId === helperId) : undefined;
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <h1 className="font-display text-3xl font-bold text-gray-900">Pairing reviews</h1>
       <p className="mt-2 text-gray-600">
-        Some pairings need a person on our safety team to look at them before they can go
-        ahead. This is where those stand.
+        Some pairings need a person on our safety team to look at them before they can go ahead.
+        This is where those stand.
       </p>
 
       {error && (
@@ -97,9 +95,8 @@ export function ExceptionWizard({ helperId }: { helperId?: string }) {
                 Ask for this pairing to be reviewed
               </h2>
               <p className="mt-1 text-sm text-amber-900">
-                You&apos;ll each record a short video saying who you are and that you both want
-                this booking. Someone on our team watches both and decides within one working
-                day.
+                You&apos;ll each record a short video saying who you are and that you both want this
+                booking. Someone on our team watches both and decides within one working day.
               </p>
               <button
                 type="button"
@@ -114,9 +111,7 @@ export function ExceptionWizard({ helperId }: { helperId?: string }) {
           )}
 
           {items.length === 0 && !helperId && (
-            <p className="py-8 text-center text-gray-500">
-              You have no pairing reviews open.
-            </p>
+            <p className="py-8 text-center text-gray-500">You have no pairing reviews open.</p>
           )}
         </div>
       )}
@@ -165,9 +160,7 @@ function ExceptionCard({
               design is that this pairing is arranged in advance, and the booking screen will
               refuse an immediate one. */}
           This booking needs to be arranged for a set time rather than requested on the spot.
-          {e.expiresAt != null && (
-            <> This approval lasts until {absoluteTime(e.expiresAt)}.</>
-          )}
+          {e.expiresAt != null && <> This approval lasts until {absoluteTime(e.expiresAt)}.</>}
         </p>
         {e.myRole === "requester" && (
           <Link
@@ -202,9 +195,7 @@ function ExceptionCard({
     return (
       <div className="rounded-2xl border-2 border-gray-200 bg-white p-5">
         <Clock size={20} className="mb-2 text-primary" aria-hidden />
-        <h2 className="font-display text-lg font-bold text-gray-900">
-          Being reviewed by our team
-        </h2>
+        <h2 className="font-display text-lg font-bold text-gray-900">Being reviewed by our team</h2>
         <p className="mt-1 text-sm text-gray-600">
           Both videos are in. Someone will watch them and decide
           {e.reviewDueBy != null ? <> by {absoluteTime(e.reviewDueBy)}</> : <> shortly</>}.
@@ -246,9 +237,7 @@ function ExceptionCard({
             <Clock size={14} className="text-gray-400" aria-hidden />
           )}
           <span className="text-gray-600">
-            {theirsSubmitted
-              ? `${e.otherName}'s video is in`
-              : `Waiting on ${e.otherName} too`}
+            {theirsSubmitted ? `${e.otherName}'s video is in` : `Waiting on ${e.otherName} too`}
           </span>
         </li>
       </ul>
@@ -256,8 +245,8 @@ function ExceptionCard({
       {!mineSubmitted && (
         <div className="mt-4">
           <p className="mb-3 text-sm text-gray-600">
-            Record a few seconds saying your name, that you know who {e.otherName} is, and that
-            you want this booking to go ahead. Nobody sees it except our safety team.
+            Record a few seconds saying your name, that you know who {e.otherName} is, and that you
+            want this booking to go ahead. Nobody sees it except our safety team.
           </p>
           <CameraCapture
             mode="video"
@@ -281,8 +270,7 @@ function ExceptionCard({
 
       {mineSubmitted && !theirsSubmitted && (
         <p className="mt-4 rounded-xl bg-gray-50 px-3 py-2.5 text-sm text-gray-600">
-          Nothing more for you to do yet. Once {e.otherName} has recorded theirs, our team has
-          {" "}
+          Nothing more for you to do yet. Once {e.otherName} has recorded theirs, our team has{" "}
           {Math.round(EXCEPTION_REVIEW_SLA_MS / (60 * 60 * 1000))} hours to decide.
         </p>
       )}

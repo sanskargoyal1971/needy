@@ -11,9 +11,7 @@ export function haversineMeters(a: LatLng, b: LatLng): number {
   const dLng = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
   const lat2 = toRad(b.lat);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
 }
 
@@ -46,7 +44,5 @@ export async function computeEta(from: LatLng, to: LatLng): Promise<EtaResult> {
 /** Placeholder for Google/Mapbox Directions. Kept isolated so wiring a real key is a
  *  one-function change and the rest of the app is provider-agnostic. */
 async function routeViaProvider(_from: LatLng, _to: LatLng): Promise<EtaResult> {
-  throw new Error(
-    `directions provider '${config.directions.provider}' not implemented yet`,
-  );
+  throw new Error(`directions provider '${config.directions.provider}' not implemented yet`);
 }

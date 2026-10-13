@@ -82,13 +82,7 @@ export const registerTracking: NamespaceRegistrar = (deps: Deps): void => {
       try {
         // Read-only, so participation (not liveness) is enough: a client re-opening a
         // finished task may still sit in the room. The mutating `location` demands more.
-        const participation = await requireParticipant(
-          deps,
-          socket,
-          "join",
-          userId,
-          p.taskId,
-        );
+        const participation = await requireParticipant(deps, socket, "join", userId, p.taskId);
         if (!participation) return;
         // Gating on the result matters more here than anywhere: a client that believes it is
         // subscribed to a task room but is not sits watching a map that never moves, with no

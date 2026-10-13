@@ -25,8 +25,7 @@ export type RequestResult =
    *  caller can't probe which limiter it tripped. */
   | { ok: false; reason: "rate-limited"; scope: "phone" | "ip" };
 export type VerifyResult =
-  | { ok: true }
-  | { ok: false; reason: "expired" | "invalid" | "too-many-attempts" };
+  { ok: true } | { ok: false; reason: "expired" | "invalid" | "too-many-attempts" };
 
 /** Both the request cap and the attempt cap are counted over the same one-hour window, so the
  *  total number of guesses reachable per phone per hour is `maxAttempts` — full stop. */
@@ -47,7 +46,9 @@ export class OtpService {
     private readonly sms: SmsProvider,
     private readonly config: OtpConfig,
     private readonly generateCode: () => string = () =>
-      randomInt(0, 10 ** config.length).toString().padStart(config.length, "0"),
+      randomInt(0, 10 ** config.length)
+        .toString()
+        .padStart(config.length, "0"),
   ) {}
 
   private get maxPerHourPerIp(): number {
@@ -87,7 +88,10 @@ export class OtpService {
     // now window-scoped and survives a re-request, so `maxAttempts` is a real hourly ceiling.
     // (The cost to a legitimate user who has burned their attempts is having to wait out the
     // window, which is exactly what a lockout is for.)
-    await this.sms.send(phone, `Your Needy verification code is ${code}. It expires in ${Math.round(this.config.ttlSeconds / 60)} minutes.`);
+    await this.sms.send(
+      phone,
+      `Your Needy verification code is ${code}. It expires in ${Math.round(this.config.ttlSeconds / 60)} minutes.`,
+    );
     return { ok: true };
   }
 

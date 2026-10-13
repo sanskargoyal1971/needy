@@ -59,8 +59,7 @@ function Waiting({ since }: { since: number }) {
   }, []);
 
   const seconds = Math.round((now - since) / 1000);
-  const tone =
-    seconds > 300 ? "text-red-700" : seconds > 60 ? "text-orange-600" : "text-gray-700";
+  const tone = seconds > 300 ? "text-red-700" : seconds > 60 ? "text-orange-600" : "text-gray-700";
   return (
     <span className={`font-semibold tabular-nums ${tone}`} title={absoluteTime(since)}>
       {seconds < 60 ? `${seconds}s` : relativeTime(since, now)}
@@ -131,13 +130,7 @@ function Party({
   );
 }
 
-function AlertCard({
-  alert,
-  onChanged,
-}: {
-  alert: AlertView;
-  onChanged: (a: AlertView) => void;
-}) {
+function AlertCard({ alert, onChanged }: { alert: AlertView; onChanged: (a: AlertView) => void }) {
   const [busy, setBusy] = useState<"ack" | "resolve" | null>(null);
   const [note, setNote] = useState("");
   const [resolving, setResolving] = useState(false);

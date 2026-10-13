@@ -62,9 +62,7 @@ export function SosButton({
   // raised by the other party: a helper's alert appears on the requester's screen without
   // this component ever having been touched.
   if (alert && alert.status !== "cancelled") {
-    return (
-      <AlertLive alert={alert} mine={alert.raisedBy === userId} onCancel={onCancel} />
-    );
+    return <AlertLive alert={alert} mine={alert.raisedBy === userId} onCancel={onCancel} />;
   }
 
   async function raise(kind: SosKind) {
@@ -183,10 +181,7 @@ function AlertLive({
   // alarm beside them would be worse — but it is not theirs to describe or to withdraw.
   if (!mine) {
     return (
-      <div
-        role="status"
-        className="rounded-2xl border-2 border-red-300 bg-red-50 p-4"
-      >
+      <div role="status" className="rounded-2xl border-2 border-red-300 bg-red-50 p-4">
         <p className="flex items-center gap-2 font-display font-bold text-gray-900">
           <AlertTriangle size={18} className="text-red-700" aria-hidden />
           The other person has raised an alarm

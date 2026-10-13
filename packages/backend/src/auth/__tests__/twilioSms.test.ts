@@ -26,7 +26,10 @@ function okResponse(): Response {
 describe("TwilioSmsProvider", () => {
   it("posts a form-encoded message to the account's Messages endpoint", async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(okResponse());
-    await new TwilioSmsProvider({ ...CREDS, fetchImpl }).send("+919876543210", "Your code is 123456");
+    await new TwilioSmsProvider({ ...CREDS, fetchImpl }).send(
+      "+919876543210",
+      "Your code is 123456",
+    );
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, init] = fetchImpl.mock.calls[0]!;

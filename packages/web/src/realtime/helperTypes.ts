@@ -131,10 +131,7 @@ export interface HelperDriver {
    * right one rather than emitting both, because emitting both would re-advertise a helper who
    * is demonstrably busy.
    */
-  reportPosition(
-    point: LatLng,
-    extras?: { heading?: number; speedMps?: number },
-  ): void;
+  reportPosition(point: LatLng, extras?: { heading?: number; speedMps?: number }): void;
 
   /** Take an offer. The ack tells us whether we won the race; losing is normal, not an error. */
   accept(taskId: string): void;

@@ -35,17 +35,28 @@ export function Header() {
           <Link href={paths.landing} className="flex items-center gap-2 group">
             <div className="relative">
               <div className="absolute -inset-1 bg-primary/20 rounded-full blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
-              <span className="relative font-display text-2xl font-black text-primary drop-shadow-sm">Needy</span>
+              <span className="relative font-display text-2xl font-black text-primary drop-shadow-sm">
+                Needy
+              </span>
             </div>
           </Link>
           <nav className="hidden gap-6 text-sm font-bold text-gray-600 md:flex">
-            <Link href={paths.becomeHelper} className="transition-all hover:text-primary hover:-translate-y-0.5 inline-block">
+            <Link
+              href={paths.becomeHelper}
+              className="transition-all hover:text-primary hover:-translate-y-0.5 inline-block"
+            >
               Become a Helper
             </Link>
-            <Link href={paths.safety} className="transition-all hover:text-primary hover:-translate-y-0.5 inline-block">
+            <Link
+              href={paths.safety}
+              className="transition-all hover:text-primary hover:-translate-y-0.5 inline-block"
+            >
               Trust &amp; Safety
             </Link>
-            <Link href={paths.pricing} className="transition-all hover:text-primary hover:-translate-y-0.5 inline-block">
+            <Link
+              href={paths.pricing}
+              className="transition-all hover:text-primary hover:-translate-y-0.5 inline-block"
+            >
               Pricing
             </Link>
           </nav>
@@ -56,7 +67,10 @@ export function Header() {
               tokens are httpOnly, so only /auth/me can answer — and rendering "Log in" during
               that window makes a signed-in user's own header flicker at them on every load. */}
           {state.status === "loading" ? (
-            <div className="h-9 w-32 animate-pulse rounded-full bg-gray-200 shadow-inner" aria-hidden />
+            <div
+              className="h-9 w-32 animate-pulse rounded-full bg-gray-200 shadow-inner"
+              aria-hidden
+            />
           ) : state.status === "authenticated" ? (
             <>
               <Link

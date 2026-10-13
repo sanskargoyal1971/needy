@@ -59,16 +59,13 @@ export default function RequesterHome() {
     void load();
   }, [load]);
 
-  const firstName =
-    auth.status === "authenticated" ? auth.user.displayName.split(" ")[0] : "there";
+  const firstName = auth.status === "authenticated" ? auth.user.displayName.split(" ")[0] : "there";
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
       <header className="mb-8">
         <h1 className="font-display text-3xl font-black text-gray-900">Hello, {firstName}</h1>
-        <p className="mt-1 text-gray-600">
-          Verified people near you, ready to help in person.
-        </p>
+        <p className="mt-1 text-gray-600">Verified people near you, ready to help in person.</p>
       </header>
 
       <FormError>{error}</FormError>
@@ -118,8 +115,8 @@ export default function RequesterHome() {
             Need a hand with something?
           </h2>
           <p className="mx-auto mt-2 max-w-md text-gray-600">
-            Tell us what you need and we&apos;ll find a verified helper close by. You&apos;ll
-            see who they are before they set off.
+            Tell us what you need and we&apos;ll find a verified helper close by. You&apos;ll see
+            who they are before they set off.
           </p>
           <Link
             href={paths.newRequest}
@@ -152,8 +149,7 @@ export default function RequesterHome() {
                       : t.state === "unmatched"
                         ? "Nobody was available"
                         : "Completed"}{" "}
-                    ·{" "}
-                    {relativeTime(t.updatedAt)}
+                    · {relativeTime(t.updatedAt)}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">

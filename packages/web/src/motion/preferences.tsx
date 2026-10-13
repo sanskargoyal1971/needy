@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 /**
  * Reduced-motion is a genuine accessibility requirement here (§4) — elderly users are a
@@ -56,13 +49,9 @@ export function MotionPreferencesProvider({
 }) {
   const [override, setOverride] = useState<Override>(defaultOverride);
   const system = useSystemReducedMotion();
-  const reduced =
-    override === "reduce" ? true : override === "allow" ? false : system;
+  const reduced = override === "reduce" ? true : override === "allow" ? false : system;
 
-  const value = useMemo(
-    () => ({ reduced, override, setOverride }),
-    [reduced, override],
-  );
+  const value = useMemo(() => ({ reduced, override, setOverride }), [reduced, override]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

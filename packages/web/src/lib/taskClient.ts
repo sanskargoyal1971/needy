@@ -12,12 +12,7 @@
  *  ordinary user's bundle is allowed to call.
  */
 
-import type {
-  ServiceDefinition,
-  SessionSnapshot,
-  Task,
-  TaskCategory,
-} from "@needy/shared";
+import type { ServiceDefinition, SessionSnapshot, Task, TaskCategory } from "@needy/shared";
 import { AuthError } from "./authClient";
 import { csrfFetch } from "./csrf";
 
@@ -116,8 +111,7 @@ export const taskClient = {
   create: (input: CreateTaskInput) =>
     call<Task>("/tasks", { method: "POST", body: JSON.stringify(input) }),
 
-  get: (taskId: string) =>
-    call<{ task: Task }>(`/tasks/${encodeURIComponent(taskId)}`),
+  get: (taskId: string) => call<{ task: Task }>(`/tasks/${encodeURIComponent(taskId)}`),
 
   /**
    * Every task this user is currently party to, with its live context.
@@ -136,8 +130,7 @@ export const taskClient = {
 
   // ── the doorstep handoff ──────────────────────────────────────────────────
 
-  handoff: (taskId: string) =>
-    call<HandoffView>(`/tasks/${encodeURIComponent(taskId)}/handoff`),
+  handoff: (taskId: string) => call<HandoffView>(`/tasks/${encodeURIComponent(taskId)}/handoff`),
 
   /** Helper: what I will and will not do. A precondition for a code being issued. */
   submitBrief: (taskId: string, brief: string) =>
@@ -155,10 +148,9 @@ export const taskClient = {
    * replaces the previous hash, so a code read out earlier stops working immediately.
    */
   revealCode: (taskId: string) =>
-    call<{ code: string; expiresAt: number }>(
-      `/tasks/${encodeURIComponent(taskId)}/handoff/code`,
-      { method: "POST" },
-    ),
+    call<{ code: string; expiresAt: number }>(`/tasks/${encodeURIComponent(taskId)}/handoff/code`, {
+      method: "POST",
+    }),
 
   /** Helper: enter what the requester read out. Five wrong guesses burn the code. */
   verifyCode: (taskId: string, code: string) =>
@@ -190,13 +182,10 @@ export const taskClient = {
    * `exceptionFor` is keyed on the pair from the requester's side — this is what lets the
    * second person be told that a testimony is waiting on them.
    */
-  myExceptions: () =>
-    call<{ exceptions: ParticipantException[] }>("/me/exceptions"),
+  myExceptions: () => call<{ exceptions: ParticipantException[] }>("/me/exceptions"),
 
   exceptionFor: (helperId: string) =>
-    call<{ exception: ExceptionView | null }>(
-      `/exceptions/for/${encodeURIComponent(helperId)}`,
-    ),
+    call<{ exception: ExceptionView | null }>(`/exceptions/for/${encodeURIComponent(helperId)}`),
 
   openException: (helperId: string) =>
     call<{ exception: ExceptionView }>("/exceptions", {

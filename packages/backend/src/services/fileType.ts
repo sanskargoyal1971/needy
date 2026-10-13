@@ -76,10 +76,7 @@ export function sniffContentType(bytes: Buffer): SniffResult {
  * "invalid file" is not.
  */
 export type UploadRejection =
-  | "empty"
-  | "too-large"
-  | "unrecognized-format"
-  | "wrong-format-for-kind";
+  "empty" | "too-large" | "unrecognized-format" | "wrong-format-for-kind";
 
 export function validateUpload(
   bytes: Buffer,

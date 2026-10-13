@@ -125,14 +125,8 @@ function connect(
   });
 }
 
-const publish = (
-  socket: AppClient,
-  point: LatLng,
-  available: boolean,
-): Promise<OkAck> =>
-  new Promise((resolve) =>
-    socket.emit("publish-availability", { point, available }, resolve),
-  );
+const publish = (socket: AppClient, point: LatLng, available: boolean): Promise<OkAck> =>
+  new Promise((resolve) => socket.emit("publish-availability", { point, available }, resolve));
 
 /** Emit with a payload the typed client would refuse to produce — the point of a B7 check is
  *  that the SERVER does not trust the wire. */
@@ -154,10 +148,7 @@ const emitRaw = (socket: AppClient, event: string, payload: unknown): void => {
  *  for work that will never come needs to be told why, not ignored. */
 function nextError(socket: AppClient, ms = 3_000): Promise<SocketErrorPayload> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("timed out waiting for an error event")),
-      ms,
-    );
+    const timer = setTimeout(() => reject(new Error("timed out waiting for an error event")), ms);
     socket.once("error", (payload) => {
       clearTimeout(timer);
       resolve(payload as SocketErrorPayload);
@@ -181,8 +172,7 @@ async function waitFor(
   }
 }
 
-const settle = (ms = 150): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const settle = (ms = 150): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("/presence idle availability (audit A1 / B9 / B10)", () => {
   let httpServer: HttpServer;
@@ -301,9 +291,7 @@ describe("/presence idle availability (audit A1 / B9 / B10)", () => {
     // And the position stored is the one published, not a rounded or swapped pair. `geopos`
     // returns [lng, lat]; lat/lng transposition is the classic silent failure here, and it
     // would still satisfy a radius search around a nearby point in Bengaluru.
-    const [pos] = (await client.geopos(keys.helperGeo(), HELPER_OK)) as [
-      [string, string] | null,
-    ];
+    const [pos] = (await client.geopos(keys.helperGeo(), HELPER_OK)) as [[string, string] | null];
     expect(pos).not.toBeNull();
     expect(Number(pos![0])).toBeCloseTo(HERE.lng, 4);
     expect(Number(pos![1])).toBeCloseTo(HERE.lat, 4);
@@ -388,9 +376,7 @@ describe("/presence idle availability (audit A1 / B9 / B10)", () => {
 
     // The previously-published good position is untouched — a rejected frame must not
     // clobber the last known good one.
-    const [pos] = (await client.geopos(keys.helperGeo(), HELPER_OK)) as [
-      [string, string] | null,
-    ];
+    const [pos] = (await client.geopos(keys.helperGeo(), HELPER_OK)) as [[string, string] | null];
     expect(Number(pos![1])).toBeCloseTo(HERE.lat, 4);
   });
 

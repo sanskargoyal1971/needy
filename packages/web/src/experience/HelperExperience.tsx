@@ -2,14 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import {
-  CircleSlash,
-  Loader2,
-  MapPinOff,
-  Settings2,
-  ShieldAlert,
-  WifiOff,
-} from "lucide-react";
+import { CircleSlash, Loader2, MapPinOff, Settings2, ShieldAlert, WifiOff } from "lucide-react";
 import { isTerminal, type TaskState } from "@needy/shared";
 import { useHelperDriver, useHelperExperience } from "@/realtime";
 import { paths } from "@/lib/paths";

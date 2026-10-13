@@ -1,8 +1,4 @@
-import {
-  type ActivityContext,
-  type Presence,
-  type PresenceState,
-} from "@needy/shared";
+import { type ActivityContext, type Presence, type PresenceState } from "@needy/shared";
 import type { RedisClient } from "../redis.js";
 import { keys } from "./keys.js";
 
@@ -10,10 +6,7 @@ import { keys } from "./keys.js";
  *  (which owns the socket wiring + away-sweep) and by matching (which filters candidates
  *  to `online-available`). Centralizing the hash shape keeps the two in lockstep. */
 
-export async function writePresence(
-  redis: RedisClient,
-  presence: Presence,
-): Promise<void> {
+export async function writePresence(redis: RedisClient, presence: Presence): Promise<void> {
   await redis.hmset(keys.presence(presence.userId), {
     state: presence.state,
     activity: presence.activity,
@@ -21,10 +14,7 @@ export async function writePresence(
   });
 }
 
-export async function readPresence(
-  redis: RedisClient,
-  userId: string,
-): Promise<Presence | null> {
+export async function readPresence(redis: RedisClient, userId: string): Promise<Presence | null> {
   const h = await redis.hgetall(keys.presence(userId));
   if (!h || !h.state) return null;
   return {
@@ -71,10 +61,7 @@ export async function removePresenceSub(
   await redis.srem(keys.presenceSubs(helperId), requesterId);
 }
 
-export async function listPresenceSubs(
-  redis: RedisClient,
-  helperId: string,
-): Promise<string[]> {
+export async function listPresenceSubs(redis: RedisClient, helperId: string): Promise<string[]> {
   return redis.smembers(keys.presenceSubs(helperId));
 }
 
@@ -98,10 +85,7 @@ export async function listPresenceSubs(
 const SOCKET_COUNT_TTL_SECONDS = 60 * 60 * 12;
 
 /** Register a new live socket. Returns the resulting count (≥1). */
-export async function incrSocketCount(
-  redis: RedisClient,
-  userId: string,
-): Promise<number> {
+export async function incrSocketCount(redis: RedisClient, userId: string): Promise<number> {
   const key = keys.socketCount(userId);
   const [[, count]] = (await redis
     .multi()
@@ -115,10 +99,7 @@ export async function incrSocketCount(
  *  caller should flip the user offline. Clamped at 0 and self-healing: a stray decrement
  *  (a double-disconnect, a count lost to a restart) deletes the key rather than leaving a
  *  negative value that would make every future disconnect look like "others still here". */
-export async function decrSocketCount(
-  redis: RedisClient,
-  userId: string,
-): Promise<number> {
+export async function decrSocketCount(redis: RedisClient, userId: string): Promise<number> {
   const key = keys.socketCount(userId);
   const remaining = await redis.decr(key);
   if (remaining <= 0) {

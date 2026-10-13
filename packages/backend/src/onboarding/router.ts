@@ -359,7 +359,9 @@ export function createOnboardingRouter(deps: OnboardingDeps): Router {
       }
       const missing = missingDocuments(loaded.documents);
       if (missing.length > 0) {
-        res.status(422).json({ error: "documents-incomplete", missing, required: REQUIRED_DOCUMENTS });
+        res
+          .status(422)
+          .json({ error: "documents-incomplete", missing, required: REQUIRED_DOCUMENTS });
         return;
       }
 

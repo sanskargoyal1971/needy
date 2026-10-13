@@ -81,12 +81,10 @@ export default function HelperServices() {
         Back
       </Link>
 
-      <h1 className="mt-4 font-display text-3xl font-bold text-gray-900">
-        What you can help with
-      </h1>
+      <h1 className="mt-4 font-display text-3xl font-bold text-gray-900">What you can help with</h1>
       <p className="mt-2 text-gray-600">
-        You&apos;ll only be offered work you&apos;ve chosen here. You can change this whenever
-        you like.
+        You&apos;ll only be offered work you&apos;ve chosen here. You can change this whenever you
+        like.
       </p>
 
       {error && (
@@ -138,8 +136,8 @@ export default function HelperServices() {
                       </span>
                       {locked && (
                         <span className="mt-1.5 block text-sm font-medium text-primary">
-                          Every verified helper offers this — it&apos;s the emergency path, so
-                          it can&apos;t be switched off.
+                          Every verified helper offers this — it&apos;s the emergency path, so it
+                          can&apos;t be switched off.
                         </span>
                       )}
                     </span>

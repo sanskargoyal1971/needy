@@ -101,20 +101,16 @@ function send(
   clientMsgId: string,
   body: string,
 ): Promise<SendAck> {
-  return new Promise((resolve) =>
-    socket.emit("send", { taskId, clientMsgId, body }, resolve),
-  );
+  return new Promise((resolve) => socket.emit("send", { taskId, clientMsgId, body }, resolve));
 }
 
 /** Send a deliberately malformed payload; the client-side typing is bypassed on purpose,
  *  because the whole point is that the SERVER must not trust the wire. */
 function sendRawWithAck(socket: AppClient, payload: unknown): Promise<SendAck> {
   return new Promise((resolve) =>
-    (socket as unknown as { emit: (e: string, p: unknown, ack: (r: SendAck) => void) => void }).emit(
-      "send",
-      payload,
-      resolve,
-    ),
+    (
+      socket as unknown as { emit: (e: string, p: unknown, ack: (r: SendAck) => void) => void }
+    ).emit("send", payload, resolve),
   );
 }
 
@@ -122,10 +118,7 @@ function sendRawWithAck(socket: AppClient, payload: unknown): Promise<SendAck> {
  *  absent refusal is itself the failure we are testing for (never a silent drop). */
 function nextError(socket: AppClient, ms = 3_000): Promise<SocketErrorPayload> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("timed out waiting for an error event")),
-      ms,
-    );
+    const timer = setTimeout(() => reject(new Error("timed out waiting for an error event")), ms);
     socket.once("error", (payload) => {
       clearTimeout(timer);
       resolve(payload as SocketErrorPayload);
@@ -165,8 +158,7 @@ function errorMatching(
   });
 }
 
-const tick = (ms = 120): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const tick = (ms = 120): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("/chat participant authorization (audit A3)", () => {
   let httpServer: HttpServer;
@@ -196,7 +188,15 @@ describe("/chat participant authorization (audit A3)", () => {
       state: "in-progress",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
+      description: "test",
+      price: 100,
+      serviceCode: null,
+      scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
+      createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
 
@@ -211,7 +211,15 @@ describe("/chat participant authorization (audit A3)", () => {
       state: "in-progress",
       origin: ORIGIN,
       title: "Someone else's task",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
+      description: "test",
+      price: 100,
+      serviceCode: null,
+      scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
+      createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
     await messages.append({
@@ -435,9 +443,7 @@ describe("/chat participant authorization (audit A3)", () => {
     requester.emit("join", { taskId: TASK_ID });
     await tick();
 
-    const received = new Promise<ChatMessage>((resolve) =>
-      requester.once("message", resolve),
-    );
+    const received = new Promise<ChatMessage>((resolve) => requester.once("message", resolve));
     const ack = await send(helper, TASK_ID, "cmid-happy-path", "at your door");
     expect(ack.ok).toBe(true);
     const messageId = ack.ok ? ack.message.id : "";
@@ -529,7 +535,15 @@ describe("/chat participant authorization (audit A3)", () => {
       state: "cancelled",
       origin: ORIGIN,
       title: "Called off",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
+      description: "test",
+      price: 100,
+      serviceCode: null,
+      scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
+      createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
     });
 

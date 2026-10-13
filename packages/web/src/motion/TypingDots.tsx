@@ -2,12 +2,7 @@
 
 import { motion } from "framer-motion";
 import type { CSSProperties } from "react";
-import {
-  duration as D,
-  ease as E,
-  resolveColor,
-  type MotionColor,
-} from "./motion.config.js";
+import { duration as D, ease as E, resolveColor, type MotionColor } from "./motion.config.js";
 import { useReducedMotionPref } from "./preferences.js";
 
 export interface TypingDotsProps {

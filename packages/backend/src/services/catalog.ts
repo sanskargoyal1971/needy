@@ -1,8 +1,4 @@
-import {
-  MANDATORY_SERVICE_CODES,
-  SEED_SERVICES,
-  type ServiceDefinition,
-} from "@needy/shared";
+import { MANDATORY_SERVICE_CODES, SEED_SERVICES, type ServiceDefinition } from "@needy/shared";
 import type { DbPool } from "../db.js";
 
 /** ── Service catalog & helper enrolment ────────────────────────────────────

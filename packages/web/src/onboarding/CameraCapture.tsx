@@ -175,7 +175,11 @@ export function CameraCapture({ mode, maxDurationSeconds = 30, onCapture, disabl
             // A plain <img>, not next/image: the source is a blob: URL created moments ago
             // from the camera, so there is nothing for the optimiser to fetch or cache — it
             // would only add a loader that fails on an object URL.
-            <img src={preview.url} alt="Your captured selfie" className="h-full w-full object-cover" />
+            <img
+              src={preview.url}
+              alt="Your captured selfie"
+              className="h-full w-full object-cover"
+            />
           ) : (
             <video src={preview.url} controls playsInline className="h-full w-full object-cover" />
           )

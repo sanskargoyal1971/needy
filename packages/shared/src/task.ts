@@ -145,11 +145,7 @@ export function publicTask(task: Task): PublicTask {
 
 /** Terminal states never transition further; the reconnect snapshot uses this to decide
  *  whether to resubscribe a client to live event streams. */
-export const TERMINAL_TASK_STATES: readonly TaskState[] = [
-  "completed",
-  "cancelled",
-  "unmatched",
-];
+export const TERMINAL_TASK_STATES: readonly TaskState[] = ["completed", "cancelled", "unmatched"];
 
 export function isTerminal(state: TaskState): boolean {
   return TERMINAL_TASK_STATES.includes(state);

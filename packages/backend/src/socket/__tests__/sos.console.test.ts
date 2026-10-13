@@ -120,7 +120,10 @@ function watch(socket: SosSocketClient): Promise<WatchAck> {
   return new Promise((resolve) => socket.emit("watch", resolve));
 }
 
-function raise(socket: SosSocketClient, taskId: string): Promise<{ ok: boolean; alert?: SosAlert }> {
+function raise(
+  socket: SosSocketClient,
+  taskId: string,
+): Promise<{ ok: boolean; alert?: SosAlert }> {
   return new Promise((resolve) =>
     socket.emit("raise", { taskId, kind: "panic", at: ORIGIN }, resolve as never),
   );
@@ -190,7 +193,12 @@ describe("SOS operator console", () => {
     audit = recordingAudit();
 
     await users.create(
-      makeUser({ id: REQUESTER_ID, phone: "+919000008001", role: "requester", displayName: "Asha" }),
+      makeUser({
+        id: REQUESTER_ID,
+        phone: "+919000008001",
+        role: "requester",
+        displayName: "Asha",
+      }),
     );
     await users.create(
       makeUser({ id: HELPER_ID, phone: "+919000008002", role: "helper", displayName: "Priya" }),
@@ -411,9 +419,7 @@ describe("SOS operator console", () => {
         .set("Authorization", auth)
         .send({ note: "phoned her, the helper had the wrong building" });
       expect(first.status).toBe(200);
-      expect(first.body.alert.resolutionNote).toBe(
-        "phoned her, the helper had the wrong building",
-      );
+      expect(first.body.alert.resolutionNote).toBe("phoned her, the helper had the wrong building");
 
       const second = await request(app)
         .post(`/admin/sos/${alertId}/resolve`)

@@ -103,10 +103,7 @@ function DefaultSilhouette({ size }: { size: number }) {
       {/* subtle direction hint at the top */}
       <path d="M12 1 L15 6 L9 6 Z" fill="var(--needy-warm, #E8935A)" opacity="0.9" />
       <circle cx="12" cy="9.5" r="3" fill="var(--needy-warm, #E8935A)" />
-      <path
-        d="M6.5 20c0-3.6 2.5-6 5.5-6s5.5 2.4 5.5 6z"
-        fill="var(--needy-warm, #E8935A)"
-      />
+      <path d="M6.5 20c0-3.6 2.5-6 5.5-6s5.5 2.4 5.5 6z" fill="var(--needy-warm, #E8935A)" />
     </svg>
   );
 }

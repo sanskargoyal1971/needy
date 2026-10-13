@@ -88,10 +88,7 @@ function NewRequest() {
     })();
   }, []);
 
-  const selected = useMemo(
-    () => services?.find((s) => s.code === code) ?? null,
-    [services, code],
-  );
+  const selected = useMemo(() => services?.find((s) => s.code === code) ?? null, [services, code]);
   const category = code ? (CATEGORY_FOR_SERVICE[code] ?? "errand") : "errand";
   const price = CATEGORY_PRICING[category];
 
@@ -128,8 +125,7 @@ function NewRequest() {
           // The server's own minimum lead time, echoed back rather than hard-coded here, so
           // the two cannot drift apart.
           const lead = err.details?.minimumLeadMs;
-          const hours =
-            typeof lead === "number" ? Math.round(lead / (60 * 60 * 1000)) : 24;
+          const hours = typeof lead === "number" ? Math.round(lead / (60 * 60 * 1000)) : 24;
           setError(
             `That time doesn't work. A booking like this needs at least ${hours} hours' notice.`,
           );
@@ -151,10 +147,10 @@ function NewRequest() {
   // letting the button look ready would spend a tap to learn that.
   const ready = Boolean(
     code &&
-      origin &&
-      title.trim().length > 0 &&
-      description.trim().length > 0 &&
-      (!namedHelper || scheduledFor),
+    origin &&
+    title.trim().length > 0 &&
+    description.trim().length > 0 &&
+    (!namedHelper || scheduledFor),
   );
 
   return (
@@ -220,8 +216,8 @@ function NewRequest() {
         <section>
           <h2 className="mb-1 text-sm font-medium text-gray-900">Where are you?</h2>
           <p className="mb-3 text-sm text-gray-500">
-            Drag the pin if it isn&apos;t exactly right. Helpers only see a rough area until
-            one of them accepts.
+            Drag the pin if it isn&apos;t exactly right. Helpers only see a rough area until one of
+            them accepts.
           </p>
           <OriginPicker value={origin} onChange={setOrigin} />
         </section>
@@ -333,9 +329,8 @@ function PairingRefusal({ code, helperId }: { code: string; helperId?: string })
             <>
               <p className="font-semibold">This pairing needs a review first</p>
               <p className="mt-1">
-                For safety, we don&apos;t automatically match two young adults of different
-                genders. It isn&apos;t about either of you — it applies to everyone, both ways
-                round.
+                For safety, we don&apos;t automatically match two young adults of different genders.
+                It isn&apos;t about either of you — it applies to everyone, both ways round.
               </p>
               <p className="mt-2">
                 If you both want to go ahead, you can each record a short video saying so and a
@@ -357,8 +352,8 @@ function PairingRefusal({ code, helperId }: { code: string; helperId?: string })
             <>
               <p className="font-semibold">We can&apos;t arrange this particular pairing</p>
               <p className="mt-1">
-                Our safety rules don&apos;t allow this specific match. Choosing an open
-                request instead will find you someone nearby straight away.
+                Our safety rules don&apos;t allow this specific match. Choosing an open request
+                instead will find you someone nearby straight away.
               </p>
             </>
           )}

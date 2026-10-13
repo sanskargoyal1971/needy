@@ -24,11 +24,7 @@ import type { RedisClient } from "../redis.js";
 import { emitSignal } from "../domain/abuseStore.js";
 import type { Deps, NamespaceRegistrar } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
-import {
-  freshHelperIds,
-  getTaskLocation,
-  removeHelperGeo,
-} from "../domain/location-store.js";
+import { freshHelperIds, getTaskLocation, removeHelperGeo } from "../domain/location-store.js";
 import { readPresence } from "../domain/presence-store.js";
 import { computeEta } from "../services/eta.js";
 import { withLock } from "../services/lock.js";
@@ -183,10 +179,8 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
 
         const task = await deps.tasks.get(taskId);
         if (!task) return ack({ ok: false, error: "task-not-found" });
-        if (task.state !== "searching")
-          return ack({ ok: false, error: "task-not-searching" });
-        if (task.requesterId !== requesterId)
-          return ack({ ok: false, error: "not-requester" });
+        if (task.state !== "searching") return ack({ ok: false, error: "task-not-searching" });
+        if (task.requesterId !== requesterId) return ack({ ok: false, error: "not-requester" });
 
         // ── an assigned booking is NOT a search ──────────────────────────────
         //
@@ -220,12 +214,7 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
         // on different instances would both observe "no live offer" if we checked first.
         // Exactly one gets `1` back and owns the broadcast.
         const expiresAt = deps.now() + deps.config.match.offerWindowMs;
-        const claimed = await client.zadd(
-          keys.offerExpiryQueue(),
-          "NX",
-          expiresAt,
-          taskId,
-        );
+        const claimed = await client.zadd(keys.offerExpiryQueue(), "NX", expiresAt, taskId);
         if (claimed === 0) {
           const existing = await client.zscore(keys.offerExpiryQueue(), taskId);
           if (existing != null && Number(existing) > deps.now()) {
@@ -241,12 +230,7 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
 
         // Wave 0 — the innermost ring. `broadcastWave` handles the audience bookkeeping,
         // the fan-out and the "nobody there" release; escalation reuses it unchanged.
-        await client.set(
-          keys.offerWave(taskId),
-          "0",
-          "PX",
-          waveKeyTtlMs(deps),
-        );
+        await client.set(keys.offerWave(taskId), "0", "PX", waveKeyTtlMs(deps));
         await broadcastWave(deps, nsp, task, 0, expiresAt);
 
         // Best-effort in-process timer purely for LATENCY: it closes the offer the instant
@@ -310,82 +294,73 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
         // Unique token per attempt so releaseLock only ever deletes OUR lock.
         const token = `${socket.id}:${deps.now()}`;
 
-        const outcome = await withLock(
-          client,
-          keys.matchLock(taskId),
-          token,
-          async () => {
-            // ── DOUBLE-ACCEPT GUARD ──────────────────────────────────────────
-            // Reload under the lock and re-check: if a helper is already assigned or
-            // the task has left "searching", this acceptance loses. This re-read is the
-            // whole point of the lock — a stale in-flight accept must NOT overwrite a
-            // match that another helper already won.
-            const task = await deps.tasks.get(taskId);
-            if (!task) return { won: false as const, reason: "expired" as const };
-            if (task.helperId != null || task.state !== "searching")
-              return { won: false as const, reason: "already-taken" as const };
+        const outcome = await withLock(client, keys.matchLock(taskId), token, async () => {
+          // ── DOUBLE-ACCEPT GUARD ──────────────────────────────────────────
+          // Reload under the lock and re-check: if a helper is already assigned or
+          // the task has left "searching", this acceptance loses. This re-read is the
+          // whole point of the lock — a stale in-flight accept must NOT overwrite a
+          // match that another helper already won.
+          const task = await deps.tasks.get(taskId);
+          if (!task) return { won: false as const, reason: "expired" as const };
+          if (task.helperId != null || task.state !== "searching")
+            return { won: false as const, reason: "already-taken" as const };
 
-            // ── OFFER VALIDITY (audit: neither of these was checked) ──────────
-            // 1. The window. `expiresAt` was sent to the client and then never enforced
-            //    server-side, so an offer could be accepted arbitrarily long after it
-            //    lapsed — the requester has given up and moved on by then.
-            const expiresAt = await client.zscore(keys.offerExpiryQueue(), taskId);
-            if (expiresAt == null || Number(expiresAt) <= deps.now())
-              return { won: false as const, reason: "expired" as const };
+          // ── OFFER VALIDITY (audit: neither of these was checked) ──────────
+          // 1. The window. `expiresAt` was sent to the client and then never enforced
+          //    server-side, so an offer could be accepted arbitrarily long after it
+          //    lapsed — the requester has given up and moved on by then.
+          const expiresAt = await client.zscore(keys.offerExpiryQueue(), taskId);
+          if (expiresAt == null || Number(expiresAt) <= deps.now())
+            return { won: false as const, reason: "expired" as const };
 
-            // 2. The audience. Nothing tied `accept` to having been OFFERED the task, so any
-            //    authenticated user who learned a taskId could accept a stranger's request —
-            //    bypassing the radius, presence, role and KYC filters entirely. Rooms and
-            //    client-side offer state are not a security boundary; the audience set is.
-            const offered = await client.sismember(
-              keys.offerAudience(taskId),
+          // 2. The audience. Nothing tied `accept` to having been OFFERED the task, so any
+          //    authenticated user who learned a taskId could accept a stranger's request —
+          //    bypassing the radius, presence, role and KYC filters entirely. Rooms and
+          //    client-side offer state are not a security boundary; the audience set is.
+          const offered = await client.sismember(keys.offerAudience(taskId), helperId);
+          if (offered !== 1) return { won: false as const, reason: "expired" as const };
+
+          // 3. The distance cap, re-checked at accept time rather than trusted from the
+          //    offer. The audience is cumulative across escalation waves and lives a little
+          //    past each window, so membership alone no longer implies "currently within
+          //    range" — and a helper who has driven away since being offered must not be
+          //    able to take a job they can no longer reach. 10 km is a hard ceiling: no
+          //    wave, and no amount of waiting, makes a further helper acceptable.
+          const distanceMeters = await helperDistanceTo(deps, helperId, task);
+          if (distanceMeters != null && distanceMeters > deps.config.match.radiusMeters) {
+            deps.logger.warn("matching accept refused — helper beyond the radius cap", {
+              taskId,
               helperId,
-            );
-            if (offered !== 1)
-              return { won: false as const, reason: "expired" as const };
-
-            // 3. The distance cap, re-checked at accept time rather than trusted from the
-            //    offer. The audience is cumulative across escalation waves and lives a little
-            //    past each window, so membership alone no longer implies "currently within
-            //    range" — and a helper who has driven away since being offered must not be
-            //    able to take a job they can no longer reach. 10 km is a hard ceiling: no
-            //    wave, and no amount of waiting, makes a further helper acceptable.
-            const distanceMeters = await helperDistanceTo(deps, helperId, task);
-            if (distanceMeters != null && distanceMeters > deps.config.match.radiusMeters) {
-              deps.logger.warn("matching accept refused — helper beyond the radius cap", {
-                taskId,
-                helperId,
-                distanceMeters,
-              });
-              return { won: false as const, reason: "expired" as const };
-            }
-
-            const updated = await deps.tasks.update(taskId, {
-              helperId,
-              state: "matched",
-              updatedAt: deps.now(),
+              distanceMeters,
             });
+            return { won: false as const, reason: "expired" as const };
+          }
 
-            // Build the reveal card BEFORE de-listing: it reads the availability position as
-            // its ETA fallback (see `buildMatchedHelper`), and that entry is about to go.
-            const helper = await buildMatchedHelper(deps, helperId, updated);
+          const updated = await deps.tasks.update(taskId, {
+            helperId,
+            state: "matched",
+            updatedAt: deps.now(),
+          });
 
-            // ── DE-LIST THE WINNER (audit follow-up) ─────────────────────────
-            // The winner is now busy and must stop being a candidate. Nothing did this: the
-            // only de-list was in /tracking's `location`, which is gated on `en-route`/
-            // `arrived` — states a freshly-matched helper has not reached. So between winning
-            // and setting off (a verification step, a phone call, a walk to the door — easily
-            // minutes) they stayed in `geo:helpers` with a fresh timestamp and could be
-            // offered a SECOND task. Accepting it would strand one of the two requesters, and
-            // the one who loses is someone already told help is on the way.
-            //
-            // Done inside the lock, after the write that made them the winner, so a losing
-            // concurrent accept can never de-list a helper it did not actually match.
-            await removeHelperGeo(client, helperId);
+          // Build the reveal card BEFORE de-listing: it reads the availability position as
+          // its ETA fallback (see `buildMatchedHelper`), and that entry is about to go.
+          const helper = await buildMatchedHelper(deps, helperId, updated);
 
-            return { won: true as const, task: updated, helper };
-          },
-        );
+          // ── DE-LIST THE WINNER (audit follow-up) ─────────────────────────
+          // The winner is now busy and must stop being a candidate. Nothing did this: the
+          // only de-list was in /tracking's `location`, which is gated on `en-route`/
+          // `arrived` — states a freshly-matched helper has not reached. So between winning
+          // and setting off (a verification step, a phone call, a walk to the door — easily
+          // minutes) they stayed in `geo:helpers` with a fresh timestamp and could be
+          // offered a SECOND task. Accepting it would strand one of the two requesters, and
+          // the one who loses is someone already told help is on the way.
+          //
+          // Done inside the lock, after the write that made them the winner, so a losing
+          // concurrent accept can never de-list a helper it did not actually match.
+          await removeHelperGeo(client, helperId);
+
+          return { won: true as const, task: updated, helper };
+        });
 
         // withLock returns null when the lock is held elsewhere — another accept is mid
         // -flight, so from this helper's perspective the task is already being taken.
@@ -412,9 +387,7 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
         const audience = await client.smembers(keys.offerAudience(taskId));
         for (const otherId of audience) {
           if (otherId === helperId) continue;
-          nsp
-            .to(personalRoom(otherId))
-            .emit("offer-closed", { taskId, reason: "already-taken" });
+          nsp.to(personalRoom(otherId)).emit("offer-closed", { taskId, reason: "already-taken" });
         }
         await client.del(keys.offerAudience(taskId));
         await client.del(keys.offerWave(taskId));
@@ -481,7 +454,12 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
             // replaced (B12b).
             const task = await deps.tasks.get(taskId);
             if (!task)
-              return { ok: false, error: "task-not-found", code: "NOT_FOUND", message: "no such task" };
+              return {
+                ok: false,
+                error: "task-not-found",
+                code: "NOT_FOUND",
+                message: "no such task",
+              };
 
             const role = taskRoleOf(task, userId);
             if (!role)
@@ -691,10 +669,7 @@ async function findEligibleHelpers(
   // Redis GEO members have no per-member TTL, so the companion freshness index is what
   // expresses availability decay (audit A1/B9). Intersecting here is what stops us offering
   // work to a phantom whose last publish was days ago.
-  const fresh = await freshHelperIds(
-    deps.redis.client,
-    deps.now() - AVAILABILITY_TTL_MS,
-  );
+  const fresh = await freshHelperIds(deps.redis.client, deps.now() - AVAILABILITY_TTL_MS);
 
   const eligible: Candidate[] = [];
   /** In range and otherwise offerable, refused ONLY by the pairing matrix. Reported back to
@@ -756,9 +731,7 @@ async function findEligibleHelpers(
   // Rank primarily by distance ascending. Secondary tiebreak on rating is a deliberate
   // seam: future scoring folds in response-time and volunteer standing (weighted more for
   // "social-service" tasks, §2.4) — extend this comparator, don't scatter the logic.
-  eligible.sort(
-    (a, b) => a.distanceMeters - b.distanceMeters || b.rating - a.rating,
-  );
+  eligible.sort((a, b) => a.distanceMeters - b.distanceMeters || b.rating - a.rating);
   return { eligible, restrictedNearby };
 }
 
@@ -863,11 +836,7 @@ async function buildMatchedHelper(
  * a GEO read blipped would strand a requester who has been told help is coming. The cap is a
  * guard against a stale audience, not the primary authorization.
  */
-async function helperDistanceTo(
-  deps: Deps,
-  helperId: string,
-  task: Task,
-): Promise<number | null> {
+async function helperDistanceTo(deps: Deps, helperId: string, task: Task): Promise<number | null> {
   try {
     const point = await readAvailabilityPoint(deps, helperId);
     if (!point) return null;
@@ -884,14 +853,10 @@ async function helperDistanceTo(
   }
 }
 
-async function readAvailabilityPoint(
-  deps: Deps,
-  helperId: string,
-): Promise<LatLng | null> {
+async function readAvailabilityPoint(deps: Deps, helperId: string): Promise<LatLng | null> {
   try {
     const res = (await deps.redis.client.geopos(keys.helperGeo(), helperId)) as
-      | (string[] | null)[]
-      | null;
+      (string[] | null)[] | null;
     const first = res?.[0];
     if (!first) return null;
     const lng = Number(first[0]);
@@ -910,16 +875,9 @@ async function readAvailabilityPoint(
 /** Collect every offer whose window has lapsed and close each one. Driven by the interval in
  *  `registerMatching`; the per-task ZREM claim inside `closeExpiredOffer` means running this
  *  on several instances at once (or alongside a stray in-process timer) is safe. */
-async function sweepExpiredOffers(
-  deps: Deps,
-  nsp: MatchingNamespace,
-): Promise<void> {
+async function sweepExpiredOffers(deps: Deps, nsp: MatchingNamespace): Promise<void> {
   try {
-    const due = await deps.redis.client.zrangebyscore(
-      keys.offerExpiryQueue(),
-      "-inf",
-      deps.now(),
-    );
+    const due = await deps.redis.client.zrangebyscore(keys.offerExpiryQueue(), "-inf", deps.now());
     for (const taskId of due) {
       await closeExpiredOffer(deps, nsp, taskId);
     }
@@ -1026,9 +984,7 @@ async function closeCancelledOffer(
     if (claimed !== 1) return;
     const audience = await deps.redis.client.smembers(keys.offerAudience(taskId));
     for (const helperId of audience) {
-      nsp
-        .to(personalRoom(helperId))
-        .emit("offer-closed", { taskId, reason: "cancelled" });
+      nsp.to(personalRoom(helperId)).emit("offer-closed", { taskId, reason: "cancelled" });
     }
     await deps.redis.client.del(keys.offerAudience(taskId));
   } catch (err) {
@@ -1134,11 +1090,7 @@ async function broadcastWave(
  * as the original expiry does. A no-longer-searching task takes the close path regardless,
  * which is what stops a matched or cancelled task escalating forever.
  */
-async function expireOffer(
-  deps: Deps,
-  nsp: MatchingNamespace,
-  taskId: string,
-): Promise<void> {
+async function expireOffer(deps: Deps, nsp: MatchingNamespace, taskId: string): Promise<void> {
   const { client } = deps.redis;
   try {
     const task = await deps.tasks.get(taskId);
@@ -1155,12 +1107,7 @@ async function expireOffer(
         // scheduled entry and retries the wave; the other order would leave an offer out
         // with nothing scheduled to close it.
         await client.zadd(keys.offerExpiryQueue(), expiresAt, taskId);
-        await client.set(
-          keys.offerWave(taskId),
-          String(next),
-          "PX",
-          waveKeyTtlMs(deps),
-        );
+        await client.set(keys.offerWave(taskId), String(next), "PX", waveKeyTtlMs(deps));
         const reached = await broadcastWave(deps, nsp, task, next, expiresAt);
         deps.logger.info("matching search widened", {
           taskId,

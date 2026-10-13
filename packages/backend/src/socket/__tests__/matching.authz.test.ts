@@ -56,8 +56,7 @@ import { claimLapsedOffer, registerMatching } from "../matching.js";
 
 type AppClient = ClientSocket<MatchingServerEvents, MatchingClientEvents>;
 type AcceptAck =
-  | { won: true; task: PublicTask }
-  | { won: false; reason: "already-taken" | "expired" };
+  { won: true; task: PublicTask } | { won: false; reason: "already-taken" | "expired" };
 type OkAck = { ok: true } | { ok: false; error: string };
 type AdvanceAck = { ok: true; task: PublicTask } | { ok: false; error: string };
 
@@ -131,8 +130,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   ]);
 }
 
-const settle = (ms = 120): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const settle = (ms = 120): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 function connect(port: number, userId: string, role: Role): Promise<AppClient> {
   const token = signAccessToken({ sub: userId, role, displayName: userId });
@@ -153,11 +151,7 @@ const requestHelp = (socket: AppClient, taskId: string): Promise<OkAck> =>
 const accept = (socket: AppClient, taskId: string): Promise<AcceptAck> =>
   new Promise((resolve) => socket.emit("accept", { taskId }, resolve));
 
-const advance = (
-  socket: AppClient,
-  taskId: string,
-  to: TaskState,
-): Promise<AdvanceAck> =>
+const advance = (socket: AppClient, taskId: string, to: TaskState): Promise<AdvanceAck> =>
   new Promise((resolve) => socket.emit("advance-task", { taskId, to }, resolve));
 
 /** Emit a frame with NO acknowledgement callback, bypassing the typed client — which would
@@ -213,7 +207,15 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
       state: "searching",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: FIXED_NOW,
+      description: "test",
+      price: 100,
+      serviceCode: null,
+      scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
+      createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,
       ...over,
     });
@@ -396,8 +398,7 @@ describe("/matching authorization + eligibility (audit A6 / B11 / B12)", () => {
   });
 
   afterAll(async () => {
-    for (const c of [requester, helperOk, helperUnverified, helperFar, helperEta])
-      c?.disconnect();
+    for (const c of [requester, helperOk, helperUnverified, helperFar, helperEta]) c?.disconnect();
     await io.close();
     await new Promise<void>((r) => httpServer.close(() => r()));
     // Delete only OUR keys — never flushdb, which would take out whatever else is on db 15.

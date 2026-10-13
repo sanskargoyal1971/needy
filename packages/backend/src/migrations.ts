@@ -581,10 +581,9 @@ export async function migrate(
           await client.query("ROLLBACK").catch(() => undefined);
           // Rethrow: an unapplied migration means the schema is not what the code expects, and
           // serving traffic against it produces corrupt data rather than a clean failure.
-          throw new Error(
-            `migration ${m.id} (${m.name}) failed: ${(err as Error).message}`,
-            { cause: err },
-          );
+          throw new Error(`migration ${m.id} (${m.name}) failed: ${(err as Error).message}`, {
+            cause: err,
+          });
         }
 
         // Tolerant statements run after the commit, each on its own, so one unvalidatable

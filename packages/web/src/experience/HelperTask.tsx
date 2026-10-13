@@ -71,8 +71,8 @@ export function HelperTask({
               actually happened. */}
           <div className="mt-3">
             <SandboxNote>
-              The live video call is not built yet. Nothing is recorded and no call takes place
-              — this step only marks the task as verified.
+              The live video call is not built yet. Nothing is recorded and no call takes place —
+              this step only marks the task as verified.
             </SandboxNote>
           </div>
           <button
@@ -108,8 +108,8 @@ export function HelperTask({
           <CheckCircle2 size={22} className="mb-2 text-emerald-600" aria-hidden />
           <h3 className="font-display text-lg font-bold text-gray-900">You&apos;re helping</h3>
           <p className="mt-1 text-gray-600">
-            When you&apos;re finished, they&apos;ll confirm it on their phone and this will
-            close. If anything feels wrong, press the red button.
+            When you&apos;re finished, they&apos;ll confirm it on their phone and this will close.
+            If anything feels wrong, press the red button.
           </p>
         </div>
       )}
@@ -232,8 +232,8 @@ function HandoffStage({ task }: { task: PublicTask }) {
           Tell them what you&apos;ll do
         </h3>
         <p className="mt-1 text-gray-600">
-          They&apos;ll read this before they let you in. Be specific, and say what you
-          won&apos;t be doing too.
+          They&apos;ll read this before they let you in. Be specific, and say what you won&apos;t be
+          doing too.
         </p>
         <textarea
           value={brief}
@@ -266,17 +266,13 @@ function HandoffStage({ task }: { task: PublicTask }) {
   return (
     <div className="rounded-3xl border-2 border-primary/30 bg-white p-6">
       <KeyRound size={22} className="mb-2 text-primary" aria-hidden />
-      <h3 className="font-display text-lg font-bold text-gray-900">
-        Ask them for their code
-      </h3>
+      <h3 className="font-display text-lg font-bold text-gray-900">Ask them for their code</h3>
       <p className="mt-1 text-gray-600">
-        They have a six-digit code on their screen. Ask them to read it to you, and type it in
-        here.
+        They have a six-digit code on their screen. Ask them to read it to you, and type it in here.
       </p>
 
       <div className="mt-3 rounded-xl bg-gray-50 p-3 text-sm text-gray-600">
-        <span className="font-medium text-gray-900">What you told them:</span>{" "}
-        {task.serviceBrief}
+        <span className="font-medium text-gray-900">What you told them:</span> {task.serviceBrief}
       </div>
 
       <input

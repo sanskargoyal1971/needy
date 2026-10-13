@@ -24,7 +24,10 @@ export interface AdminRouterDeps {
 
 const applySchema = z.object({
   displayName: z.string().trim().min(1).max(80),
-  phone: z.string().trim().regex(/^\+?[1-9]\d{7,14}$/),
+  phone: z
+    .string()
+    .trim()
+    .regex(/^\+?[1-9]\d{7,14}$/),
   aadhaarLast4: z.string().regex(/^\d{4}$/, "exactly 4 digits"),
   experience: z.string().trim().min(10).max(1000),
 });
@@ -262,7 +265,9 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
         if (deps.pool) {
           const [usersR, helpersR, tasksR, revenueR, pendingR] = await Promise.all([
             deps.pool.query<{ count: string }>("SELECT COUNT(*) as count FROM users"),
-            deps.pool.query<{ count: string }>("SELECT COUNT(*) as count FROM users WHERE role IN ('helper','both')"),
+            deps.pool.query<{ count: string }>(
+              "SELECT COUNT(*) as count FROM users WHERE role IN ('helper','both')",
+            ),
             deps.pool.query<{ count: string; completed: string }>(
               "SELECT COUNT(*) as count, COUNT(*) FILTER (WHERE state = 'completed') as completed FROM tasks",
             ),

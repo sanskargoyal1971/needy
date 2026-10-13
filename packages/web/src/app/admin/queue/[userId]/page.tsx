@@ -195,8 +195,8 @@ export default function PacketDetail() {
               <p className="flex items-start gap-2 rounded-xl bg-red-50 p-3 text-xs text-red-800">
                 <ShieldX size={14} className="mt-0.5 shrink-0" aria-hidden />
                 <span>
-                  Rejecting is permanent. It blocks this mobile number from registering again
-                  and signs the applicant out of every device.
+                  Rejecting is permanent. It blocks this mobile number from registering again and
+                  signs the applicant out of every device.
                 </span>
               </p>
             </section>

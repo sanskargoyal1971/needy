@@ -51,8 +51,15 @@ describe("onboarding router", () => {
   const token = (sub: string, role = "requester") =>
     signAccessToken({ sub, role: role as "requester", displayName: sub });
 
-  const seed = async (id: string, patch: Parameters<typeof makeUser>[0] extends never ? never : Partial<ReturnType<typeof makeUser>> = {}) =>
-    users.create(makeUser({ id, phone: `+9198765${id.slice(-5).padStart(5, "0")}`, createdAt: NOW, ...patch }));
+  const seed = async (
+    id: string,
+    patch: Parameters<typeof makeUser>[0] extends never
+      ? never
+      : Partial<ReturnType<typeof makeUser>> = {},
+  ) =>
+    users.create(
+      makeUser({ id, phone: `+9198765${id.slice(-5).padStart(5, "0")}`, createdAt: NOW, ...patch }),
+    );
 
   beforeAll(async () => {
     storageRoot = await mkdtemp(join(tmpdir(), "needy-kyc-"));
@@ -221,7 +228,9 @@ describe("onboarding router", () => {
   it("is idempotent on double submission", async () => {
     await seed("u9", { dateOfBirth: "1990-01-01", gender: "male", onboardingStatus: "documents" });
     await uploadAll("u9");
-    await request(app).post("/onboarding/submit").set("authorization", `Bearer ${token("u9")}`);
+    await request(app)
+      .post("/onboarding/submit")
+      .set("authorization", `Bearer ${token("u9")}`);
     const first = (await users.getById("u9"))?.submittedAt;
 
     const again = await request(app)
@@ -270,7 +279,9 @@ describe("requireOnboarded", () => {
       "/protected",
       (req, _res, next): void => {
         // Stand-in for requireAuth so this test isolates the gate itself.
-        (req as express.Request & { user?: unknown }).user = { sub: req.headers["x-user"] as string };
+        (req as express.Request & { user?: unknown }).user = {
+          sub: req.headers["x-user"] as string,
+        };
         next();
       },
       requireOnboarded({ users }),
@@ -340,7 +351,9 @@ describe("phone blocklist", () => {
     const auth = new AuthService({ users, sessions, phoneBlocks: blocks, now: () => NOW });
 
     // An existing, previously fine account.
-    await users.create(makeUser({ id: "b1", phone: "+919111111111", onboardingStatus: "approved" }));
+    await users.create(
+      makeUser({ id: "b1", phone: "+919111111111", onboardingStatus: "approved" }),
+    );
     await blocks.block("+919111111111", "rejected at review", "admin-1", NOW);
     await expect(auth.loginWithPhone("+919111111111", "vitest")).rejects.toThrow(PhoneBlockedError);
 

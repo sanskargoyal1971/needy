@@ -19,7 +19,8 @@ const merriweather = Merriweather({
 
 export const metadata: Metadata = {
   title: "Needy | Immediate, verified assistance",
-  description: "A hyperlocal trust platform that connects people who need immediate, verified assistance with ID-verified local helpers.",
+  description:
+    "A hyperlocal trust platform that connects people who need immediate, verified assistance with ID-verified local helpers.",
 };
 
 export default function RootLayout({
@@ -48,7 +49,9 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${inter.variable} ${merriweather.variable} font-sans antialiased bg-background text-foreground min-h-screen flex flex-col`}>
+      <body
+        className={`${inter.variable} ${merriweather.variable} font-sans antialiased bg-background text-foreground min-h-screen flex flex-col`}
+      >
         {/* Wraps everything, including the Header, so the nav can reflect the session. */}
         <AuthProvider>
           <Header />

@@ -126,8 +126,14 @@ export function createPgKycDocumentRepo(pool: DbPool): KycDocumentRepository {
          RETURNING (SELECT storage_key FROM kyc_documents k
                      WHERE k.user_id = $2 AND k.kind = $3) AS replaced`,
         [
-          doc.id, doc.userId, doc.kind, doc.storageKey, doc.contentType,
-          doc.sizeBytes, doc.sha256, doc.createdAt,
+          doc.id,
+          doc.userId,
+          doc.kind,
+          doc.storageKey,
+          doc.contentType,
+          doc.sizeBytes,
+          doc.sha256,
+          doc.createdAt,
         ],
       );
       const replaced = rows[0]?.replaced ?? null;

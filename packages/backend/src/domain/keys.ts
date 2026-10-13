@@ -38,8 +38,7 @@ export const keys = {
   mfaPending: (phone: string) => `auth:mfa:${phone}`,
   /** Dedup key mapping a chat clientMsgId → committed messageId, so a resend after a
    *  reconnect reconciles instead of double-posting (audit: clientMsgId was ignored). */
-  chatDedup: (taskId: string, clientMsgId: string) =>
-    `chat:dedup:${taskId}:${clientMsgId}`,
+  chatDedup: (taskId: string, clientMsgId: string) => `chat:dedup:${taskId}:${clientMsgId}`,
   /** Live socket count per user, so presence only flips offline at zero rather than when
    *  any one of several tabs closes — and stays correct across instances (audit B10). */
   socketCount: (userId: string) => `presence:sockets:${userId}`,

@@ -189,9 +189,7 @@ describe("abuse review queue", () => {
   it("renders a signal whose subject account is gone", async () => {
     await emitSignal(abuse, "handoff.code_burned", "deleted-user", NOW - 500);
     const res = await request(app).get("/admin/abuse").set("Authorization", auth(ADMIN, "admin"));
-    const ghost = (res.body.entries as AbuseRollup[]).find(
-      (e) => e.subjectId === "deleted-user",
-    );
+    const ghost = (res.body.entries as AbuseRollup[]).find((e) => e.subjectId === "deleted-user");
     expect(ghost).toBeDefined();
     expect(ghost!.displayName).toBe("(deleted account)");
   });

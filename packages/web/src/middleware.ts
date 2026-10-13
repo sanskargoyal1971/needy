@@ -46,8 +46,7 @@ function connectOrigins(): string[] {
  *  templating, not URL syntax, so the origin is extracted from a de-templated copy. */
 function tileOrigin(): string | null {
   const raw =
-    process.env.NEXT_PUBLIC_MAP_TILE_URL ??
-    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+    process.env.NEXT_PUBLIC_MAP_TILE_URL ?? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
   try {
     // `{s}` is a subdomain shard (a, b, c). Replaced with a wildcard host so all shards match.
     const host = new URL(raw.replace(/\{s\}\./, "")).host;

@@ -4,12 +4,7 @@ import { useEffect, useState } from "react";
 import type { HelperDriver } from "@/realtime";
 
 /** What the browser is telling us about where the helper is. */
-export type PositionStatus =
-  | "idle"
-  | "locating"
-  | "tracking"
-  | "denied"
-  | "unavailable";
+export type PositionStatus = "idle" | "locating" | "tracking" | "denied" | "unavailable";
 
 /** ── The helper's position, fed to the driver ──────────────────────────────
  *  A `watchPosition` subscription that stays open for as long as the helper is either
@@ -33,10 +28,7 @@ export type PositionStatus =
  *  `/tracking`); this hook only decides when to ask for one. That split is deliberate: it is the
  *  audit's A1 rule, and it belongs in one place rather than being re-derived by every caller.
  */
-export function usePositionReporting(
-  driver: HelperDriver,
-  active: boolean,
-): PositionStatus {
+export function usePositionReporting(driver: HelperDriver, active: boolean): PositionStatus {
   const [status, setStatus] = useState<PositionStatus>("idle");
 
   useEffect(() => {

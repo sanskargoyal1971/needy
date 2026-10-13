@@ -86,8 +86,7 @@ const silentLogger: Logger = {
   error: () => {},
 };
 
-const settle = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const settle = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
@@ -139,7 +138,15 @@ describe("/matching offer-expiry claim under a real clock (C19)", () => {
       state: "searching",
       origin: ORIGIN,
       title: "Pick up medicine",
-      description: "test", price: 100, serviceCode: null, scheduledFor: null, serviceBrief: null, handoffOtpHash: null, handoffOtpExpiresAt: null, handoffVerifiedAt: null, createdAt: now(),
+      description: "test",
+      price: 100,
+      serviceCode: null,
+      scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
+      createdAt: now(),
       updatedAt: now(),
     });
 
@@ -158,8 +165,7 @@ describe("/matching offer-expiry claim under a real clock (C19)", () => {
 
   /** Re-list the helper: `accept` de-lists a winner, and availability freshness is scored
    *  against the real clock here, so each new search needs a current publish. */
-  const publishHelper = (): Promise<void> =>
-    upsertHelperGeo(client, HELPER, 77.595, 12.972, now());
+  const publishHelper = (): Promise<void> => upsertHelperGeo(client, HELPER, 77.595, 12.972, now());
 
   /** C20 bounds `request-help` at capacity 10 / 0.5 per second. This suite issues several in
    *  quick succession, so hand the bucket back rather than sleeping out the refill. */

@@ -57,9 +57,7 @@ export function createInMemoryTaskRepo(): TaskRepository {
     },
     async activeForUser(userId) {
       return [...tasks.values()].filter(
-        (t) =>
-          (t.requesterId === userId || t.helperId === userId) &&
-          !isTerminal(t.state),
+        (t) => (t.requesterId === userId || t.helperId === userId) && !isTerminal(t.state),
       );
     },
   };
