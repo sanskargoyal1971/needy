@@ -291,7 +291,8 @@ function NewRequest() {
           {/* Stated before they commit, not after. A flat price is one of the few honest
               things this product can promise, and burying it would waste that. */}
           <p className="mt-1 text-xs text-gray-500">
-            Flat price, agreed up front. Nothing is charged until the job is done.
+            Flat price, agreed up front. In-app payment is not available yet, so nothing is charged
+            through Needy for now.
           </p>
         </div>
 

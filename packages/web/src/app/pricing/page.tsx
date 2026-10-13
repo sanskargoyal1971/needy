@@ -18,14 +18,14 @@ export default function Pricing() {
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Commercial Mode</h2>
             <p className="text-gray-500 mb-6">Pay for immediate, professional assistance from verified helpers.</p>
             <div className="text-4xl font-black text-gray-900 mb-6">
-              Hourly / Base Rate
+              From ₹149
             </div>
             <ul className="space-y-4 mb-8">
               {[
-                "Helpers set their own base rates",
-                "100% of tips go to the helper",
-                "Secure in-app payments via Razorpay",
-                "Automated receipts provided"
+                "One flat price per service, shown before you ask",
+                "Hospital visit ₹299 · Companion walk ₹199",
+                "Grocery & shopping ₹149 · Pick & deliver ₹149",
+                "No surge pricing, at any hour"
               ].map((feature, i) => (
                 <li key={i} className="flex items-center gap-3">
                   <CheckCircle2 className="text-primary" size={20} />
@@ -33,6 +33,11 @@ export default function Pricing() {
                 </li>
               ))}
             </ul>
+            {/* Payments are not built. Said here rather than left to be discovered: a pricing
+                page that names a payment provider the product does not use is a promise. */}
+            <p className="mb-6 border-l-4 border-yellow-400 bg-yellow-50 p-3 text-sm text-yellow-800">
+              In-app payment is not available yet, so nothing is charged through Needy for now.
+            </p>
             <Link href="/signup" className="block w-full text-center rounded-xl bg-primary px-6 py-3 font-medium text-white transition-colors hover:bg-primary-dark">
               Request Commercial Help
             </Link>
@@ -51,7 +56,7 @@ export default function Pricing() {
             <ul className="space-y-4 mb-8 relative z-10">
               {[
                 "Routed to our network of verified volunteers",
-                "Same rigorous safety and KYC standards",
+                "The same verification and safety checks",
                 "Perfect for elderly care or emergency errands",
                 "Driven by community compassion"
               ].map((feature, i) => (

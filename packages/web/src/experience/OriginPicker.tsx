@@ -60,27 +60,38 @@ export function OriginPicker({
         ? { lat: auth.user.areaLat, lng: auth.user.areaLng }
         : null;
 
+    let settled = false;
     const settle = (point: LatLng, message: string | null) => {
-      if (cancelled) return;
+      if (cancelled || settled) return;
+      settled = true;
       onChange(point);
       setNote(message);
       setLocating(false);
     };
+
+    const fallBack = () =>
+      settle(
+        savedArea ?? FALLBACK,
+        savedArea
+          ? "We couldn't get your exact location, so we've used your home area. Drag the pin if you're somewhere else."
+          : "We couldn't get your location. Drag the pin to where you are.",
+      );
 
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       settle(savedArea ?? FALLBACK, "Drag the pin to where you are.");
       return;
     }
 
+    // The browser's own `timeout` only starts once permission is granted. A permission prompt
+    // that is simply never answered — easy to miss, and common with this audience — fires
+    // neither callback, and the form sat on "Finding where you are…" for ever. This is the
+    // clock for that case. If a real fix arrives later it is ignored rather than yanking a
+    // pin the person may already have moved.
+    const giveUp = setTimeout(fallBack, 12_000);
+
     navigator.geolocation.getCurrentPosition(
       (pos) => settle({ lat: pos.coords.latitude, lng: pos.coords.longitude }, null),
-      () =>
-        settle(
-          savedArea ?? FALLBACK,
-          savedArea
-            ? "We couldn't get your exact location, so we've used your home area. Drag the pin if you're somewhere else."
-            : "We couldn't get your location. Drag the pin to where you are.",
-        ),
+      fallBack,
       // A long timeout on purpose: an indoor fix is slow, and failing over to a coarse home
       // area after two seconds would send a helper to the wrong place more often than waiting
       // ten would inconvenience anyone.
@@ -89,6 +100,7 @@ export function OriginPicker({
 
     return () => {
       cancelled = true;
+      clearTimeout(giveUp);
     };
     // Seeds ONCE, deliberately. `value` and `onChange` are omitted from the deps because
     // re-running this would re-request geolocation and snap the pin back every time the user
