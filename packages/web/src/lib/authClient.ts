@@ -54,6 +54,42 @@ export interface PublicUser {
   passwordSetAt?: number | null;
 }
 
+/**
+ * What a correct password gets you. Only the first of these is a session.
+ *
+ *  - An ordinary account: a user, signed in.
+ *  - Staff with a second factor on file: `mfaRequired`, and `method` says which — a code by
+ *    text (`sms`) or one from an authenticator app (`totp`).
+ *  - A super admin with no authenticator yet: `enrolmentRequired`. They are NOT signed in;
+ *    the pending token lets them set one up, and the session arrives when they confirm it.
+ */
+export type PasswordLoginResult =
+  | { user: PublicUser; csrfToken?: string; mfaRequired?: undefined; enrolmentRequired?: undefined }
+  | {
+      mfaRequired: true;
+      method: "sms" | "totp";
+      pendingToken: string;
+      expiresInMs: number;
+      enrolmentRequired?: undefined;
+    }
+  | {
+      enrolmentRequired: true;
+      pendingToken: string;
+      expiresInMs: number;
+      mfaRequired?: undefined;
+    };
+
+/** The facts about an account's authenticator — never the secret or the codes. */
+export interface TotpStatus {
+  /** Staff only; participants are not offered this. */
+  available: boolean;
+  /** True for a super admin, whose only second factor this is. */
+  required: boolean;
+  enabled: boolean;
+  enabledAt: number | null;
+  recoveryCodesRemaining: number;
+}
+
 /** A failed request carrying the server's machine-readable reason, so callers can branch
  *  (e.g. rate-limited vs wrong code) instead of pattern-matching on prose. */
 export class AuthError extends Error {
@@ -158,23 +194,71 @@ export const authClient = {
   /**
    * Sign in with a password.
    *
-   * Resolves one of two shapes. An ordinary account gets a session and a user. An ADMIN gets
-   * `mfaRequired` and a pending token instead — staff still owe the one-time code, because the
-   * console sees every live emergency and a password alone is a weaker gate than the code this
-   * platform already had. The caller must handle both; treating a successful response as "I am
-   * signed in" would leave an admin looking at a logged-out app.
+   * Resolves one of three shapes — see `PasswordLoginResult`. An ordinary account gets a
+   * session and a user. STAFF never do: they get `mfaRequired` (a code is still owed, because
+   * the console sees every live emergency and a password alone is not enough) or, for a super
+   * admin with no authenticator yet, `enrolmentRequired`. The caller must handle all three;
+   * treating a successful response as "I am signed in" would leave staff looking at a
+   * logged-out app.
    */
   passwordLogin: async (identifier: { phone: string } | { username: string }, password: string) => {
-    const res = await call<
-      | { user: PublicUser; csrfToken?: string; mfaRequired?: undefined }
-      | { mfaRequired: true; pendingToken: string; expiresInMs: number }
-    >("/auth/password/login", {
+    const res = await call<PasswordLoginResult>("/auth/password/login", {
       method: "POST",
       body: JSON.stringify({ ...identifier, password }),
     });
-    if (!("mfaRequired" in res) || !res.mfaRequired) adoptCsrfToken(res.csrfToken);
+    if (!res.mfaRequired && !res.enrolmentRequired) adoptCsrfToken(res.csrfToken);
     return res;
   },
+
+  // ── authenticator-app second factor ───────────────────────────────────────
+
+  /** Finish a staff sign-in with a code from the app, or with one recovery code. */
+  totpLogin: async (pendingToken: string, proof: { code: string } | { recoveryCode: string }) => {
+    const res = await call<{
+      user: PublicUser;
+      csrfToken?: string;
+      /** Present only after a recovery code was spent. */
+      recoveryCodesRemaining?: number;
+    }>("/auth/totp/login", {
+      method: "POST",
+      body: JSON.stringify({ pendingToken, ...proof }),
+    });
+    adoptCsrfToken(res.csrfToken);
+    return res;
+  },
+
+  /**
+   * Begin setting up an authenticator. The response is the ONLY time the secret is ever sent;
+   * it is held in component state for the length of the setup screen and nowhere else.
+   *
+   * `pendingToken` for a super admin's first sign-in (no session exists yet); `password` for a
+   * signed-in member of staff, who is asked for it again before a new credential is attached.
+   */
+  totpEnrolStart: (auth: { pendingToken: string } | { password: string }) =>
+    call<{ secret: string; otpauthUri: string }>("/auth/totp/enrol/start", {
+      method: "POST",
+      body: JSON.stringify(auth),
+    }),
+
+  /** Prove the app holds the secret. Returns the recovery codes — once — and, on a first
+   *  sign-in, the session that the password step withheld. */
+  totpEnrolConfirm: async (code: string, pendingToken?: string) => {
+    const res = await call<{ recoveryCodes: string[]; user?: PublicUser; csrfToken?: string }>(
+      "/auth/totp/enrol/confirm",
+      {
+        method: "POST",
+        body: JSON.stringify({ code, ...(pendingToken ? { pendingToken } : {}) }),
+      },
+    );
+    if (res.user) adoptCsrfToken(res.csrfToken);
+    return res;
+  },
+
+  /** Turn the authenticator off. Costs a current code from it. */
+  totpDisable: (code: string) =>
+    call<{ ok: true }>("/auth/totp/disable", { method: "POST", body: JSON.stringify({ code }) }),
+
+  totpStatus: () => call<TotpStatus>("/auth/totp/status"),
 
   /** The admin's second factor. `pendingToken` comes from `passwordLogin` and is what proves
    *  the password step happened — without it this would be a plain OTP login. */

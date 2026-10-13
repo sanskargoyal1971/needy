@@ -10,6 +10,8 @@ import { createInMemoryKycDocumentRepo } from "../../onboarding/repos.js";
 import { createInMemoryAbuseRepo } from "../../domain/abuseStore.js";
 import { createInMemoryPhoneBlockRepo } from "../phoneBlocks.js";
 import { AuthService } from "../service.js";
+import { createInMemoryTotpRepo } from "../totpRepo.js";
+import { createLoggingAuditLogger } from "../../audit/log.js";
 import { OtpService } from "../otp.js";
 import { ConsoleSmsProvider, SandboxKycProvider } from "../providers.js";
 import { createAuthRouter } from "../router.js";
@@ -58,6 +60,8 @@ describe("session hardening", () => {
           () => CODE,
         ),
         kyc: new SandboxKycProvider(),
+        totp: createInMemoryTotpRepo(),
+        audit: createLoggingAuditLogger(),
         users,
         documents: createInMemoryKycDocumentRepo(),
         redis,

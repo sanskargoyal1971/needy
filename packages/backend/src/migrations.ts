@@ -492,6 +492,49 @@ export const MIGRATIONS: readonly Migration[] = [
           AND created_at < (EXTRACT(EPOCH FROM now()) * 1000)::bigint - 86400000`,
     ],
   },
+  {
+    id: 9,
+    name: "staff-totp-second-factor",
+    statements: [
+      // ── a second factor that is not a phone number ──────────────────────────────────────
+      //
+      // An admin's second factor was an SMS code, and a super admin had none at all: that
+      // account signs in by username, has no real number to text, and so reached the staff
+      // console — the account that can mint operators — on a password alone. This is where an
+      // authenticator-app credential lives.
+      //
+      // A table of its own rather than columns on `users`, so that no query about users can
+      // return it. `secret_enc` is AES-256-GCM ciphertext under a key that is not in this
+      // database (TOTP_ENCRYPTION_KEY); the secret cannot be hashed, because the server has to
+      // compute the same code the phone does.
+      //
+      // `status` is 'pending' from the moment a secret is generated until a first code proves
+      // the app holds it. `last_step` is the newest 30-second step already accepted — the
+      // replay floor — and is only ever moved forward by a conditional UPDATE.
+      //
+      // The foreign keys are inline, not `tolerant`: both tables are new, so there are no
+      // existing rows that could violate them.
+      `CREATE TABLE IF NOT EXISTS user_totp (
+         user_id      TEXT PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+         secret_enc   TEXT NOT NULL,
+         status       TEXT NOT NULL CHECK (status IN ('pending','active')),
+         last_step    BIGINT,
+         created_at   BIGINT NOT NULL,
+         activated_at BIGINT
+       )`,
+      // Recovery codes, as SHA-256 digests. Shown to the holder once at activation and never
+      // retrievable afterwards. `used_at` rather than a DELETE so a spent code stays on record
+      // beside the audit entry that says when it was spent. Cascades from `user_totp`, so
+      // disabling the credential cannot leave working codes behind.
+      `CREATE TABLE IF NOT EXISTS user_totp_recovery_codes (
+         user_id    TEXT NOT NULL REFERENCES user_totp (user_id) ON DELETE CASCADE,
+         code_hash  TEXT NOT NULL,
+         created_at BIGINT NOT NULL,
+         used_at    BIGINT,
+         PRIMARY KEY (user_id, code_hash)
+       )`,
+    ],
+  },
 ];
 
 /** Single-quote a string for inline SQL.

@@ -36,6 +36,11 @@ export const keys = {
    *  DIGEST of a single-use token, not the token — a read-only leak of Redis must not hand
    *  someone the half-finished login of the account that can see every emergency. */
   mfaPending: (phone: string) => `auth:mfa:${phone}`,
+  /** A member of staff who has passed the password step and still owes an authenticator code
+   *  — or, for a super admin with no authenticator yet, still owes enrolling one. Keyed by the
+   *  DIGEST of the single-use token, for the same reason as above; the value says whose
+   *  half-finished login it is and which of those two things it may be used for. */
+  totpPending: (tokenHash: string) => `auth:totp:${tokenHash}`,
   /** Dedup key mapping a chat clientMsgId → committed messageId, so a resend after a
    *  reconnect reconciles instead of double-posting (audit: clientMsgId was ignored). */
   chatDedup: (taskId: string, clientMsgId: string) => `chat:dedup:${taskId}:${clientMsgId}`,

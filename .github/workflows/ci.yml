@@ -66,6 +66,7 @@ jobs:
       DATABASE_URL: postgres://needy:needy@localhost:5432/needy
       JWT_SECRET: ci-only-secret-not-used-in-production-000000
       KYC_CALLBACK_SECRET: ci-only-kyc-secret-not-used-in-prod-00000
+      TOTP_ENCRYPTION_KEY: ci-only-totp-key-not-used-in-production-0000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -96,6 +97,7 @@ jobs:
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-only-secret-not-used-in-production-000000
       KYC_CALLBACK_SECRET: ci-only-kyc-secret-not-used-in-prod-00000
+      TOTP_ENCRYPTION_KEY: ci-only-totp-key-not-used-in-production-0000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

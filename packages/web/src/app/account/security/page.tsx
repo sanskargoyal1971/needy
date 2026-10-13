@@ -5,7 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/auth/AuthProvider";
 import { AppGate } from "@/auth/AppGate";
-import { authClient, AuthError } from "@/lib/authClient";
+import { authClient, AuthError, type TotpStatus } from "@/lib/authClient";
+import { AuthenticatorSecret, RecoveryCodes } from "@/components/Authenticator";
 import { homeFor } from "@/lib/paths";
 import { Button, Field, FormError, TextInput } from "@/components/ui";
 
@@ -227,8 +228,224 @@ function Security() {
           )}
         </>
       )}
+
+      <AuthenticatorSection />
     </div>
   );
+}
+
+/** ── Authenticator app (staff only) ────────────────────────────────────────
+ *  Renders nothing for a participant: the server says whether this account is offered an
+ *  authenticator at all, and for everyone who is not staff the answer is no. They sign in
+ *  with a code by text, and a second screen of security settings they cannot use would only
+ *  make this page harder to read.
+ *
+ *  For an admin, an authenticator REPLACES the text-message code as the second step. For a
+ *  super admin it is the only second step there is, so it can be replaced but the account
+ *  never goes back to a password alone — the copy below says so before they turn it off.
+ */
+function AuthenticatorSection() {
+  const [status, setStatus] = useState<TotpStatus | null>(null);
+  const [setup, setSetup] = useState<{ secret: string; otpauthUri: string } | null>(null);
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await authClient.totpStatus());
+    } catch {
+      // Unknown is treated as "not offered": better to show nothing than a setup form that
+      // may not apply to this account.
+      setStatus(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (!status?.available) return null;
+
+  async function run(action: () => Promise<void>) {
+    setError(null);
+    setDone(null);
+    setBusy(true);
+    try {
+      await action();
+    } catch (err) {
+      setError(describeAuthenticator(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const start = (e: React.FormEvent) => {
+    e.preventDefault();
+    void run(async () => {
+      setSetup(await authClient.totpEnrolStart({ password }));
+      setPassword("");
+      setCode("");
+    });
+  };
+
+  const confirm = (e: React.FormEvent) => {
+    e.preventDefault();
+    void run(async () => {
+      const res = await authClient.totpEnrolConfirm(code);
+      setCodes(res.recoveryCodes);
+      setSetup(null);
+      setCode("");
+      await load();
+    });
+  };
+
+  const disable = (e: React.FormEvent) => {
+    e.preventDefault();
+    void run(async () => {
+      await authClient.totpDisable(code);
+      setCode("");
+      setCodes(null);
+      setDone(
+        status.required
+          ? "Your authenticator has been removed. You'll be asked to set one up the next time you sign in."
+          : "Your authenticator has been removed. We'll text you a code when you sign in, as before.",
+      );
+      await load();
+    });
+  };
+
+  const codeField = (id: string, label: string) => (
+    <Field label={label} htmlFor={id}>
+      <TextInput
+        id={id}
+        autoComplete="one-time-code"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={6}
+        required
+        value={code}
+        onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+      />
+    </Field>
+  );
+
+  return (
+    <section className="mt-10 border-t border-gray-100 pt-8">
+      <h2 className="font-display text-xl font-bold text-gray-900">Authenticator app</h2>
+      <p className="mt-2 text-sm text-gray-600">
+        Staff accounts need a second step after the password. An authenticator app on your phone
+        gives you that step without relying on a text message arriving.
+      </p>
+
+      <div
+        className={`mt-4 flex items-start gap-3 rounded-2xl p-4 ${
+          status.enabled ? "bg-emerald-50 text-emerald-900" : "bg-gray-50 text-gray-700"
+        }`}
+      >
+        {status.enabled ? (
+          <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-700" aria-hidden />
+        ) : (
+          <KeyRound size={18} className="mt-0.5 shrink-0 text-gray-500" aria-hidden />
+        )}
+        <p className="text-sm">
+          {status.enabled
+            ? `An authenticator app is set up. You have ${status.recoveryCodesRemaining} recovery ${
+                status.recoveryCodesRemaining === 1 ? "code" : "codes"
+              } left.`
+            : "No authenticator app is set up. Your second step is a code by text."}
+        </p>
+      </div>
+
+      <div className="mt-5 space-y-5">
+        <FormError>{error}</FormError>
+
+        {codes && <RecoveryCodes codes={codes} />}
+
+        {!status.enabled && !setup && (
+          <form className="space-y-5" onSubmit={start}>
+            {/* Asked for again on purpose: this attaches a new way of proving who you are, and
+                a browser left signed in should not be enough to do that. */}
+            <Field
+              label="Your password"
+              hint="We ask again before adding a new sign-in step to your account."
+              htmlFor="totp-password"
+            >
+              <TextInput
+                id="totp-password"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </Field>
+            <Button type="submit" loading={busy}>
+              Set up an authenticator app
+            </Button>
+          </form>
+        )}
+
+        {!status.enabled && setup && (
+          <form className="space-y-5" onSubmit={confirm}>
+            <AuthenticatorSecret secret={setup.secret} otpauthUri={setup.otpauthUri} />
+            {codeField("totp-confirm", "Code from the app")}
+            <Button type="submit" loading={busy}>
+              Confirm and turn on
+            </Button>
+            <p className="text-center text-xs text-gray-500">
+              Nothing changes until you confirm a code — until then you still sign in as before.
+            </p>
+          </form>
+        )}
+
+        {status.enabled && (
+          <form className="space-y-5" onSubmit={disable}>
+            <p className="text-sm text-gray-600">
+              {status.required
+                ? "To move to a new phone, remove this authenticator and set one up again. Your account always needs one, so you'll be asked to set it up the next time you sign in."
+                : "You can remove it and go back to a code by text. Removing it needs a current code from the app."}
+            </p>
+            {codeField("totp-disable", "Current code from the app")}
+            <Button type="submit" variant="secondary" loading={busy}>
+              Remove my authenticator
+            </Button>
+          </form>
+        )}
+
+        {done && (
+          <p role="status" className="text-center text-sm font-medium text-emerald-700">
+            {done}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function describeAuthenticator(err: unknown): string {
+  if (err instanceof AuthError) {
+    switch (err.code) {
+      case "current-password-invalid":
+        return "That password isn't right.";
+      case "totp-invalid":
+        return "That code isn't right. Wait for the next one in your app and try again.";
+      case "totp-already-enabled":
+        return "An authenticator is already set up. Remove it first to set up a new one.";
+      case "totp-not-pending":
+        return "That setup has expired. Please start again.";
+      case "too-many-attempts":
+        return "Too many attempts. Please wait a few minutes before trying again.";
+      case "network-unreachable":
+        return "We can't reach Needy right now. Check your connection and try again.";
+      default:
+        return "Something went wrong. Please try again.";
+    }
+  }
+  return "Something went wrong. Please try again.";
 }
 
 function describe(err: unknown): string {

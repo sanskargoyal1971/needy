@@ -53,6 +53,42 @@ export const passwordMfaSchema = z.object({
   pendingToken: z.string().min(16).max(128),
 });
 
+// ── authenticator-app second factor ──────────────────────────────────────────
+
+/** Exactly six digits. Tighter than the SMS schema's 4–8 because this length is fixed by the
+ *  algorithm rather than by configuration. */
+const totpCodeSchema = z.string().regex(/^\d{6}$/, "enter the 6-digit code from your app");
+/** Bounded like every other token that is hashed and looked up. */
+const pendingTokenSchema = z.string().min(16).max(128);
+
+/** Finishing a staff sign-in: the token from the password step, plus EITHER a code from the
+ *  app or one recovery code. Never both — "whichever matched" is not a rule. */
+export const totpLoginSchema = z
+  .object({
+    pendingToken: pendingTokenSchema,
+    code: totpCodeSchema.optional(),
+    recoveryCode: z.string().trim().min(12).max(32).optional(),
+  })
+  .refine((v) => Boolean(v.code) !== Boolean(v.recoveryCode), {
+    message: "provide either a code or a recovery code",
+    path: ["code"],
+  });
+
+/** Starting enrolment. A signed-in member of staff re-enters their password; a super admin
+ *  mid-way through their first sign-in presents the pending token instead. Which of the two
+ *  applies is decided in the route, which is the only place that can see a session. */
+export const totpEnrolStartSchema = z.object({
+  pendingToken: pendingTokenSchema.optional(),
+  password: passwordSchema.optional(),
+});
+
+export const totpEnrolConfirmSchema = z.object({
+  pendingToken: pendingTokenSchema.optional(),
+  code: totpCodeSchema,
+});
+
+export const totpDisableSchema = z.object({ code: totpCodeSchema });
+
 export const setPasswordSchema = z.object({
   /** Required whenever the account already has one. Checked in the route, because only it
    *  knows whether a password exists — a schema cannot see the account. */

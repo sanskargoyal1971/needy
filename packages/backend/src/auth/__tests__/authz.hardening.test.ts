@@ -20,6 +20,8 @@ import { createInMemoryKycDocumentRepo } from "../../onboarding/repos.js";
 import { createInMemoryAbuseRepo } from "../../domain/abuseStore.js";
 import { createInMemoryPhoneBlockRepo } from "../phoneBlocks.js";
 import { AuthService } from "../service.js";
+import { createInMemoryTotpRepo } from "../totpRepo.js";
+import { createLoggingAuditLogger } from "../../audit/log.js";
 import { OtpService } from "../otp.js";
 import { ConsoleSmsProvider, SandboxKycProvider, signKycCallback } from "../providers.js";
 
@@ -74,6 +76,7 @@ async function loadHttpRouterUnderEnv(nodeEnv: string) {
   // supply real ones — this test is about route mounting, not the secret checks.
   vi.stubEnv("JWT_SECRET", "x".repeat(48));
   vi.stubEnv("KYC_CALLBACK_SECRET", "y".repeat(48));
+  vi.stubEnv("TOTP_ENCRYPTION_KEY", "z".repeat(48));
   const { config } = await import("../../config.js");
   const { createHttpRouter } = await import("../../http/router.js");
   return { config, createHttpRouter };
@@ -281,6 +284,8 @@ describe("audit A5 — KYC callback authenticity", () => {
           () => CODE,
         ),
         kyc: new SandboxKycProvider(),
+        totp: createInMemoryTotpRepo(),
+        audit: createLoggingAuditLogger(),
         users,
         documents,
         redis,

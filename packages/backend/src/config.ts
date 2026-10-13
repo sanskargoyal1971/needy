@@ -172,6 +172,23 @@ export const config = {
       process.env.KYC_CALLBACK_SECRET,
       "dev-only-kyc-callback-secret",
     ),
+    /**
+     * The key the authenticator-app secrets are encrypted under at rest.
+     *
+     * Required in production for the same reason the JWT secret is: with the development
+     * default, anyone who has read this repository can decrypt every staff member's second
+     * factor out of a database dump, which is the one thing encrypting them was for.
+     *
+     * NOT rotatable by simply changing it. Every stored secret is sealed under this value, so
+     * a new key makes every enrolled authenticator stop verifying — staff would have to be
+     * re-enrolled. Treat it as a long-lived secret and keep a copy wherever the database
+     * backups' keys are kept; a backup restored without it restores no second factors.
+     */
+    totpEncryptionKey: requireSecret(
+      "TOTP_ENCRYPTION_KEY",
+      process.env.TOTP_ENCRYPTION_KEY,
+      "dev-only-totp-encryption-key",
+    ),
     /** Short-lived access token; refresh rotates behind it. */
     accessTtlSeconds: num("AUTH_ACCESS_TTL_SECONDS", 900),
     refreshTtlDays: num("AUTH_REFRESH_TTL_DAYS", 30),

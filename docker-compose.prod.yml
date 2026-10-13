@@ -95,6 +95,9 @@ services:
       # Only while rotating JWT_SECRET: the outgoing key, accepted for verification only.
       JWT_SECRET_PREVIOUS: ${JWT_SECRET_PREVIOUS:-}
       KYC_CALLBACK_SECRET: ${KYC_CALLBACK_SECRET:?set KYC_CALLBACK_SECRET to at least 32 random characters}
+      # Seals the staff authenticator-app secrets at rest. Long-lived: changing it makes every
+      # enrolled authenticator stop verifying, so staff would have to enrol again.
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?set TOTP_ENCRYPTION_KEY to at least 32 random characters}
       # The one browser origin allowed to call the API — drives both CORS and the CSRF check.
       CORS_ORIGIN: https://${DOMAIN:?set DOMAIN}
       PUBLIC_BASE_URL: https://api.${DOMAIN:?set DOMAIN}

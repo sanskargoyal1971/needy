@@ -35,6 +35,13 @@ export type AuditAction =
   | "admin.password_set"
   | "admin.user_unblocked"
   | "admin.role_changed"
+  // staff second factor. Never records a code or the secret — what matters afterwards is
+  // that the strongest lock on a staff account was added, removed or bypassed, and when.
+  | "auth.totp_enrolled"
+  | "auth.totp_disabled"
+  /** A recovery code was spent in place of an authenticator code. Legitimate when a phone is
+   *  lost; also exactly what it looks like when a printed sheet of codes has been found. */
+  | "auth.totp_recovery_code_used"
   // safety
   | "sos.raised"
   /** An operator took ownership. Recorded separately from `sos.resolved` because how long an

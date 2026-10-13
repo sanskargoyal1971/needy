@@ -3,6 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import type { DocumentKind } from "@needy/shared";
 import { config } from "../config.js";
+import type { AuditLogger } from "../audit/log.js";
 import { emitSignal, type AbuseRepository } from "../domain/abuseStore.js";
 import { keys } from "../domain/keys.js";
 import type { RedisClient } from "../redis.js";
@@ -15,6 +16,8 @@ import type { OtpService } from "./otp.js";
 import { KYC_SIGNATURE_HEADER, verifyKycSignature, type KycProvider } from "./providers.js";
 import type { KycDocumentRepository } from "../onboarding/repos.js";
 import type { UserRepository } from "./repos.js";
+import type { TotpRepository } from "./totpRepo.js";
+import { createTotpRouter, startTotpPending } from "./totpRouter.js";
 import type { User } from "./types.js";
 import { clearAuthCookies, parseCookies, REFRESH_COOKIE, setAuthCookies } from "./cookies.js";
 import { issueCsrfToken } from "./csrf.js";
@@ -35,6 +38,12 @@ export interface AuthRouterDeps {
   otp: OtpService;
   kyc: KycProvider;
   users: UserRepository;
+  /** Authenticator-app credentials. Required, not optional: a router built without it would
+   *  have to decide what a super admin's second factor is when there is nowhere to look one
+   *  up, and every answer to that is either a lockout or a bypass. */
+  totp: TotpRepository;
+  /** Enrolling, disabling and spending a recovery code are all written down. */
+  audit: AuditLogger;
   documents: KycDocumentRepository;
   redis: RedisClient;
   /** Behavioural signals. Only one is emitted from here — a blocked number trying again. */
@@ -390,22 +399,49 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
           return;
         }
 
-        // ── the admin second factor ────────────────────────────────────────
+        // ── the staff second factor ────────────────────────────────────────
         //
-        // An admin sees every live emergency, both parties' phone numbers and every ID
-        // document. A password alone is a weaker gate than the one-time code this platform
-        // already had, so for staff the password is the FIRST factor and the code is still
-        // required. The session is not minted here: the tokens issued above are discarded and
-        // a short-lived pending token is returned instead.
+        // Staff see every live emergency, both parties' phone numbers and every ID document,
+        // and a super admin can mint more staff. For them the password is the FIRST factor
+        // only. The session is not minted here: the tokens issued above are discarded and a
+        // short-lived pending token is returned instead.
         //
-        // A SUPER ADMIN is exempt, by explicit decision. They sign in with a username and a
-        // password and have no verified number to send a code to — the account exists to
-        // administer staff, not to participate, so there is no phone in the picture at all.
-        // That does concentrate the strongest account on the platform behind one secret, which
-        // is why this account is barred from being a participant, is rate-limited on the same
-        // bucket as everyone else, and has every action it takes written to the audit log.
-        if (issued.user.role === "admin") {
+        // A super admin used to be exempt, by explicit decision: they sign in by username and
+        // have no real number to send a code to, so the strongest account on the platform sat
+        // behind one secret. An authenticator app needs no number, which removes the reason
+        // for the exemption, and with it the exemption.
+        if (issued.user.role === "admin" || issued.user.role === "super_admin") {
           await deps.auth.logout(issued.refreshToken);
+
+          // An enrolled authenticator is THE second factor — for an admin it replaces the
+          // text message rather than sitting beside it. Offering both would make the account
+          // exactly as strong as the weaker one, and the weaker one is a SIM swap.
+          const credential = await deps.totp.get(issued.user.id);
+          if (credential?.status === "active") {
+            const pending = await startTotpPending(deps.redis, issued.user.id, "verify");
+            logger.info("staff password accepted; authenticator code required", {
+              userId: issued.user.id,
+            });
+            res.json({ mfaRequired: true, method: "totp", ...pending });
+            return;
+          }
+
+          if (issued.user.role === "super_admin") {
+            // No authenticator yet — a freshly seeded account, or one that disabled theirs.
+            // Two wrong answers are available: sign them in on the password (the hole), or
+            // refuse them (a lockout with no way to fix it, since enrolling needs a session).
+            // So: still NO session, and a token that authorises enrolment and nothing else.
+            // The session is issued by the confirm step, once a code has proven the app.
+            const pending = await startTotpPending(deps.redis, issued.user.id, "enrol");
+            logger.info("super admin password accepted; authenticator enrolment required", {
+              userId: issued.user.id,
+            });
+            res.json({ enrolmentRequired: true, ...pending });
+            return;
+          }
+
+          // An admin who has not enrolled an authenticator: the text-message code, as before.
+          //
           // The code goes to the number ON THE ACCOUNT, not to one supplied in the request.
           // A super admin assigns that number when they create the admin precisely so it is
           // not the admin's to choose — sending to a request-supplied number would hand the
@@ -424,7 +460,12 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
           logger.info("admin password accepted; second factor required", {
             userId: issued.user.id,
           });
-          res.json({ mfaRequired: true, pendingToken, expiresInMs: MFA_PENDING_TTL_MS });
+          res.json({
+            mfaRequired: true,
+            method: "sms",
+            pendingToken,
+            expiresInMs: MFA_PENDING_TTL_MS,
+          });
           return;
         }
 
@@ -472,6 +513,14 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
           res.status(401).json({ error: "invalid-credentials" });
           return;
         }
+        // An admin who has enrolled an authenticator no longer has a text-message door. The
+        // password route stops offering it; this refuses a pending token minted in the few
+        // minutes BEFORE they enrolled, which would otherwise still open it.
+        if ((await deps.totp.get(user.id))?.status === "active") {
+          await deps.redis.del(keys.mfaPending(phone));
+          res.status(401).json({ error: "mfa-expired" });
+          return;
+        }
         // Single-use: deleted only once BOTH factors have passed, so a wrong code does not
         // cost the operator their password step.
         await deps.redis.del(keys.mfaPending(phone));
@@ -485,6 +534,24 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         res.status(500).json({ error: "login-failed" });
       }
     }),
+  );
+
+  // ── the authenticator-app second factor ────────────────────────────────────
+  // Finishing a staff sign-in with a code from an app, and enrolling or disabling one. In
+  // its own module (see totpRouter.ts) and mounted here so that everything able to create a
+  // session is still reached through this one router.
+  router.use(
+    createTotpRouter(
+      {
+        auth: deps.auth,
+        users: deps.users,
+        totp: deps.totp,
+        audit: deps.audit,
+        redis: deps.redis,
+        now: deps.now,
+      },
+      (u) => publicUser(u),
+    ),
   );
 
   // ── set or change my own password ──────────────────────────────────────────

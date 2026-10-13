@@ -44,6 +44,7 @@ import {
 import { createPool, seedHelperProfiles, type DbPool } from "./db.js";
 import { migrate } from "./migrations.js";
 import { createAuthRouter, KYC_CALLBACK_PATH, kycRawBodyParser } from "./auth/router.js";
+import { createInMemoryTotpRepo, createPgTotpRepo, type TotpRepository } from "./auth/totpRepo.js";
 import { csrfProtection } from "./auth/csrf.js";
 import { AuthService } from "./auth/service.js";
 import { OtpService } from "./auth/otp.js";
@@ -120,6 +121,7 @@ async function main(): Promise<void> {
   // is not resolvable at that point.
   let userRepo: UserRepository;
   let sessionRepo;
+  let totpRepo: TotpRepository;
   let sosRepo;
   let applicationRepo: HelperApplicationRepository;
   let documentRepo: KycDocumentRepository;
@@ -147,6 +149,7 @@ async function main(): Promise<void> {
     repos = createPgRepositories(pool);
     userRepo = createPgUserRepo(pool);
     sessionRepo = createPgSessionRepo(pool);
+    totpRepo = createPgTotpRepo(pool);
     sosRepo = createPgSosRepo(pool);
     applicationRepo = createPgApplicationRepo(pool);
     documentRepo = createPgKycDocumentRepo(pool);
@@ -173,6 +176,7 @@ async function main(): Promise<void> {
     const inMemoryUsers = createInMemoryUserRepo();
     userRepo = inMemoryUsers;
     sessionRepo = createInMemorySessionRepo();
+    totpRepo = createInMemoryTotpRepo();
     sosRepo = createInMemorySosRepo();
     applicationRepo = createInMemoryApplicationRepo();
     documentRepo = createInMemoryKycDocumentRepo();
@@ -305,6 +309,8 @@ async function main(): Promise<void> {
       otp: otpService,
       kyc: kycProvider,
       users: userRepo,
+      totp: totpRepo,
+      audit,
       documents: documentRepo,
       redis: redis.client,
       abuse: abuseRepo,

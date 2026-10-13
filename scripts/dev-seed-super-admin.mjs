@@ -62,5 +62,11 @@ if (existing.length > 0) {
   console.log(`Created super admin "${username}".`);
 }
 
-console.log("Sign in at /login → “Staff sign-in”. No code is sent for this account.");
+// The password is only the first factor. This script deliberately does NOT generate the
+// authenticator secret: printing one to a terminal puts the second factor in shell scrollback
+// next to the first. The account enrols its own on first sign-in, before any session exists.
+console.log(
+  "Sign in at /login → “Staff sign-in”. The first sign-in will ask you to set up an " +
+    "authenticator app; do it straight away — until then the account is one password from open.",
+);
 await pool.end();
