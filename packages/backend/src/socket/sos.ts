@@ -11,6 +11,7 @@ import { emitSignal } from "../domain/abuseStore.js";
 import type { Deps, NamespaceRegistrar } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
 import { getTaskLocation } from "../domain/location-store.js";
+import { cancelSosEscalation, scheduleSosEscalation } from "../domain/sosEscalation.js";
 import { consumeToken } from "../services/ratelimit.js";
 import { requireParticipant } from "./guards.js";
 import { joinRoom, leaveRoom } from "./rooms.js";
@@ -160,6 +161,19 @@ export const registerSos: NamespaceRegistrar = (deps) => {
         // Persist BEFORE acknowledging. The ack is what licenses the UI to tell a frightened
         // person that help is coming, so it must not be sent until the alert is durable.
         await deps.sos.create(alert);
+
+        // Arm escalation: if no operator acknowledges within the threshold, the on-call ladder
+        // is paged (socket/sosEscalationSweep.ts). Before the ack, for the same reason the row
+        // is: the ack is what lets the raiser's screen say help has been notified, and "if
+        // nobody at the console answers, someone's phone rings" is part of that promise. It
+        // costs one Redis write and never throws; the sweep's reconcile pass re-arms from the
+        // row if it is lost.
+        await scheduleSosEscalation(
+          deps.redis.client,
+          deps.logger,
+          alert.id,
+          now + deps.config.sos.escalateAfterSeconds * 1000,
+        );
         ack({ ok: true, alert });
 
         // Log at error level: an SOS should trip alerting, not sit in a debug stream.
@@ -236,6 +250,8 @@ export const registerSos: NamespaceRegistrar = (deps) => {
         const now = deps.now();
         const updated = await deps.sos.setStatus(p.alertId, "cancelled", now);
         if (!updated) return ack({ ok: false, error: "not-found" });
+        // Nobody should be woken about an alarm its raiser has withdrawn. Never throws.
+        await cancelSosEscalation(deps.redis.client, deps.logger, updated.id);
         ack({ ok: true, alert: updated });
 
         deps.logger.warn("SOS cancelled by raiser", {

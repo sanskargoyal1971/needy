@@ -174,6 +174,14 @@ export interface SosAlert {
    *  indistinguishable from someone clearing their queue. */
   resolvedBy: string | null;
   resolutionNote: string | null;
+  /** How many on-call pages have gone out because nobody acknowledged this alert. 0 means
+   *  none yet. Kept apart from `escalationTier` because once every tier has been tried the
+   *  top one is paged again rather than left alone, so the two stop moving together. */
+  escalationStep: number;
+  /** The on-call tier most recently paged (1 = first). 0 until the first page. */
+  escalationTier: number;
+  /** When that page went out, so the console can say "escalated to tier 2 at 12:01". */
+  escalatedAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -200,6 +208,9 @@ export function makeSosAlert(
     acknowledgedAt: null,
     resolvedBy: null,
     resolutionNote: null,
+    escalationStep: 0,
+    escalationTier: 0,
+    escalatedAt: null,
     createdAt: 0,
     updatedAt: 0,
     ...seed,

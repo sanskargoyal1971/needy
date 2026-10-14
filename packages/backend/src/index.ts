@@ -17,6 +17,8 @@ import { registerTracking } from "./socket/tracking.js";
 import { registerMatching } from "./socket/matching.js";
 import { registerChat } from "./socket/chat.js";
 import { registerSos } from "./socket/sos.js";
+import { createSosEscalationSweep } from "./socket/sosEscalationSweep.js";
+import { assertSosEscalationReachable } from "./domain/sosEscalation.js";
 import { createHttpRouter } from "./http/router.js";
 import { createHandoffRouter } from "./http/handoff.js";
 import { createServicesRouter } from "./http/services.js";
@@ -270,6 +272,13 @@ async function main(): Promise<void> {
   // logging OTPs to stdout while looking configured. Unknown providers now fail loudly, and
   // the sandbox adapters are refused outright in production.
   const smsProvider = createSmsProvider();
+  // Refuses a production boot with no on-call numbers: an SOS nobody acknowledges must reach
+  // somebody, and a process that cannot make that true should not take traffic.
+  assertSosEscalationReachable(
+    config.sos,
+    { isProduction: config.isProduction, smsProvider: config.auth.smsProvider },
+    logger,
+  );
   const kycProvider = createKycProvider();
   const otpService = createOtpService(redis.client, smsProvider);
   const authService = new AuthService({
@@ -493,6 +502,9 @@ async function main(): Promise<void> {
   registerMatching(deps);
   registerChat(deps);
   registerSos(deps);
+  // One per process; the claim in the sweep makes several instances safe together.
+  const sosEscalation = createSosEscalationSweep(deps, { sms: smsProvider });
+  sosEscalation.start();
 
   httpServer.listen(config.port, () => {
     logger.info("needy backend up", {
@@ -510,6 +522,9 @@ async function main(): Promise<void> {
     if (shuttingDown) return; // a second ^C must not re-enter and double-close
     shuttingDown = true;
     logger.info("shutting down", { signal });
+    // Stop paging before the connections it pages through are closed. Anything still due is
+    // in Redis and is picked up by whichever instance sweeps next.
+    sosEscalation.stop();
 
     const closeAll = (async () => {
       // io.close() also closes the underlying HTTP server it was attached to.

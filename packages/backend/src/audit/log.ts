@@ -54,6 +54,11 @@ export type AuditAction =
    *  and it is not recoverable from the resolution alone. */
   | "sos.acknowledged"
   | "sos.resolved"
+  /** Nobody acknowledged an alarm in time and the on-call ladder was paged. One row per step,
+   *  system-originated (no actor), with how many numbers were tried and reached — never the
+   *  numbers themselves. "Who was woken, when, and did it get through" is what a review of a
+   *  slow response needs, and the console's own state only holds the latest step. */
+  | "sos.escalated"
   // abuse review. The signals themselves live in `abuse_signals`; these are the human
   // judgements about them, kept here so an observation and the decision taken on it survive
   // independently of each other.

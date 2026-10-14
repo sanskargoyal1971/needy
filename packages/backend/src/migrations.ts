@@ -769,6 +769,30 @@ export const MIGRATIONS: readonly Migration[] = [
       RUNTIME_GRANTS_SQL,
     ],
   },
+  {
+    id: 16,
+    name: "sos-escalation-state",
+    statements: [
+      // ── how far an unanswered alarm has been escalated ──────────────────────────────────
+      //
+      // An alert nobody acknowledged used to sit on the console and do nothing else. The
+      // escalation sweep (socket/sosEscalationSweep.ts) now pages the on-call tiers, and its
+      // progress lives HERE rather than only in Redis: the step counter is the compare-and-set
+      // that makes a page go out once across instances, and it is what the console reads to
+      // say who has been woken up. Redis holds only the schedule, which can be rebuilt from
+      // these columns.
+      //
+      // NOT NULL DEFAULT 0 rather than nullable: every existing row has, truthfully, been
+      // escalated to nobody, and a nullable counter would make "0" and "unknown" two states.
+      `ALTER TABLE sos_alerts ADD COLUMN IF NOT EXISTS escalation_step INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE sos_alerts ADD COLUMN IF NOT EXISTS escalation_tier INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE sos_alerts ADD COLUMN IF NOT EXISTS escalated_at BIGINT`,
+      // In the transaction, not `tolerant`: the columns were born a statement ago at 0, so
+      // there is no existing row that could fail it.
+      `ALTER TABLE sos_alerts ADD CONSTRAINT chk_sos_escalation CHECK
+         (escalation_step >= 0 AND escalation_tier >= 0 AND escalation_tier <= escalation_step)`,
+    ],
+  },
 ];
 
 /** Single-quote a string for inline SQL.

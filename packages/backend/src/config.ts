@@ -27,6 +27,77 @@ function numList(name: string, fallback: number[]): number[] {
   return [...nums].sort((a, b) => a - b);
 }
 
+/** E.164: a plus, a non-zero country digit, and at most 15 digits in all. */
+const E164 = /^\+[1-9]\d{6,14}$/;
+
+/**
+ * The on-call ladder for unacknowledged SOS alarms: tiers separated by commas, the phones
+ * within a tier by `|`, first tier first — `+9198…|+9197…,+9196…` pages two people, then one.
+ *
+ * Strict for the same reason `numList` is: a malformed number here does not fail anywhere
+ * visible, it simply never rings, and that is discovered during the one emergency in which
+ * the tier was needed. So a bad entry is a boot failure in every environment, not only
+ * production. Empty is allowed HERE — whether an empty ladder may boot is an environment
+ * decision, made in `assertSosEscalationReachable` with the logger to hand.
+ *
+ * Exported for its own tests; nothing else should parse this variable.
+ */
+export function parseOncallTiers(name: string, raw: string | undefined): string[][] {
+  if (raw == null || raw.trim() === "") return [];
+  return raw.split(",").map((tier, i) => {
+    const phones = tier
+      .split("|")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (phones.length === 0) throw new Error(`env ${name}: tier ${i + 1} is empty`);
+    for (const p of phones) {
+      // The number itself is deliberately NOT echoed: this message lands in boot logs.
+      if (!E164.test(p)) throw new Error(`env ${name}: tier ${i + 1} has a non-E.164 number`);
+    }
+    return phones;
+  });
+}
+
+/** A zero or negative wait would page on-call the instant an alarm is raised, before any
+ *  operator at the console could possibly have answered it — refused rather than honoured. */
+function positiveNum(name: string, fallback: number): number {
+  const n = num(name, fallback);
+  if (n <= 0) throw new Error(`env ${name} must be positive: ${n}`);
+  return n;
+}
+
+/** Comma-separated seconds, in the order given — NOT sorted, unlike `numList`: these are
+ *  successive waits, and reordering them would change the ladder's shape. */
+function secondsList(name: string, fallback: number[]): number[] {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === "") return fallback;
+  return raw.split(",").map((s) => {
+    const n = Number(s.trim());
+    if (!Number.isFinite(n) || n <= 0)
+      throw new Error(`env ${name} has a non-positive entry: ${s}`);
+    return n;
+  });
+}
+
+/** The web app's public origin, for links that leave the system (an on-call SMS). Defaults to
+ *  the first CORS origin, which is the same front end in every deployment so far. */
+function webOrigin(): string {
+  const raw =
+    process.env.PUBLIC_WEB_ORIGIN ||
+    (process.env.CORS_ORIGIN ?? "").split(",")[0]?.trim() ||
+    "http://localhost:3000";
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`env PUBLIC_WEB_ORIGIN is not a URL: ${raw}`);
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error(`env PUBLIC_WEB_ORIGIN must be http(s): ${raw}`);
+  }
+  return url.origin;
+}
+
 /** True when running as a real deployment. Drives the fail-fast secret checks below and the
  *  mounting of dev-only routes (audit A4: `config.env` existed but was read NOWHERE, so
  *  /dev/token — which mints a token for any userId and role — shipped unconditionally). */
@@ -236,6 +307,26 @@ export const config = {
       process.env.PII_ENCRYPTION_KEYS_PREVIOUS,
     ),
     indexKey: piiIndexKey,
+  },
+  /**
+   * Escalation of SOS alarms nobody acknowledged (socket/sosEscalationSweep.ts).
+   *
+   * An alarm on the console reaches only whoever happens to be looking at the console. These
+   * say who is woken up when nobody is, and how fast.
+   */
+  sos: {
+    /** How long an alarm may sit `raised` before the first on-call tier is paged. A minute:
+     *  long enough for an operator at the console to get to it, short enough that a person in
+     *  danger is not waiting on an empty room. */
+    escalateAfterSeconds: positiveNum("SOS_ESCALATE_AFTER_SECONDS", 60),
+    /** The wait after each page before the next one, in order; the last entry repeats. With
+     *  the default, tier 2 is paged two minutes after tier 1, and so on up the ladder. */
+    escalationStepsSeconds: secondsList("SOS_ESCALATION_STEPS", [120]),
+    /** Ordered tiers of on-call numbers. Production refuses to boot with none — see
+     *  `assertSosEscalationReachable`. These are staff numbers and are never logged unmasked. */
+    oncallTiers: parseOncallTiers("SOS_ONCALL_PHONES", process.env.SOS_ONCALL_PHONES),
+    /** Where the page's link points. Origin only; the path is fixed by the sweep. */
+    consoleOrigin: webOrigin(),
   },
   env: nodeEnv,
   isProduction,

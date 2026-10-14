@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   AlertTriangle,
+  BellRing,
   CheckCircle2,
   Loader2,
   MapPin,
@@ -239,6 +240,25 @@ function AlertCard({ alert, onChanged }: { alert: AlertView; onChanged: (a: Aler
           <ShieldCheck size={14} aria-hidden />
           Owned by {alert.acknowledgedByName ?? alert.acknowledgedBy}
           {alert.acknowledgedAt && <> · {relativeTime(alert.acknowledgedAt)}</>}
+        </p>
+      )}
+      {/* Who has been woken up because nobody here answered. Shown even after someone owns the
+          alert — "this sat long enough to page tier 2" belongs in the shift's picture of it. */}
+      {alert.escalationTier > 0 && alert.escalatedAt != null && (
+        <p
+          className={`mt-2 flex items-center gap-1.5 text-sm ${
+            alert.status === "raised" ? "text-red-700" : "text-gray-500"
+          }`}
+        >
+          <BellRing size={14} aria-hidden />
+          Escalated to on-call tier {alert.escalationTier} at{" "}
+          {new Date(alert.escalatedAt).toLocaleTimeString(undefined, {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+          {alert.escalationStep > alert.escalationTier && (
+            <span className="text-gray-400"> · paged {alert.escalationStep} times</span>
+          )}
         </p>
       )}
       {alert.resolutionNote && (

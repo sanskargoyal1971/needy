@@ -47,6 +47,26 @@ export interface SosRepository {
    *  and is a cheap COUNT rather than a fetch-and-length because the caller only wants the
    *  number. */
   countRaisedBySince(userId: string, since: number): Promise<number>;
+
+  /**
+   * Record that on-call escalation step `fromStep + 1` (paging `tier`) is going out.
+   *
+   * A compare-and-set on BOTH the status and the step counter, and it is the second of the
+   * escalation sweep's two exactly-once guards (the first is the Redis schedule claim):
+   *   - `status = 'raised'` — an operator who acknowledged a moment ago must not be paged
+   *     about an alarm they are already holding. Acknowledge runs the mirror-image predicate,
+   *     so whichever commits first wins and the other matches nothing.
+   *   - `escalation_step = fromStep` — two sweeps that both read step N cannot both send step
+   *     N+1; the second matches nothing.
+   *
+   * Returns null when either guard fails, and the caller sends nothing.
+   */
+  recordEscalation(
+    alertId: string,
+    fromStep: number,
+    tier: number,
+    at: number,
+  ): Promise<SosAlert | null>;
 }
 
 // ── in-memory ────────────────────────────────────────────────────────────────
@@ -113,6 +133,21 @@ export function createInMemorySosRepo(): SosRepository {
     async countRaisedBySince(userId, since) {
       return [...byId.values()].filter((a) => a.raisedBy === userId && a.createdAt >= since).length;
     },
+    async recordEscalation(alertId, fromStep, tier, at) {
+      const existing = byId.get(alertId);
+      if (!existing || existing.status !== "raised" || existing.escalationStep !== fromStep) {
+        return null;
+      }
+      const next: SosAlert = {
+        ...existing,
+        escalationStep: fromStep + 1,
+        escalationTier: tier,
+        escalatedAt: at,
+        updatedAt: at,
+      };
+      byId.set(alertId, next);
+      return next;
+    },
   };
 }
 
@@ -131,6 +166,9 @@ interface SosRow {
   acknowledged_at: number | string | null;
   resolved_by: string | null;
   resolution_note: string | null;
+  escalation_step: number | string;
+  escalation_tier: number | string;
+  escalated_at: number | string | null;
   created_at: number | string;
   updated_at: number | string;
 }
@@ -151,6 +189,9 @@ function rowToAlert(r: SosRow): SosAlert {
     acknowledgedAt: r.acknowledged_at == null ? null : Number(r.acknowledged_at),
     resolvedBy: r.resolved_by,
     resolutionNote: r.resolution_note,
+    escalationStep: Number(r.escalation_step),
+    escalationTier: Number(r.escalation_tier),
+    escalatedAt: r.escalated_at == null ? null : Number(r.escalated_at),
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
   };
@@ -161,8 +202,9 @@ export function createPgSosRepo(pool: DbPool): SosRepository {
     async create(alert) {
       await pool.query(
         `INSERT INTO sos_alerts
-           (id, task_id, raised_by, kind, status, at_lat, at_lng, note, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+           (id, task_id, raised_by, kind, status, at_lat, at_lng, note,
+            escalation_step, escalation_tier, escalated_at, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [
           alert.id,
           alert.taskId,
@@ -172,6 +214,9 @@ export function createPgSosRepo(pool: DbPool): SosRepository {
           alert.at?.lat ?? null,
           alert.at?.lng ?? null,
           alert.note,
+          alert.escalationStep,
+          alert.escalationTier,
+          alert.escalatedAt,
           alert.createdAt,
           alert.updatedAt,
         ],
@@ -254,6 +299,20 @@ export function createPgSosRepo(pool: DbPool): SosRepository {
         [userId, since],
       );
       return Number(rows[0]?.count ?? 0);
+    },
+    async recordEscalation(alertId, fromStep, tier, at) {
+      // One guarded UPDATE, for the same reason `acknowledge` is one: the predicate is the
+      // concurrency control, and a read-then-write would let an acknowledgement land between
+      // the two and still be paged about.
+      const { rows } = await pool.query<SosRow>(
+        `UPDATE sos_alerts
+            SET escalation_step = $2::int + 1, escalation_tier = $3::int, escalated_at = $4::bigint,
+                updated_at = $4
+          WHERE id = $1 AND status = 'raised' AND escalation_step = $2::int
+          RETURNING *`,
+        [alertId, fromStep, tier, at],
+      );
+      return rows[0] ? rowToAlert(rows[0]) : null;
     },
   };
 }

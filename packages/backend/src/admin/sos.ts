@@ -4,6 +4,7 @@ import { NS, type SosAlert, type SosStatus } from "@needy/shared";
 import { requireAuth, requireStaff, type AuthedRequest } from "../auth/middleware.js";
 import { validateBody } from "../auth/validation.js";
 import type { Deps } from "../domain/deps.js";
+import { cancelSosEscalation } from "../domain/sosEscalation.js";
 import { asyncRoute } from "../http/asyncRoute.js";
 import { personalRoom, SOS_OPERATOR_ROOM } from "../socket/sos.js";
 
@@ -224,6 +225,10 @@ export function createSosAdminRouter(deps: Deps): Router {
         return;
       }
 
+      // A person has it: stop paging on-call. First, before the fan-out, so the window in
+      // which a sweep could still claim the entry is as short as it can be (and even then the
+      // sweep's guarded write refuses an alert that is no longer `raised`).
+      await cancelSosEscalation(deps.redis.client, deps.logger, updated.id);
       await fanOut(updated);
       await deps.audit.record({
         action: "sos.acknowledged",
@@ -268,6 +273,9 @@ export function createSosAdminRouter(deps: Deps): Router {
         return;
       }
 
+      // Resolving straight from `raised` (an operator closes it without acknowledging first)
+      // must disarm escalation just as acknowledging does.
+      await cancelSosEscalation(deps.redis.client, deps.logger, updated.id);
       await fanOut(updated);
       await deps.audit.record({
         action: "sos.resolved",

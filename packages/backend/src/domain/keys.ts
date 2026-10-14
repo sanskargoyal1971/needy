@@ -27,6 +27,10 @@ export const keys = {
   /** Sorted set of taskId → offerExpiresAt, swept to close lapsed offers durably instead
    *  of via an in-process setTimeout that a restart would lose (audit C19). */
   offerExpiryQueue: () => "match:offer:expiry",
+  /** Sorted set of SOS alertId → when its next on-call escalation is due. Same shape and same
+   *  reason as the offer-expiry queue: a timer in process memory dies with the process, and an
+   *  unanswered alarm is the last thing a restart may quietly drop. */
+  sosEscalationQueue: () => "sos:escalation",
   /** Which radius wave a live search is on (0 = 1km, 1 = 5km, 2 = 10km). Kept in Redis
    *  rather than in process memory for the same reason the expiry schedule is: a restart
    *  mid-search must still escalate rather than stranding the requester at 1km forever. */
