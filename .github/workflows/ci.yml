@@ -67,6 +67,8 @@ jobs:
       JWT_SECRET: ci-only-secret-not-used-in-production-000000
       KYC_CALLBACK_SECRET: ci-only-kyc-secret-not-used-in-prod-00000
       TOTP_ENCRYPTION_KEY: ci-only-totp-key-not-used-in-production-0000
+      PII_ENCRYPTION_KEY: ci-only-pii-key-not-used-in-production-00000
+      PII_INDEX_KEY: ci-only-pii-index-not-used-in-production-0000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -98,6 +100,8 @@ jobs:
       JWT_SECRET: ci-only-secret-not-used-in-production-000000
       KYC_CALLBACK_SECRET: ci-only-kyc-secret-not-used-in-prod-00000
       TOTP_ENCRYPTION_KEY: ci-only-totp-key-not-used-in-production-0000
+      PII_ENCRYPTION_KEY: ci-only-pii-key-not-used-in-production-00000
+      PII_INDEX_KEY: ci-only-pii-index-not-used-in-production-0000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

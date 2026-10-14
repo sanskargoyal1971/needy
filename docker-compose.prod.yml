@@ -98,6 +98,12 @@ services:
       # Seals the staff authenticator-app secrets at rest. Long-lived: changing it makes every
       # enrolled authenticator stop verifying, so staff would have to enrol again.
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?set TOTP_ENCRYPTION_KEY to at least 32 random characters}
+      # Seal users' phone numbers and dates of birth at rest, and key the blind index phone
+      # lookups match on. Two different values. The encryption key rotates through
+      # PII_ENCRYPTION_KEYS_PREVIOUS; the index key must never change.
+      PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY:?set PII_ENCRYPTION_KEY to at least 32 random characters}
+      PII_ENCRYPTION_KEYS_PREVIOUS: ${PII_ENCRYPTION_KEYS_PREVIOUS:-}
+      PII_INDEX_KEY: ${PII_INDEX_KEY:?set PII_INDEX_KEY to at least 32 random characters}
       # The one browser origin allowed to call the API — drives both CORS and the CSRF check.
       CORS_ORIGIN: https://${DOMAIN:?set DOMAIN}
       PUBLIC_BASE_URL: https://api.${DOMAIN:?set DOMAIN}

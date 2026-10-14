@@ -14,9 +14,8 @@
  */
 import pg from "pg";
 import { nanoid } from "nanoid";
-import { hashPassword, passwordProblem } from "../packages/backend/dist/auth/password.js";
+import { DB, hashPassword, passwordProblem, sealPhone } from "./lib/backend.mjs";
 
-const DB = process.env.DATABASE_URL ?? "postgres://needy:needy@localhost:5432/needy";
 const [username, password, phone] = process.argv.slice(2);
 
 if (!username || !password) {
@@ -53,11 +52,25 @@ if (existing.length > 0) {
   // A phone is still required by the schema — every account has one — but it is never used
   // for this role: a super admin signs in by username and is never sent a code.
   const placeholder = phone ?? `+99${String(now).slice(-11)}`;
+  // Sealed exactly as the server seals it (migration 12): the plaintext column stays NULL.
+  // The id is chosen first because the ciphertext is bound to it.
+  const id = nanoid();
+  const sealed = sealPhone(id, placeholder);
   await pool.query(
-    `INSERT INTO users (id, phone, display_name, role, kyc_status, created_at, updated_at,
-                        onboarding_status, username, password_hash, password_set_at)
-     VALUES ($1,$2,$3,'super_admin','verified',$4,$4,'approved',$5,$6,$4)`,
-    [nanoid(), placeholder, "Super Admin", now, username, hash],
+    `INSERT INTO users (id, phone_enc, phone_hash, phone_last4, display_name, role, kyc_status,
+                        created_at, updated_at, onboarding_status, username, password_hash,
+                        password_set_at)
+     VALUES ($1,$2,$3,$4,$5,'super_admin','verified',$6,$6,'approved',$7,$8,$6)`,
+    [
+      id,
+      sealed.phone_enc,
+      sealed.phone_hash,
+      sealed.phone_last4,
+      "Super Admin",
+      now,
+      username,
+      hash,
+    ],
   );
   console.log(`Created super admin "${username}".`);
 }

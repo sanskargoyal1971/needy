@@ -13,11 +13,20 @@
  *
  *      node scripts/dev-set-password.mjs +919999999999 "some good passphrase"
  *      node scripts/dev-set-password.mjs --all "some good passphrase"   # every seeded account
+ *
+ *  The number is found the way the server finds it — by its keyed index, since the column
+ *  holds only ciphertext (migration 12) — and printed masked.
  */
 import pg from "pg";
-import { hashPassword, passwordProblem } from "../packages/backend/dist/auth/password.js";
+import {
+  DB,
+  hashPassword,
+  masked,
+  openPhone,
+  passwordProblem,
+  phoneIndex,
+} from "./lib/backend.mjs";
 
-const DB = process.env.DATABASE_URL ?? "postgres://needy:needy@localhost:5432/needy";
 const [target, password] = process.argv.slice(2);
 
 if (!target || !password) {
@@ -27,15 +36,20 @@ if (!target || !password) {
 
 const pool = new pg.Pool({ connectionString: DB });
 
-const { rows } =
+const COLUMNS = `id, phone, phone_enc, display_name, role`;
+const { rows: found } =
   target === "--all"
-    ? await pool.query(`SELECT id, phone, display_name, role FROM users ORDER BY role, id`)
-    : await pool.query(`SELECT id, phone, display_name, role FROM users WHERE phone = $1`, [
-        target,
-      ]);
+    ? await pool.query(`SELECT ${COLUMNS} FROM users ORDER BY role, id`)
+    : // The plaintext arm only matches a row the server has not sealed yet.
+      await pool.query(
+        `SELECT ${COLUMNS} FROM users
+          WHERE phone_hash = $1 OR (phone_hash IS NULL AND phone = $2)`,
+        [phoneIndex(target), target.trim()],
+      );
+const rows = found.map((r) => ({ ...r, phone: openPhone(r) }));
 
 if (rows.length === 0) {
-  console.error(`No account with phone ${target}.`);
+  console.error(`No account with phone ${masked(target)}.`);
   await pool.end();
   process.exit(1);
 }
@@ -45,7 +59,7 @@ for (const user of rows) {
   // would refuse would be testing something the product does not actually do.
   const problem = passwordProblem(password, user.phone);
   if (problem) {
-    console.log(`  ✗ ${user.display_name} (${user.phone}) — refused: ${problem}`);
+    console.log(`  ✗ ${user.display_name} (${masked(user.phone)}) — refused: ${problem}`);
     continue;
   }
   const hash = await hashPassword(password);
@@ -56,7 +70,7 @@ for (const user of rows) {
     [user.id, hash, Date.now()],
   );
   const note = user.role === "admin" ? " (admin — will also be asked for a code)" : "";
-  console.log(`  ✓ ${user.display_name} (${user.phone})${note}`);
+  console.log(`  ✓ ${user.display_name} (${masked(user.phone)})${note}`);
 }
 
 await pool.end();

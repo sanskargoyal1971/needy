@@ -1,4 +1,5 @@
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
+import { phoneIndex } from "../crypto/pii.js";
 import type { RedisClient } from "../redis.js";
 import type { SmsProvider } from "./providers.js";
 
@@ -32,9 +33,12 @@ export type VerifyResult =
 const WINDOW_SECONDS = 3600;
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
-const codeKey = (phone: string) => `otp:code:${phone}`;
-const attemptsKey = (phone: string) => `otp:attempts:${phone}`;
-const requestsKey = (phone: string) => `otp:req:${phone}`;
+/** Keyed by the number's blind index, not the number. Key NAMES are what `SCAN`, `MONITOR`, a
+ *  slow-log and an RDB dump all show, so a raw number here made Redis a running list of who was
+ *  signing in — the same directory the users table no longer is. */
+const codeKey = (phone: string) => `otp:code:${phoneIndex(phone)}`;
+const attemptsKey = (phone: string) => `otp:attempts:${phoneIndex(phone)}`;
+const requestsKey = (phone: string) => `otp:req:${phoneIndex(phone)}`;
 /** IP is hashed rather than embedded: the key space is attacker-influenced (a raw IPv6 address
  *  with a colon-heavy shape is awkward in a key) and this keeps a Redis dump from being a list
  *  of who tried to log in from where. */

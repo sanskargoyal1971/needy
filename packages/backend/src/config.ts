@@ -66,6 +66,38 @@ function requireSecret(name: string, value: string | undefined, devFallback: str
   return value;
 }
 
+/**
+ * Keys being rotated out of the personal-data envelope: a comma-separated list, accepted for
+ * decryption only. Held to the same production rule as the current key, because a weak
+ * "previous" key decrypts exactly as much as a weak current one — every row not yet re-sealed.
+ */
+function previousSecrets(name: string, raw: string | undefined): string[] {
+  const list = (raw ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (isProduction && list.some((s) => s.length < 32)) {
+    throw new Error(`env ${name}: every key must be at least 32 characters in production`);
+  }
+  return list;
+}
+
+const piiEncryptionKey = requireSecret(
+  "PII_ENCRYPTION_KEY",
+  process.env.PII_ENCRYPTION_KEY,
+  "dev-only-pii-encryption-key",
+);
+const piiIndexKey = requireSecret(
+  "PII_INDEX_KEY",
+  process.env.PII_INDEX_KEY,
+  "dev-only-pii-index-key",
+);
+// One string doing both jobs would undo the reason they are separate: the encryption key is
+// meant to be rotatable and the index key is not, and a leak of one should not be both.
+if (isProduction && piiEncryptionKey === piiIndexKey) {
+  throw new Error("env PII_INDEX_KEY must differ from PII_ENCRYPTION_KEY");
+}
+
 export const config = {
   port: num("PORT", 4000),
   /**
@@ -160,6 +192,27 @@ export const config = {
    * Express's own syntax: "1" (one hop), a CIDR, or a comma-separated list.
    */
   trustProxy: process.env.TRUST_PROXY ?? "",
+  /**
+   * Field-level encryption of personal data in `users` (see crypto/pii.ts).
+   *
+   * `encryptionKey` seals every new value. To rotate it: move the old value into
+   * `PII_ENCRYPTION_KEYS_PREVIOUS`, set a new one, and restart — rows sealed under the old key
+   * still open, and each is re-sealed under the new one the next time it is written. Remove the
+   * old key only once nothing is sealed under it.
+   *
+   * `indexKey` is NOT rotatable by changing it. It computes the digest every phone lookup
+   * matches on, so a new value makes every existing number unfindable and sign-in would create
+   * a second account for each of them. Keep both wherever the database backups' keys are
+   * kept: a backup restored without them restores nobody's phone number.
+   */
+  pii: {
+    encryptionKey: piiEncryptionKey,
+    encryptionKeysPrevious: previousSecrets(
+      "PII_ENCRYPTION_KEYS_PREVIOUS",
+      process.env.PII_ENCRYPTION_KEYS_PREVIOUS,
+    ),
+    indexKey: piiIndexKey,
+  },
   env: nodeEnv,
   isProduction,
   /** Dev-only affordances (POST /dev/token, fixture seeding) mount ONLY when true. */

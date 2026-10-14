@@ -4,6 +4,7 @@ import { z } from "zod";
 import { CATEGORY_PRICING, HELPER_SHARE_PERCENT, type HelperApplication } from "@needy/shared";
 import { requireAuth, requireRole, requireStaff, type AuthedRequest } from "../auth/middleware.js";
 import type { UserRepository } from "../auth/repos.js";
+import { openPhone } from "../auth/userPii.js";
 import type { HelperApplicationRepository } from "./repos.js";
 import type { HelperProfileRepository, TaskRepository } from "../domain/stores.js";
 import { asyncRoute } from "../http/asyncRoute.js";
@@ -233,12 +234,15 @@ export function createAdminRouter(deps: AdminRouterDeps): Router {
       try {
         if (deps.pool) {
           const { rows } = await deps.pool.query(
-            `SELECT id, phone, display_name, role, kyc_status, created_at FROM users ORDER BY created_at DESC LIMIT 100`,
+            `SELECT id, phone, phone_enc, display_name, role, kyc_status, created_at
+               FROM users ORDER BY created_at DESC LIMIT 100`,
           );
           res.json({
             users: rows.map((r: Record<string, unknown>) => ({
               id: r.id,
-              phone: r.phone,
+              // Sealed at rest since migration 12; opened through the same helper the user
+              // repository uses, so this listing cannot drift from it.
+              phone: openPhone(r as { id: string; phone: string | null; phone_enc: string | null }),
               displayName: r.display_name,
               role: r.role,
               kycStatus: r.kyc_status,

@@ -575,6 +575,58 @@ export const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE users ADD COLUMN IF NOT EXISTS session_epoch INTEGER NOT NULL DEFAULT 0`,
     ],
   },
+  {
+    id: 12,
+    name: "users-pii-field-encryption",
+    statements: [
+      // ── phone number and date of birth, sealed ──────────────────────────────────────────
+      //
+      // Both sat in the clear, so any dump of `users` was a directory of who is on the
+      // platform, how to reach them, and how old they are — on a platform whose users are
+      // selected for being vulnerable. They are now AES-256-GCM ciphertext under a key this
+      // database does not hold (see crypto/pii.ts).
+      //
+      // SQL cannot do the encrypting: the key is not in the database, and must not be. So this
+      // migration only makes room, and the boot step `backfillUserPii` (auth/userPii.ts) seals
+      // the existing rows and empties the plaintext columns. Until it has run, readers fall back
+      // to the plaintext column, so there is no window in which an account is unreadable.
+      //
+      //  - phone_enc   the number, sealed. Bound to the row id, so it cannot be moved.
+      //  - phone_hash  a keyed HMAC of the number — the blind index every lookup matches on,
+      //                and now the column that carries the uniqueness.
+      //  - phone_last4 the last four digits, in the clear on purpose: it is what the admin
+      //                screens show and search by, and four digits identify nobody.
+      //  - date_of_birth_enc  the date, sealed. A separate column because `date_of_birth` is
+      //                a DATE and cannot hold ciphertext; the eligibility matrix only ever
+      //                needs it in memory, so nothing queries it in SQL.
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_enc TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_hash TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_last4 TEXT`,
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth_enc TEXT`,
+      // A plain unique index allows any number of NULLs, which is what a row the backfill has
+      // not reached yet holds.
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_hash ON users (phone_hash)`,
+      `CREATE INDEX IF NOT EXISTS idx_users_phone_last4 ON users (phone_last4)`,
+      // ── retiring the plaintext column ───────────────────────────────────────────────────
+      //
+      // `phone` was NOT NULL UNIQUE. NOT NULL has to go, or the backfill could never empty it.
+      // It is replaced by a CHECK that says what NOT NULL used to mean — every account has a
+      // number, in one form or the other — so a row with no phone at all is still refused.
+      //
+      // The UNIQUE constraint is kept: it compares only non-NULL values, so once the column is
+      // empty it constrains nothing, and while a not-yet-sealed row still holds a number it
+      // still stops a duplicate. Dropping it would buy nothing and lose that. The column itself
+      // is left in place, empty, rather than dropped here: dropping it is the step that cannot
+      // be undone, and it belongs in a later migration once every database has been backfilled.
+      `ALTER TABLE users ALTER COLUMN phone DROP NOT NULL`,
+      `ALTER TABLE users ADD CONSTRAINT chk_users_has_phone
+         CHECK (phone IS NOT NULL OR phone_enc IS NOT NULL)`,
+      // The ciphertext and its index are written together or not at all. A sealed number with
+      // no index is an account no lookup can find, and the login path would create a second.
+      `ALTER TABLE users ADD CONSTRAINT chk_users_phone_sealed_together
+         CHECK ((phone_enc IS NULL) = (phone_hash IS NULL))`,
+    ],
+  },
 ];
 
 /** Single-quote a string for inline SQL.

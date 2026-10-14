@@ -43,6 +43,7 @@ import {
 } from "./admin/repos.js";
 import { createPool, seedHelperProfiles, type DbPool } from "./db.js";
 import { migrate } from "./migrations.js";
+import { backfillUserPii } from "./auth/userPii.js";
 import { createAuthRouter, KYC_CALLBACK_PATH, kycRawBodyParser } from "./auth/router.js";
 import { createInMemoryTotpRepo, createPgTotpRepo, type TotpRepository } from "./auth/totpRepo.js";
 import { csrfProtection } from "./auth/csrf.js";
@@ -140,6 +141,10 @@ async function main(): Promise<void> {
     // whole DDL on every boot, which had no way to express a non-idempotent change and raced
     // itself when two instances started together during a rolling deploy.
     await migrate(pool, logger);
+    // Seal any phone number or date of birth still in the clear (migration 12 made room; the
+    // key is not in the database, so SQL could not do it). Before serving, under its own
+    // advisory lock: a second instance waits, then finds nothing left to do.
+    await backfillUserPii(pool, logger);
     // Fixture seeding OVERWRITES existing helper rows (ON CONFLICT DO UPDATE), so it must
     // never run against a real database — it would stomp live profiles on every deploy.
     if (config.allowDevRoutes) {

@@ -1,10 +1,14 @@
 import type { DbPool } from "../db.js";
+import { phoneIndex, pii, type PiiCipher } from "../crypto/pii.js";
 import type { Session, User } from "./types.js";
+import { openDob, openPhone, sealDob, sealPhone } from "./userPii.js";
 
 /** Persistence for identity. Same interface-with-two-implementations pattern as the task/
  *  message repos, so auth runs on in-memory in tests/dev and Postgres when configured. */
 export interface UserRepository {
   getById(id: string): Promise<User | null>;
+  /** By the number's blind index, never by the number: the Postgres twin stores only a sealed
+   *  copy, which cannot be compared (see migration 12). */
   getByPhone(phone: string): Promise<User | null>;
   /** Staff sign-in. Case-insensitive, matching the unique index on `lower(username)` — a
    *  console account reached as `Needy_Admin` and `needy_admin` must be one account, not two
@@ -70,6 +74,8 @@ export type InMemoryUserRepository = UserRepository & { all(): User[] };
 
 export function createInMemoryUserRepo(): InMemoryUserRepository {
   const byId = new Map<string, User>();
+  /** Keyed by the same blind index the Postgres twin looks up by, so both normalise a number
+   *  identically and a lookup that misses in one misses in the other. */
   const byPhone = new Map<string, string>();
   /** Separate from the user records for the same reason the column is separate from `User`:
    *  nothing that enumerates users should be able to hand out credentials by accident. */
@@ -82,7 +88,7 @@ export function createInMemoryUserRepo(): InMemoryUserRepository {
       return byId.get(id) ?? null;
     },
     async getByPhone(phone) {
-      const id = byPhone.get(phone);
+      const id = byPhone.get(phoneIndex(phone));
       return id ? (byId.get(id) ?? null) : null;
     },
     async getByUsername(username) {
@@ -91,7 +97,7 @@ export function createInMemoryUserRepo(): InMemoryUserRepository {
     },
     async create(user) {
       byId.set(user.id, user);
-      byPhone.set(user.phone, user.id);
+      byPhone.set(phoneIndex(user.phone), user.id);
       return user;
     },
     async getPasswordHash(userId) {
@@ -126,8 +132,11 @@ export function createInMemoryUserRepo(): InMemoryUserRepository {
         id: existing.id,
         sessionEpoch: existing.sessionEpoch,
       };
+      // A changed number must stop finding this account under the old one.
+      const before = phoneIndex(existing.phone);
+      if (byPhone.get(before) === id) byPhone.delete(before);
       byId.set(id, next);
-      byPhone.set(next.phone, id);
+      byPhone.set(phoneIndex(next.phone), id);
       return next;
     },
   };
@@ -164,7 +173,12 @@ export function createInMemorySessionRepo(): SessionRepository {
 
 interface UserRow {
   id: string;
-  phone: string;
+  /** Legacy plaintext. NULL on every row the backfill has sealed; see migration 12. */
+  phone: string | null;
+  phone_enc: string | null;
+  phone_hash: string | null;
+  phone_last4: string | null;
+  date_of_birth_enc: string | null;
   email: string | null;
   display_name: string;
   role: string;
@@ -207,10 +221,11 @@ function toIsoDate(v: Date | string | null): string | null {
   return `${y}-${m}-${d}`;
 }
 
-function rowToUser(r: UserRow): User {
+function rowToUser(r: UserRow, cipher: PiiCipher): User {
   return {
     id: r.id,
-    phone: r.phone,
+    // Opened here and only here: the rest of the app sees the number as it always did.
+    phone: openPhone(r, cipher),
     email: r.email,
     displayName: r.display_name,
     role: r.role as User["role"],
@@ -220,7 +235,7 @@ function rowToUser(r: UserRow): User {
     // `?? "draft"` covers a row read through a connection that predates migration 3 in tests
     // that stub the pool; on a migrated database the column is NOT NULL with a default.
     onboardingStatus: (r.onboarding_status ?? "draft") as User["onboardingStatus"],
-    dateOfBirth: toIsoDate(r.date_of_birth ?? null),
+    dateOfBirth: openDob(r, toIsoDate(r.date_of_birth ?? null), cipher),
     gender: (r.gender ?? null) as User["gender"],
     areaLabel: r.area_label ?? null,
     areaLat: numOrNull(r.area_lat),
@@ -239,33 +254,52 @@ function rowToUser(r: UserRow): User {
   };
 }
 
-export function createPgUserRepo(pool: DbPool): UserRepository {
+/**
+ * `cipher` is injectable so a test can seal rows under keys of its own — rotation in
+ * particular cannot be exercised through the process-wide instance.
+ */
+export function createPgUserRepo(pool: DbPool, cipher: PiiCipher = pii): UserRepository {
+  const toUser = (r: UserRow) => rowToUser(r, cipher);
   return {
     async getById(id) {
       const { rows } = await pool.query<UserRow>(`SELECT * FROM users WHERE id = $1`, [id]);
-      return rows[0] ? rowToUser(rows[0]) : null;
+      return rows[0] ? toUser(rows[0]) : null;
     },
     async getByPhone(phone) {
-      const { rows } = await pool.query<UserRow>(`SELECT * FROM users WHERE phone = $1`, [phone]);
-      return rows[0] ? rowToUser(rows[0]) : null;
+      // The plaintext arm matches only a row that has never been sealed — one the boot-time
+      // backfill has not reached, or one written by hand. It cannot match a sealed row, whose
+      // `phone` is NULL, so it never resurrects a lookup on the retired column. Should both arms
+      // match (a stray plaintext duplicate the backfill refused to seal), the sealed account
+      // wins: it is the one the unique index vouches for.
+      const { rows } = await pool.query<UserRow>(
+        `SELECT * FROM users
+          WHERE phone_hash = $1 OR (phone_hash IS NULL AND phone = $2)
+          ORDER BY (phone_hash IS NULL)
+          LIMIT 1`,
+        [phoneIndex(phone, cipher), phone.trim()],
+      );
+      return rows[0] ? toUser(rows[0]) : null;
     },
     async getByUsername(username) {
       const { rows } = await pool.query<UserRow>(
         `SELECT * FROM users WHERE lower(username) = lower($1)`,
         [username],
       );
-      return rows[0] ? rowToUser(rows[0]) : null;
+      return rows[0] ? toUser(rows[0]) : null;
     },
     async create(user) {
+      const phone = sealPhone(user.id, user.phone, cipher);
+      // `phone` and `date_of_birth` are not in the column list: they stay NULL, and the number
+      // and the date exist in this row only as ciphertext.
       await pool.query(
-        `INSERT INTO users (id, phone, email, display_name, role, kyc_status, created_at, updated_at,
-                            onboarding_status, date_of_birth, gender, area_label, area_lat, area_lng,
+        `INSERT INTO users (id, phone_enc, email, display_name, role, kyc_status, created_at, updated_at,
+                            onboarding_status, date_of_birth_enc, gender, area_label, area_lat, area_lng,
                             rejection_reason, blocked_at, reviewed_by, reviewed_at, submitted_at,
-                            username)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+                            username, phone_hash, phone_last4)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
         [
           user.id,
-          user.phone,
+          phone.phone_enc,
           user.email,
           user.displayName,
           user.role,
@@ -273,7 +307,7 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
           user.createdAt,
           user.updatedAt,
           user.onboardingStatus,
-          user.dateOfBirth,
+          sealDob(user.id, user.dateOfBirth, cipher),
           user.gender,
           user.areaLabel,
           user.areaLat,
@@ -284,6 +318,8 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
           user.reviewedAt,
           user.submittedAt,
           user.username,
+          phone.phone_hash,
+          phone.phone_last4,
         ],
       );
       return user;
@@ -298,22 +334,28 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
         id: existing.id,
         sessionEpoch: existing.sessionEpoch,
       };
+      // Every write re-seals under the current key and empties the plaintext columns, so a row
+      // the backfill missed — or one sealed under a key being rotated out — is brought up to
+      // date by the next ordinary save.
+      const phone = sealPhone(next.id, next.phone, cipher);
       await pool.query(
-        `UPDATE users SET phone=$2, email=$3, display_name=$4, role=$5, kyc_status=$6, updated_at=$7,
-                          onboarding_status=$8, date_of_birth=$9, gender=$10, area_label=$11,
+        `UPDATE users SET phone=NULL, phone_enc=$2, email=$3, display_name=$4, role=$5, kyc_status=$6,
+                          updated_at=$7, onboarding_status=$8, date_of_birth=NULL,
+                          date_of_birth_enc=$9, gender=$10, area_label=$11,
                           area_lat=$12, area_lng=$13, rejection_reason=$14, blocked_at=$15,
-                          reviewed_by=$16, reviewed_at=$17, submitted_at=$18, username=$19
+                          reviewed_by=$16, reviewed_at=$17, submitted_at=$18, username=$19,
+                          phone_hash=$20, phone_last4=$21
          WHERE id=$1`,
         [
           next.id,
-          next.phone,
+          phone.phone_enc,
           next.email,
           next.displayName,
           next.role,
           next.kycStatus,
           next.updatedAt,
           next.onboardingStatus,
-          next.dateOfBirth,
+          sealDob(next.id, next.dateOfBirth, cipher),
           next.gender,
           next.areaLabel,
           next.areaLat,
@@ -324,6 +366,8 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
           next.reviewedAt,
           next.submittedAt,
           next.username,
+          phone.phone_hash,
+          phone.phone_last4,
         ],
       );
       return next;

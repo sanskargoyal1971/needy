@@ -1,3 +1,5 @@
+import { phoneIndex } from "../crypto/pii.js";
+
 /** All Redis key builders live here so modules never hand-roll key strings and can't
  *  drift apart. Presence, matching, tracking and rate-limiting all key off these. */
 export const keys = {
@@ -34,8 +36,9 @@ export const keys = {
   handoffAttempts: (taskId: string) => `handoff:attempts:${taskId}`,
   /** An admin who has passed the password step and still owes the one-time code. Holds a
    *  DIGEST of a single-use token, not the token — a read-only leak of Redis must not hand
-   *  someone the half-finished login of the account that can see every emergency. */
-  mfaPending: (phone: string) => `auth:mfa:${phone}`,
+   *  someone the half-finished login of the account that can see every emergency. Named by
+   *  the number's blind index rather than the number, for the same reason as the OTP keys. */
+  mfaPending: (phone: string) => `auth:mfa:${phoneIndex(phone)}`,
   /** A member of staff who has passed the password step and still owes an authenticator code
    *  — or, for a super admin with no authenticator yet, still owes enrolling one. Keyed by the
    *  DIGEST of the single-use token, for the same reason as above; the value says whose

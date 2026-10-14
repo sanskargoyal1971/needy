@@ -1,14 +1,15 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { config } from "../config.js";
 import type { DbPool } from "../db.js";
+import { phoneIndex } from "../crypto/pii.js";
 
 /** ── Phone blocklist ───────────────────────────────────────────────────────
  *  A rejected applicant is not merely denied — their number is blocked, so re-registering is
  *  not a way around the decision. This is the enforcement point: `loginWithPhone` consults it
  *  before it will find-or-create an account.
  *
- *  The number is stored as an HMAC, never in plaintext. Two reasons, and the second is the
- *  one that matters:
+ *  The number is stored as a keyed digest, never in plaintext. Two reasons, and the second is
+ *  the one that matters:
  *
  *   1. This table is a list of people the platform has refused. In a dump it would be a
  *      readable directory of exactly the users with the strongest claim to privacy.
@@ -17,19 +18,30 @@ import type { DbPool } from "../db.js";
  *      commodity hardware. An HMAC under a server-held key is not invertible without the key,
  *      so a stolen table alone yields nothing.
  *
- *  The key therefore has the same secrecy requirement as the JWT signing key. It is derived
- *  from the existing `config.jwtSecret` rather than adding a new required env var: rotating
- *  it invalidates the blocklist (blocked numbers would silently unblock), so it must be a
- *  value operators already treat as permanent. That coupling is deliberate and documented
- *  here so nobody rotates JWT_SECRET casually.
+ *  The digest is the same blind index `users.phone_hash` holds (crypto/pii.ts, under
+ *  PII_INDEX_KEY). It used to be an HMAC keyed off `config.jwtSecret`, which coupled the
+ *  blocklist to the signing key: rotating JWT_SECRET would have silently unblocked every
+ *  refused number. Rows written under that old key are still honoured — see `legacyPhoneHmac`
+ *  — and the boot-time backfill re-keys every one it can match to an account.
  */
 
-const HMAC_DOMAIN = "needy:phone-block:v1";
-
-/** Domain-separated so this digest can never collide with another HMAC built from the same
- *  key elsewhere in the app. */
+/** The digest a block is stored under. Deterministic, so a lookup works at all; keyed, so the
+ *  table cannot be reversed by enumerating numbers. */
 export function phoneHmac(phoneE164: string): string {
-  return createHmac("sha256", `${HMAC_DOMAIN}:${config.jwtSecret}`)
+  return phoneIndex(phoneE164);
+}
+
+const LEGACY_HMAC_DOMAIN = "needy:phone-block:v1";
+
+/**
+ * The digest blocks were stored under before migration 12: an HMAC keyed off the JWT secret.
+ *
+ * Still checked on every lookup, because a block whose number belongs to no account has no
+ * plaintext anywhere for the backfill to re-key it from — and a refused number that quietly
+ * stops being refused is the one failure this table exists to prevent. Never written.
+ */
+export function legacyPhoneHmac(phoneE164: string): string {
+  return createHmac("sha256", `${LEGACY_HMAC_DOMAIN}:${config.jwtSecret}`)
     .update(phoneE164.trim())
     .digest("hex");
 }
@@ -62,7 +74,7 @@ export function createInMemoryPhoneBlockRepo(): PhoneBlockRepository {
   const blocks = new Map<string, PhoneBlock>();
   return {
     async isBlocked(phone) {
-      return blocks.has(phoneHmac(phone));
+      return blocks.has(phoneHmac(phone)) || blocks.has(legacyPhoneHmac(phone));
     },
     async block(phone, reason, blockedBy, at) {
       const key = phoneHmac(phone);
@@ -72,6 +84,7 @@ export function createInMemoryPhoneBlockRepo(): PhoneBlockRepository {
     },
     async unblock(phone) {
       blocks.delete(phoneHmac(phone));
+      blocks.delete(legacyPhoneHmac(phone));
     },
   };
 }
@@ -80,8 +93,8 @@ export function createPgPhoneBlockRepo(pool: DbPool): PhoneBlockRepository {
   return {
     async isBlocked(phone) {
       const { rows } = await pool.query<{ one: number }>(
-        `SELECT 1 AS one FROM phone_blocks WHERE phone_hmac = $1`,
-        [phoneHmac(phone)],
+        `SELECT 1 AS one FROM phone_blocks WHERE phone_hmac IN ($1, $2)`,
+        [phoneHmac(phone), legacyPhoneHmac(phone)],
       );
       return rows.length > 0;
     },
@@ -94,7 +107,12 @@ export function createPgPhoneBlockRepo(pool: DbPool): PhoneBlockRepository {
       );
     },
     async unblock(phone) {
-      await pool.query(`DELETE FROM phone_blocks WHERE phone_hmac = $1`, [phoneHmac(phone)]);
+      // Both forms: reinstating someone must not leave a pre-migration block behind that
+      // still refuses them.
+      await pool.query(`DELETE FROM phone_blocks WHERE phone_hmac IN ($1, $2)`, [
+        phoneHmac(phone),
+        legacyPhoneHmac(phone),
+      ]);
     },
   };
 }

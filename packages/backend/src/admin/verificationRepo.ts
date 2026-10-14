@@ -1,6 +1,8 @@
 import type { OnboardingStatus } from "@needy/shared";
 import type { DbPool } from "../db.js";
 import type { User } from "../auth/types.js";
+import { phoneSchema } from "../auth/validation.js";
+import { phoneIndex } from "../crypto/pii.js";
 
 /** ── Admin-side user queries ───────────────────────────────────────────────
  *  `UserRepository` is deliberately keyed-lookup only (by id, by phone) because that is all
@@ -28,7 +30,7 @@ export interface AdminUserQueries {
   /** Pending packets, oldest first — the fairness ordering, and the one the partial index
    *  in migration 3 is built for. */
   queue(status: OnboardingStatus, limit: number): Promise<QueueEntry[]>;
-  /** Everyone, newest first, optionally filtered by a name/phone fragment. */
+  /** Everyone, newest first, optionally filtered — see `matchSearch` for what a search matches. */
   listUsers(opts: { search?: string; limit: number }): Promise<QueueEntry[]>;
   /** Headline counts for the dashboard. One round trip, not five. */
   counts(): Promise<Record<string, number>>;
@@ -41,10 +43,31 @@ export function maskPhone(phone: string): string {
   return tail.length === 0 ? "***" : `***${tail}`;
 }
 
+/**
+ * What an admin search can match on now that the number is sealed.
+ *
+ * It used to be any fragment of the number (`phone ILIKE '%…%'`). A sealed column cannot be
+ * searched that way — that is the point of sealing it — so a search matches:
+ *   - a name fragment, as before;
+ *   - a whole number, through its blind index;
+ *   - exactly four digits, as the last four of the number, which is what a support call quotes
+ *     and what the masked list already shows.
+ * Anything else that looks like part of a number simply finds nobody.
+ */
+function matchSearch(search: string) {
+  const s = search.trim();
+  return {
+    exactPhoneHash: phoneSchema.safeParse(s).success ? phoneIndex(s) : null,
+    last4: /^\d{4}$/.test(s) ? s : null,
+  };
+}
+
 const rowToEntry = (r: {
   id: string;
   display_name: string;
-  phone: string;
+  /** Legacy plaintext; only a row the backfill has not sealed yet still has it. */
+  phone: string | null;
+  phone_last4: string | null;
   onboarding_status: string;
   submitted_at: string | number | null;
   created_at: string | number;
@@ -53,7 +76,8 @@ const rowToEntry = (r: {
 }): QueueEntry => ({
   id: r.id,
   displayName: r.display_name,
-  phoneMasked: maskPhone(r.phone),
+  // The masked form needs only the last four, which is why the list never has to decrypt.
+  phoneMasked: r.phone_last4 ? `***${r.phone_last4}` : maskPhone(r.phone ?? ""),
   onboardingStatus: r.onboarding_status as OnboardingStatus,
   submittedAt: r.submitted_at == null ? null : Number(r.submitted_at),
   createdAt: Number(r.created_at),
@@ -61,7 +85,7 @@ const rowToEntry = (r: {
   blockedAt: r.blocked_at == null ? null : Number(r.blocked_at),
 });
 
-const COLUMNS = `id, display_name, phone, onboarding_status, submitted_at, created_at, role, blocked_at`;
+const COLUMNS = `id, display_name, phone, phone_last4, onboarding_status, submitted_at, created_at, role, blocked_at`;
 
 export function createPgAdminUserQueries(pool: DbPool): AdminUserQueries {
   return {
@@ -81,12 +105,16 @@ export function createPgAdminUserQueries(pool: DbPool): AdminUserQueries {
       // ILIKE on a parameterised pattern — the wildcards are added here, not taken from the
       // caller, so a search for "%" matches a literal percent rather than everything.
       const pattern = search ? `%${search.replace(/[%_\\]/g, "\\$&")}%` : null;
+      const { exactPhoneHash, last4 } = search
+        ? matchSearch(search)
+        : { exactPhoneHash: null, last4: null };
       const { rows } = await pool.query(
         `SELECT ${COLUMNS} FROM users
-          WHERE $1::text IS NULL OR display_name ILIKE $1 OR phone ILIKE $1
+          WHERE $1::text IS NULL OR display_name ILIKE $1
+             OR phone_hash = $3::text OR phone_last4 = $4::text
           ORDER BY created_at DESC
           LIMIT $2`,
-        [pattern, limit],
+        [pattern, limit, exactPhoneHash, last4],
       );
       return rows.map(rowToEntry);
     },
@@ -123,9 +151,18 @@ export function createInMemoryAdminUserQueries(all: () => User[]): AdminUserQuer
     },
     async listUsers({ search, limit }) {
       const q = search?.toLowerCase();
+      const { exactPhoneHash, last4 } = search
+        ? matchSearch(search)
+        : { exactPhoneHash: null, last4: null };
+      // The same three arms as the Postgres twin, so a search that finds someone in one finds
+      // them in the other.
       return all()
         .filter(
-          (u) => !q || u.displayName.toLowerCase().includes(q) || u.phone.toLowerCase().includes(q),
+          (u) =>
+            !q ||
+            u.displayName.toLowerCase().includes(q) ||
+            (exactPhoneHash != null && phoneIndex(u.phone) === exactPhoneHash) ||
+            (last4 != null && u.phone.replace(/\D/g, "").slice(-4) === last4),
         )
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, limit)

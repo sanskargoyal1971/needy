@@ -1,4 +1,5 @@
 import pg from "pg";
+import { backfillUserPii } from "../auth/userPii.js";
 import { migrate, type Migration } from "../migrations.js";
 
 /** ── Throwaway Postgres databases for tests ────────────────────────────────
@@ -54,6 +55,11 @@ export class PgHarness {
     const pool = new pg.Pool({ connectionString: urlFor(name) });
     this.pools.push(pool);
     await migrate(pool, silentLog, list);
+    // The boot path seals personal data straight after migrating, so a fully migrated test
+    // database does too — otherwise the seed row migration 2 inserts would sit in the clear
+    // here and nowhere else. Skipped for a partial list: before migration 12 there are no
+    // sealed columns to fill, and a test stopping short of it is testing the earlier schema.
+    if (!list) await backfillUserPii(pool, silentLog);
     return pool;
   }
 

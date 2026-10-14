@@ -77,6 +77,8 @@ async function loadHttpRouterUnderEnv(nodeEnv: string) {
   vi.stubEnv("JWT_SECRET", "x".repeat(48));
   vi.stubEnv("KYC_CALLBACK_SECRET", "y".repeat(48));
   vi.stubEnv("TOTP_ENCRYPTION_KEY", "z".repeat(48));
+  vi.stubEnv("PII_ENCRYPTION_KEY", "p".repeat(48));
+  vi.stubEnv("PII_INDEX_KEY", "i".repeat(48));
   const { config } = await import("../../config.js");
   const { createHttpRouter } = await import("../../http/router.js");
   return { config, createHttpRouter };
