@@ -98,10 +98,24 @@ AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2
 #      token response is dropped before it reaches the container and S3 signing fails. 2 is
 #      the value AWS documents for containers; it is still not reachable off-host, and
 #      HttpTokens=required still blocks the IMDSv1 GET an SSRF would use.
+#    - But hop limit 2 opens IMDS to EVERY container on the host, not just the backend — and
+#      the role reads and writes every KYC object. So the user data below installs a
+#      DOCKER-USER firewall rule that drops container traffic to 169.254.169.254 unless it
+#      comes from the backend's fixed address (172.30.0.10, pinned in docker-compose.prod.yml).
+#      Without it, code execution in the internet-facing web or Caddy container would be one
+#      metadata request away from every government ID in the bucket.
+#      Residual exposure, stated plainly: processes on the host itself still reach IMDS (they
+#      run as root or ec2-user anyway); and a container that could forge its source address
+#      could pass the rule. web, backend and Caddy drop every capability, so cannot; redis
+#      and postgres keep Docker's defaults, NET_RAW among them. If the instance is ever given
+#      IPv6 metadata (HttpProtocolIpv6=enabled), add the same rule for fd00:ec2::254.
 #    - S3 credentials come from the instance role, so the instance needs an instance profile
 #      whose role allows, on the KYC bucket only:
 #          s3:PutObject, s3:GetObject, s3:DeleteObject, s3:AbortMultipartUpload
 #        on  arn:aws:s3:::<S3_BUCKET>/kyc/*
+#      Each is used: GetObject because a presigned document link acts as the role, so it is
+#      what a reviewer's link is allowed to read; DeleteObject because a retaken selfie
+#      replaces the old object and a rejected upload is removed. No ListBucket, no wildcard.
 #      (plus kms:GenerateDataKey / kms:Decrypt on the bucket's key if it uses SSE-KMS).
 #      This script does not create or attach one. Create the role + profile once, then either
 #      add `--iam-instance-profile Name=<profile>` to the run-instances call below or attach
@@ -127,9 +141,33 @@ echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
 
 # Install Docker
 dnf update -y
-dnf install -y docker
+dnf install -y docker iptables-nft
 systemctl enable docker
+
+# Only the backend container may reach the instance metadata service (see the note on the
+# hop limit in deploy-ec2.sh). A unit rather than a one-off command: iptables rules do not
+# survive a reboot, and DOCKER-USER only exists once Docker has started, so it is re-applied
+# after every Docker start. Inserted at the top of DOCKER-USER, which Docker evaluates before
+# any rule of its own for forwarded container traffic.
+cat > /etc/systemd/system/needy-imds-guard.service <<'UNIT'
+[Unit]
+Description=Allow only the Needy backend container to reach instance metadata
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -C DOCKER-USER -d 169.254.169.254/32 ! -s 172.30.0.10/32 -j DROP 2>/dev/null || iptables -I DOCKER-USER 1 -d 169.254.169.254/32 ! -s 172.30.0.10/32 -j DROP'
+
+[Install]
+WantedBy=docker.service
+UNIT
+systemctl daemon-reload
+systemctl enable needy-imds-guard.service
 systemctl start docker
+systemctl start needy-imds-guard.service
 usermod -a -G docker ec2-user
 
 # Install Docker Compose (pinned)

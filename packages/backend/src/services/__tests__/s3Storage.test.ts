@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { Server } from "node:http";
 import { Readable } from "node:stream";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { imdsCredentials } from "../awsCredentials.js";
 import { signRequest } from "../sigv4.js";
@@ -10,6 +12,23 @@ import { closeServer, fakeImds, fakeS3, type FakeS3Request } from "./fakeAws.js"
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 9, 15, 10);
 const MiB = 1024 * 1024;
+
+/** Buffer memory that is actually reachable. A full collection first, so garbage the
+ *  collector has not reached yet is not counted — and the lowest of a few readings, because
+ *  V8 releases large backing stores a moment after the collection that frees them, so a
+ *  single reading taken straight after `gc()` can still include them. Garbage can only make
+ *  a reading too high, never too low. */
+setFlagsFromString("--expose-gc");
+const gc = runInNewContext("gc") as () => void;
+function liveBuffers(): number {
+  gc();
+  gc();
+  return Math.min(
+    process.memoryUsage().arrayBuffers,
+    process.memoryUsage().arrayBuffers,
+    process.memoryUsage().arrayBuffers,
+  );
+}
 
 /** Deterministic bytes, generated lazily so a large "file" is never in memory at once.
  *  `produced` lets a test compare what has been read from the source with what has arrived
@@ -160,6 +179,105 @@ describe("S3 adapter on instance-role credentials", () => {
     // Bounded by one part plus stream buffers — not by the 40 MiB file.
     expect(peakAhead).toBeLessThan(S3_PART_BYTES + 2 * MiB);
     expect(s3.uploads.size).toBe(0);
+  });
+
+  /** The bound MAX_CONCURRENT_UPLOADS is sized against: one part buffer per upload. Against
+   *  the old adapter — chunks plus their concatenation plus a Uint8Array copy, then fetch's
+   *  own copies of that — this measured several parts per upload. */
+  it("holds about one part of memory per upload when many upload at once", async () => {
+    await closeServer(s3.server);
+    s3 = await fakeS3({ discardBodies: true });
+    servers.push(s3.server);
+    storage = new S3Storage(
+      {
+        bucket: "needy-kyc",
+        region: "ap-south-1",
+        credentials: imdsCredentials({ now: () => NOW, baseUrl: imds.baseUrl }),
+        endpoint: s3.baseUrl,
+      },
+      () => NOW,
+    );
+    await storage.signedUrl("warm-up", 60); // credentials fetched before the baseline
+
+    // Half selfie-sized (one PUT each), half video-sized (multipart).
+    const sizes = [7.5, 20, 7.5, 20, 7.5, 20, 7.5, 20].map((m) => Math.round(m * MiB));
+    const baseline = liveBuffers();
+    let peak = 0;
+    s3.state.onBody = () => {
+      peak = Math.max(peak, liveBuffers() - baseline);
+    };
+
+    await Promise.all(
+      sizes.map((n, i) =>
+        storage.putStream(`kyc/u${i}/upload-${i}.bin`, lazySource(n).stream, "video/webm"),
+      ),
+    );
+
+    // Every byte arrived, and the measurement actually ran while uploads were in flight.
+    const putBytes = s3.requests
+      .filter((r) => r.method === "PUT")
+      .reduce((a, r) => a + r.bodyBytes, 0);
+    expect(putBytes).toBe(sizes.reduce((a, b) => a + b, 0));
+    expect(peak).toBeGreaterThan(0);
+    expect(peak).toBeLessThan(sizes.length * S3_PART_BYTES + 8 * MiB);
+  });
+
+  it("sends every body with a Content-Length, never chunked", async () => {
+    await storage.putStream("kyc/u1/video-g.webm", lazySource(10 * MiB).stream, "video/webm");
+    const withBody = s3.requests.filter((r) => r.bodyBytes > 0);
+    expect(withBody.length).toBeGreaterThan(0);
+    for (const r of withBody) {
+      expect(r.headers["content-length"]).toBe(String(r.bodyBytes));
+      expect(r.headers["transfer-encoding"]).toBeUndefined();
+    }
+  });
+
+  it("aborts the multipart upload when S3 never answers a part", async () => {
+    storage = new S3Storage(
+      {
+        bucket: "needy-kyc",
+        region: "ap-south-1",
+        credentials: imdsCredentials({ now: () => NOW, baseUrl: imds.baseUrl }),
+        endpoint: s3.baseUrl,
+        requestTimeoutMs: 300,
+      },
+      () => NOW,
+    );
+    s3.state.hang = (method, q) => method === "PUT" && q.get("partNumber") === "2";
+
+    await expect(
+      storage.putStream("kyc/u1/video-h.webm", lazySource(20 * MiB).stream, "video/webm"),
+    ).rejects.toThrow(/timeout|aborted/i);
+    expect(s3.requests.some((r) => r.method === "DELETE" && r.query.has("uploadId"))).toBe(true);
+    expect(s3.uploads.size).toBe(0);
+    expect(s3.objects.size).toBe(0);
+  });
+
+  it("sends a body of exactly one part as a single PUT", async () => {
+    const { stream } = lazySource(S3_PART_BYTES);
+    await storage.putStream("kyc/u1/selfie-i.jpg", stream, "image/jpeg");
+    expect(s3.requests.map((r) => r.method)).toEqual(["PUT"]);
+    expect(s3.objects.get("kyc/u1/selfie-i.jpg")?.length).toBe(S3_PART_BYTES);
+  });
+
+  it("checks credentials at boot, and names the likely cause when there are none", async () => {
+    await expect(storage.checkCredentials()).resolves.toBeUndefined();
+
+    const noRole = await fakeImds({ lifetimeMs: HOUR, now: () => NOW });
+    servers.push(noRole.server);
+    noRole.state.fail = true;
+    const broken = new S3Storage(
+      {
+        bucket: "needy-kyc",
+        region: "ap-south-1",
+        credentials: imdsCredentials({ now: () => NOW, baseUrl: noRole.baseUrl }),
+        endpoint: s3.baseUrl,
+      },
+      () => NOW,
+    );
+    await expect(broken.checkCredentials()).rejects.toThrow(
+      /refusing to start: no S3 credentials from instance-role .*instance profile.*hop limit/,
+    );
   });
 
   it("sends a body that fits in one part as a single PUT", async () => {

@@ -189,8 +189,15 @@ export class LocalDiskStorage implements StorageProvider {
 
 /** Part size for streamed uploads. S3's floor is 5 MiB for every part but the last; 8 MiB
  *  means a selfie (8 MiB cap) always fits in one buffer and goes up as a single PUT, and a
- *  60 MiB video is eight parts. It is also the most any one upload holds in memory. */
+ *  60 MiB video is eight parts. Each upload holds exactly one buffer of this size, which is
+ *  what `MAX_CONCURRENT_UPLOADS` is sized against (services/uploadSlots.ts). */
 export const S3_PART_BYTES = 8 * 1024 * 1024;
+
+/** Per S3 request, including sending the body. An 8 MiB part at even 2 Mbit/s of upstream is
+ *  ~35 s, so a request still going after a minute is a hung connection, not a slow one — and
+ *  without a limit it would hold its upload slot, its client socket and its part buffer for
+ *  as long as the TCP connection stays half-open. */
+export const S3_REQUEST_TIMEOUT_MS = 60_000;
 
 /** S3 error codes that mean "your session token is no longer good", as opposed to "you are
  *  not allowed". S3 sends ExpiredToken as a 400; the task-level contract treats a 403 the same
@@ -234,6 +241,8 @@ export class S3Storage implements StorageProvider {
       /** Bucket host, or a full origin (`http://127.0.0.1:9000`) for tests and S3-compatible
        *  stores. Empty = the bucket's virtual-hosted AWS endpoint over HTTPS. */
       endpoint?: string;
+      /** Injectable so a test can exercise the timeout without waiting a minute. */
+      requestTimeoutMs?: number;
     },
     private readonly now: () => number,
   ) {
@@ -248,6 +257,14 @@ export class S3Storage implements StorageProvider {
    *
    * The retry is why `body` is a Buffer here and never a stream: a stream that has been
    * consumed by the first attempt cannot be sent again.
+   *
+   * The Buffer goes to `fetch` wrapped in a one-chunk ReadableStream with an explicit
+   * Content-Length, never as the body itself. Handed a Buffer or Uint8Array directly, Node's
+   * fetch copies it while converting it to a request body — measured on Node 25 at three
+   * extra copies, so an 8 MiB part cost 32 MiB in flight. A stream is passed through without
+   * copying, and the explicit length keeps it a plain Content-Length request rather than
+   * chunked transfer encoding, which S3 refuses. The memory test in s3Storage.test.ts pins
+   * this.
    */
   private async send(
     method: string,
@@ -275,10 +292,27 @@ export class S3Storage implements StorageProvider {
         credentials,
         nowMs: this.now(),
       });
+      const body = opts.body;
       const res = await fetch(url, {
         method,
-        headers: { ...(opts.headers ?? {}), ...auth },
-        body: opts.body ? new Uint8Array(opts.body) : undefined,
+        headers: {
+          ...(opts.headers ?? {}),
+          ...auth,
+          ...(body ? { "content-length": String(body.length) } : {}),
+        },
+        body: body
+          ? new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(body);
+                controller.close();
+              },
+            })
+          : undefined,
+        // Required by fetch for a stream body; the request is still sent in full before S3
+        // answers.
+        ...(body ? { duplex: "half" as const } : {}),
+        // Covers the response body too, which the callers read straight after.
+        signal: AbortSignal.timeout(this.opts.requestTimeoutMs ?? S3_REQUEST_TIMEOUT_MS),
       });
       if ((res.status === 400 || res.status === 403) && attempt === 0) {
         const text = await res
@@ -327,8 +361,12 @@ export class S3Storage implements StorageProvider {
   }
 
   async putStream(key: string, body: Readable, contentType: string): Promise<void> {
-    let pending: Buffer[] = [];
-    let pendingBytes = 0;
+    // One part-sized buffer per upload, filled in place and reused for every part. Collecting
+    // the socket's chunks and concatenating them would hold the part twice (the chunks and
+    // the copy) at the moment it is sent; this holds it once. Allocated on the first chunk,
+    // so a refused or empty upload never takes one.
+    let part: Buffer | null = null;
+    let filled = 0;
     let uploadId: string | null = null;
     const parts: { n: number; etag: string }[] = [];
 
@@ -343,34 +381,41 @@ export class S3Storage implements StorageProvider {
         if (!uploadId) throw new Error("s3 create multipart upload returned no UploadId");
       }
       const n = parts.length + 1;
-      const chunk = Buffer.concat(pending);
-      pending = [];
-      pendingBytes = 0;
+      // A view, not a copy. Reusing `part` afterwards is safe because `send` only resolves
+      // once S3 has answered, and S3 answers a part only after receiving all of it; a part
+      // that fails is never followed by another, since the whole upload is then aborted.
       const res = await this.send("PUT", key, {
         query: { partNumber: String(n), uploadId },
-        body: chunk,
+        body: part!.subarray(0, filled),
       });
       await this.ensureOk(res, "upload part");
       const etag = res.headers.get("etag");
       if (!etag) throw new Error("s3 upload part returned no ETag");
       parts.push({ n, etag });
+      filled = 0;
     };
 
     try {
       // Async iteration pulls one chunk at a time, so backpressure reaches the client socket:
       // while a part is in flight to S3 nothing more is read from the upload.
       for await (const chunk of body as AsyncIterable<Buffer>) {
-        pending.push(chunk);
-        pendingBytes += chunk.length;
-        if (pendingBytes >= S3_PART_BYTES) await sendPart();
+        part ??= Buffer.alloc(S3_PART_BYTES);
+        for (let off = 0; off < chunk.length;) {
+          // Flush a full buffer only once more bytes arrive, so a body of exactly one part
+          // still goes up as a single PUT. Every part but the last is exactly S3_PART_BYTES.
+          if (filled === S3_PART_BYTES) await sendPart();
+          const n = chunk.copy(part, filled, off);
+          filled += n;
+          off += n;
+        }
       }
 
       if (uploadId == null) {
         // Fitted in one buffer: an ordinary PUT, one round trip instead of three.
-        await this.put(key, Buffer.concat(pending), contentType);
+        await this.put(key, (part ?? Buffer.alloc(0)).subarray(0, filled), contentType);
         return;
       }
-      if (pendingBytes > 0) await sendPart();
+      if (filled > 0) await sendPart();
       const xml = `<CompleteMultipartUpload>${parts
         .map((p) => `<Part><PartNumber>${p.n}</PartNumber><ETag>${p.etag}</ETag></Part>`)
         .join("")}</CompleteMultipartUpload>`;
@@ -396,6 +441,29 @@ export class S3Storage implements StorageProvider {
           });
       }
       throw err;
+    }
+  }
+
+  /**
+   * Fetch credentials once, now, and fail with the likely cause if that is impossible.
+   *
+   * Called at boot. With static keys a missing value was a startup error; with the instance
+   * role nothing is fetched until the first upload, so a host with no instance profile — or
+   * with the IMDS hop limit left at 1 — would otherwise boot, pass its health check, and
+   * answer every KYC upload and every reviewer's document link with a 500.
+   */
+  async checkCredentials(): Promise<void> {
+    try {
+      await this.opts.credentials.get();
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      const hint =
+        this.opts.credentials.source === "instance-role"
+          ? " On EC2 this usually means no instance profile is attached, or the IMDS hop limit is 1 so the token response never reaches the container (see deploy-ec2.sh)."
+          : "";
+      throw new Error(
+        `refusing to start: no S3 credentials from ${this.opts.credentials.source} (${why}).${hint}`,
+      );
     }
   }
 

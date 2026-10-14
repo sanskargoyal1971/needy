@@ -96,8 +96,11 @@ export interface FakeS3Request {
 /**
  * Just enough S3 for the adapter: PUT, multipart create/part/complete/abort, DELETE. It does
  * not verify signatures itself; tests inspect `requests` (and recompute signatures) instead.
+ *
+ * `discardBodies` hashes bodies as they arrive and keeps none of them, so a test measuring
+ * the process's buffer memory sees the adapter's allocations and not the fake's.
  */
-export async function fakeS3() {
+export async function fakeS3(opts: { discardBodies?: boolean } = {}) {
   const objects = new Map<string, Buffer>();
   const uploads = new Map<string, { key: string; parts: Map<number, Buffer> }>();
   const requests: FakeS3Request[] = [];
@@ -106,6 +109,10 @@ export async function fakeS3() {
     expiredTokens: new Set<string>(),
     /** Bytes received across all request bodies, as they arrive. */
     received: 0,
+    /** Called once a request's whole body has arrived, before it is answered. */
+    onBody: null as (() => void) | null,
+    /** Requests this returns true for are read in full and then never answered. */
+    hang: null as ((method: string, query: URLSearchParams) => boolean) | null,
   };
   let nextId = 0;
 
@@ -113,9 +120,11 @@ export async function fakeS3() {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://x");
       const chunks: Buffer[] = [];
+      const hash = createHash("sha256");
       let bodyBytes = 0;
       for await (const c of req) {
-        chunks.push(c as Buffer);
+        if (!opts.discardBodies) chunks.push(c as Buffer);
+        hash.update(c as Buffer);
         bodyBytes += (c as Buffer).length;
         state.received += (c as Buffer).length;
       }
@@ -127,8 +136,10 @@ export async function fakeS3() {
         query: url.searchParams,
         headers: req.headers,
         bodyBytes,
-        bodySha256: createHash("sha256").update(body).digest("hex"),
+        bodySha256: hash.digest("hex"),
       });
+      state.onBody?.();
+      if (state.hang?.(req.method ?? "", url.searchParams)) return;
 
       const token = req.headers["x-amz-security-token"];
       if (typeof token === "string" && state.expiredTokens.has(token)) {

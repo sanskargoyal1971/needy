@@ -79,7 +79,7 @@ import {
   type KycDocumentRepository,
 } from "./onboarding/repos.js";
 import { createLoggingAuditLogger, createPgAuditLogger, type AuditLogger } from "./audit/log.js";
-import { createStorageProvider } from "./services/storage.js";
+import { createStorageProvider, S3Storage } from "./services/storage.js";
 import {
   createInMemoryServiceCatalog,
   createPgServiceCatalog,
@@ -281,6 +281,9 @@ async function main(): Promise<void> {
   });
   // Refuses to construct in production unless S3 is configured — see createStorageProvider.
   const storage = createStorageProvider(now);
+  // Credentials are fetched lazily, so prove they can be before taking traffic — see
+  // S3Storage.checkCredentials.
+  if (storage instanceof S3Storage) await storage.checkCredentials();
 
   const deps: Deps = {
     io: undefined as unknown as IOServer, // set below once the server exists

@@ -11,6 +11,11 @@
 #
 # Only Caddy publishes ports. Postgres, Redis and the two app containers are reachable only on
 # the compose network.
+#
+# The compose network has a fixed subnet so the backend can have a fixed address: the host
+# firewall (deploy-ec2.sh) lets only 172.30.0.10 reach the instance metadata service, where
+# the instance role's S3 credentials come from. Every other container gets an address from
+# `ip_range`, which excludes .10, so nothing else can be handed it. Change the two together.
 
 x-hardening: &hardening
   restart: unless-stopped
@@ -147,6 +152,10 @@ services:
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       DIRECTIONS_PROVIDER: ${DIRECTIONS_PROVIDER:-}
       DIRECTIONS_API_KEY: ${DIRECTIONS_API_KEY:-}
+    networks:
+      default:
+        # The only address allowed to reach IMDS — see the note at the top of this file.
+        ipv4_address: 172.30.0.10
     depends_on:
       postgres:
         condition: service_healthy
@@ -171,6 +180,13 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          ip_range: 172.30.0.128/25
 
 volumes:
   redis-data:

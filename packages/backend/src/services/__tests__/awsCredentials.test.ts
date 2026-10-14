@@ -86,6 +86,25 @@ describe("instance-role credentials (IMDSv2)", () => {
     await expect(creds.get()).rejects.toThrow(/token request failed: 500/);
   });
 
+  it("does not go back to IMDS on every call when a refresh returns near-expiry credentials", async () => {
+    let clock = Date.UTC(2026, 9, 15, 10);
+    // Inside the five-minute margin the moment they are issued: what IMDS can hand out just
+    // before it rotates, or what any credentials look like to a skewed clock.
+    const imds = await fakeImds({ lifetimeMs: 2 * 60 * 1000, now: () => clock });
+    servers.push(imds.server);
+    const creds = imdsCredentials({ now: () => clock, baseUrl: imds.baseUrl });
+
+    for (let i = 0; i < 20; i++) {
+      expect((await creds.get()).sessionToken).toBe("fake-session-token-1");
+    }
+    expect(imds.state.issued).toBe(1);
+
+    // After the pause it does ask again, so rotation is still picked up.
+    clock += 11 * 1000;
+    expect((await creds.get()).sessionToken).toBe("fake-session-token-2");
+    expect(imds.state.issued).toBe(2);
+  });
+
   it("never writes a secret or session token to the log", async () => {
     const clock = Date.UTC(2026, 9, 15, 10);
     const imds = await fakeImds({ lifetimeMs: HOUR, now: () => clock });

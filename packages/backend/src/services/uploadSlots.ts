@@ -6,10 +6,14 @@ import { logger } from "../logger.js";
  *
  * Uploads used to be read whole into memory, so the cap was 4 and the worst case was
  * 4 × 60 MB = 240 MB. They are now streamed (services/uploadStream.ts): what one upload holds
- * is a few stream buffers on the local adapter and at most one S3 part (`S3_PART_BYTES`,
- * 8 MiB, plus one socket chunk) in production. Sixteen at once is therefore ~130 MB worst
- * case — about half the old ceiling, for four times the concurrency, which is what lets a
- * burst of helpers recording testimony at a launch event go through instead of seeing 503s.
+ * is a few stream buffers on the local adapter and, in production, one part buffer
+ * (`S3_PART_BYTES`, 8 MiB) plus a socket chunk and the stream high-water marks. That bound
+ * depends on the S3 adapter never copying the part — no concatenation of the socket's
+ * chunks, and no Buffer handed to `fetch`, which copies it — and the concurrent-upload
+ * memory test in s3Storage.test.ts measures it rather than assuming it. Sixteen at once is
+ * therefore ~130 MB worst case: about half the old ceiling, for four times the concurrency,
+ * which is what lets a burst of helpers recording testimony at a launch event go through
+ * instead of seeing 503s.
  *
  * Why still a cap at all: each slot is also an open socket, an S3 multipart upload and a
  * share of the instance's upstream bandwidth, and a slow client can hold one for minutes.

@@ -106,8 +106,8 @@ export class RefreshingCredentialProvider implements CredentialProvider {
 
   get(): Promise<AwsCredentials> {
     if (this.fresh(this.cached)) return Promise.resolve(this.cached);
-    // Inside the margin, a recent refresh failed: serve what we have rather than retrying on
-    // every single request.
+    // Inside the margin, a recent refresh failed or came back no fresher: serve what we have
+    // rather than retrying on every single request.
     if (this.usable(this.cached) && this.now() < this.retryNotBefore) {
       return Promise.resolve(this.cached);
     }
@@ -116,6 +116,13 @@ export class RefreshingCredentialProvider implements CredentialProvider {
     this.inflight = this.fetchFresh()
       .then((c) => {
         this.cached = c;
+        // A refresh can succeed and still hand back credentials already inside the margin:
+        // IMDS only promises new ones "at least five minutes" before expiry, which is the
+        // margin itself, and clock skew does the rest. Without this, every S3 call and every
+        // presign would go straight back to IMDS (three requests each) until rotation, and
+        // IMDS throttles under exactly that load. Treat it like a failed refresh: keep the
+        // usable credentials and ask again after the same pause.
+        if (!this.fresh(c)) this.retryNotBefore = this.now() + this.retryAfterFailureMs;
         return c;
       })
       .catch((err: unknown) => {
