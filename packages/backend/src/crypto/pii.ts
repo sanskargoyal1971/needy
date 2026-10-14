@@ -28,6 +28,11 @@ import { config } from "../config.js";
 /** Format tag. A future change of cipher or layout gets `v2`, and `v1` rows stay readable. */
 const FORMAT = "v1";
 
+/** The only nonce and tag lengths `v1` is ever written with. Fixed by the format, and checked
+ *  on the way in: see `decrypt`. */
+const IV_BYTES = 12;
+const TAG_BYTES = 16;
+
 export interface PiiKeyConfig {
   /** Seals every new value. */
   currentKey: string;
@@ -104,8 +109,8 @@ export function createPiiCipher(cfg: PiiKeyConfig): PiiCipher {
      * authenticate instead of decrypting to something plausible.
      */
     encrypt(plaintext, context) {
-      const iv = randomBytes(12);
-      const cipher = createCipheriv("aes-256-gcm", current.key, iv);
+      const iv = randomBytes(IV_BYTES);
+      const cipher = createCipheriv("aes-256-gcm", current.key, iv, { authTagLength: TAG_BYTES });
       cipher.setAAD(Buffer.from(context, "utf8"));
       const sealed = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
       return [
@@ -123,16 +128,30 @@ export function createPiiCipher(cfg: PiiKeyConfig): PiiCipher {
      * account the app cannot text, look up or show, and quietly treating it as absent would
      * let the login path create a duplicate account for the same number. Failing loudly is
      * the only safe answer to a missing key or a tampered row.
+     *
+     * The tag length is pinned, twice. GCM lets the verifier accept a truncated tag, and Node
+     * does by default — a 4-byte tag passes `setAuthTag` with only a deprecation warning. The
+     * stored value carries its own tag, so without the pin whoever writes the row chooses how
+     * many bits of integrity it gets: a forged or moved `phone_enc` (the threat the associated
+     * data exists for) would need ~2^32 guesses rather than 2^128, and short tags leak the GCM
+     * authentication key besides. So anything that is not exactly a 12-byte nonce and a
+     * 16-byte tag is refused before it reaches the cipher, and the decipher is told the length
+     * as well, so the guarantee does not rest on the length check alone.
      */
     decrypt(stored, context) {
       const parts = stored.split(".");
       if (parts.length !== 5 || parts[0] !== FORMAT) throw new PiiDecryptError("unknown format");
+      const iv = Buffer.from(parts[2], "base64url");
+      const tag = Buffer.from(parts[4], "base64url");
+      if (iv.length !== IV_BYTES || tag.length !== TAG_BYTES) {
+        throw new PiiDecryptError("unknown format");
+      }
       const key = byId.get(parts[1]);
       if (!key) throw new PiiDecryptError(`no configured key has id ${parts[1]}`);
       try {
-        const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(parts[2], "base64url"));
+        const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
         decipher.setAAD(Buffer.from(context, "utf8"));
-        decipher.setAuthTag(Buffer.from(parts[4], "base64url"));
+        decipher.setAuthTag(tag);
         return Buffer.concat([
           decipher.update(Buffer.from(parts[3], "base64url")),
           decipher.final(),

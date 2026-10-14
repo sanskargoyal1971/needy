@@ -627,6 +627,28 @@ export const MIGRATIONS: readonly Migration[] = [
          CHECK ((phone_enc IS NULL) = (phone_hash IS NULL))`,
     ],
   },
+  {
+    id: 13,
+    name: "helper-applications-phone-encryption",
+    statements: [
+      // ── the applicant's number, sealed here too ─────────────────────────────────────────
+      //
+      // Migration 12 sealed the number in `users`, but every helper application keeps its own
+      // copy, and that copy was still plaintext — so a dump still listed every applicant's
+      // number. Same envelope, same boot-time backfill (auth/userPii.ts), associated data
+      // `helper_applications.phone:<id>` so it cannot be moved to or from an account.
+      //
+      // Only the ciphertext. Nothing looks an application up by number, so there is no blind
+      // index to keep beside it; adding one would only give a dump a way to join applications
+      // to accounts that it does not need.
+      `ALTER TABLE helper_applications ADD COLUMN IF NOT EXISTS phone_enc TEXT`,
+      // NOT NULL goes so the backfill can empty the column; the CHECK keeps what it meant.
+      // Left in place, empty, for the same reason `users.phone` is.
+      `ALTER TABLE helper_applications ALTER COLUMN phone DROP NOT NULL`,
+      `ALTER TABLE helper_applications ADD CONSTRAINT chk_applications_has_phone
+         CHECK (phone IS NOT NULL OR phone_enc IS NOT NULL)`,
+    ],
+  },
 ];
 
 /** Single-quote a string for inline SQL.

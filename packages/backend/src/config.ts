@@ -122,6 +122,13 @@ export const config = {
     .split(",")
     .map((o) => o.trim())
     .filter(Boolean),
+  /** Signs access tokens — and, for now, one thing more. Phone blocks written before migration
+   *  12 are keyed by an HMAC under this secret (auth/phoneBlocks.ts `legacyPhoneHmac`), and a
+   *  block whose number has no account could not be re-keyed, because nothing holds that
+   *  number to re-key it from. Rotating JWT_SECRET silently lifts every such block: a refused
+   *  number can sign up again. Do not rotate it while the boot log reports unmatched phone
+   *  blocks (`phone blocks not matched to any account`); `JWT_SECRET_PREVIOUS` does not help,
+   *  it is only consulted for token verification. */
   jwtSecret: requireSecret("JWT_SECRET", process.env.JWT_SECRET, DEV_JWT_SECRET),
   /** The key being rotated OUT. Accepted for verification only, never used to sign; set it to
    *  the old `JWT_SECRET` while deploying a new one, and remove it an access-token lifetime

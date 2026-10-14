@@ -2,9 +2,14 @@ import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MIGRATIONS, migrate } from "../../migrations.js";
 import { PgHarness, silentLog } from "../../test/pgHarness.js";
+import { createPgApplicationRepo } from "../../admin/repos.js";
 import { createPgAdminUserQueries } from "../../admin/verificationRepo.js";
 import { createPiiCipher, phoneIndex, pii } from "../../crypto/pii.js";
-import { createPgPhoneBlockRepo, legacyPhoneHmac } from "../phoneBlocks.js";
+import {
+  countUnmatchedPhoneBlocks,
+  createPgPhoneBlockRepo,
+  legacyPhoneHmac,
+} from "../phoneBlocks.js";
 import { createPgUserRepo } from "../repos.js";
 import { makeUser } from "../types.js";
 import { backfillUserPii } from "../userPii.js";
@@ -222,14 +227,15 @@ describe("users: boot-time backfill of rows written before migration 12", () => 
       `INSERT INTO phone_blocks (phone_hmac, reason, blocked_at) VALUES ($1, 'orphan', 1)`,
       [legacyPhoneHmac("+919100009999")],
     );
-    // Only up to 12: later migrations are not what this test is about.
+    // Up to 13, which the backfill also needs (it seals helper applications too); later
+    // migrations are not what this test is about.
     expect(
       await migrate(
         pool,
         silentLog,
-        MIGRATIONS.filter((m) => m.id <= 12),
+        MIGRATIONS.filter((m) => m.id <= 13),
       ),
-    ).toEqual([12]);
+    ).toEqual([12, 13]);
   });
   afterAll(async () => {
     await harness.dropAll();
@@ -282,7 +288,12 @@ describe("users: boot-time backfill of rows written before migration 12", () => 
     const before = await pool.query(
       `SELECT id, phone_enc, date_of_birth_enc FROM users ORDER BY id`,
     );
-    expect(await backfillUserPii(pool, silentLog)).toEqual({ sealed: 0, conflicts: 0 });
+    expect(await backfillUserPii(pool, silentLog)).toEqual({
+      sealed: 0,
+      conflicts: 0,
+      deferred: 0,
+      applicationsSealed: 0,
+    });
     const after = await pool.query(
       `SELECT id, phone_enc, date_of_birth_enc FROM users ORDER BY id`,
     );
@@ -301,6 +312,8 @@ describe("users: boot-time backfill of rows written before migration 12", () => 
     expect(await blocks.isBlocked("+919100000004")).toBe(true);
     expect(await blocks.isBlocked("+919100009999")).toBe(true);
     expect(await blocks.isBlocked("+919100000001")).toBe(false);
+    // The orphan is what still ties the blocklist to JWT_SECRET, and the boot log counts it.
+    expect(await countUnmatchedPhoneBlocks(pool)).toBe(1);
   });
 
   /** A plaintext row whose number another account already holds sealed — what an older build
@@ -313,7 +326,7 @@ describe("users: boot-time backfill of rows written before migration 12", () => 
               ('late', '+919100000077', 'Late', 1, 1, NULL)`,
     );
     const res = await backfillUserPii(pool, silentLog);
-    expect(res).toEqual({ sealed: 1, conflicts: 1 });
+    expect(res).toEqual({ sealed: 1, conflicts: 1, deferred: 0, applicationsSealed: 0 });
     const dup = await columns(pool, "dup");
     expect(dup.phone).toBe("+919100000001");
     expect(dup.phone_enc).toBeNull();
@@ -323,5 +336,207 @@ describe("users: boot-time backfill of rows written before migration 12", () => 
     expect((await columns(pool, "late")).phone).toBeNull();
     // The lookup still lands on the sealed account, not the stray.
     expect((await createPgUserRepo(pool).getByPhone("+919100000001"))?.id).toBe("b1");
+  });
+});
+
+/** ── Writes that land between the backfill reading a row and sealing it ─────
+ *  The backfill reads a batch outside its transaction, without row locks, during the rollout
+ *  in which an older build may still write rows. `racingPool` reproduces that interleaving
+ *  exactly: as soon as the backfill's read of a table returns, a second connection rewrites a
+ *  row, before the backfill has updated anything.
+ */
+describe("backfill: a row changed under it is not reverted", () => {
+  const harness = new PgHarness();
+  let pool: pg.Pool;
+
+  function racingPool(table: string, write: () => Promise<unknown>): pg.Pool {
+    let fired = false;
+    return {
+      connect: async () => {
+        const client = await pool.connect();
+        const query = client.query.bind(client) as (...a: unknown[]) => Promise<unknown>;
+        return new Proxy(client, {
+          get(target, prop, recv) {
+            if (prop !== "query") return Reflect.get(target, prop, recv);
+            return async (...args: unknown[]) => {
+              const res = await query(...args);
+              const sql = String(args[0]);
+              if (!fired && sql.includes("SELECT id, phone") && sql.includes(`FROM ${table}`)) {
+                fired = true;
+                await write();
+              }
+              return res;
+            };
+          },
+        });
+      },
+    } as unknown as pg.Pool;
+  }
+
+  beforeAll(async () => {
+    await harness.connect();
+    pool = await harness.freshDb(
+      "pii_race",
+      MIGRATIONS.filter((m) => m.id < 12),
+    );
+    await pool.query(
+      `INSERT INTO users (id, phone, display_name, created_at, updated_at, date_of_birth)
+       VALUES ('c1', '+919300000001', 'Changed', 1, 1, '1950-01-01'),
+              ('c2', '+919300000002', 'Changed dob', 1, 1, '1951-01-01'),
+              ('c3', '+919300000003', 'Untouched', 1, 1, NULL)`,
+    );
+    await pool.query(
+      `INSERT INTO helper_applications
+         (id, user_id, display_name, phone, aadhaar_last4, created_at, updated_at)
+       VALUES ('a1', 'c3', 'Applicant', '+919300000003', '1234', 1, 1),
+              ('a2', 'c3', 'Applicant', '+919300000033', '1234', 1, 1)`,
+    );
+    await migrate(
+      pool,
+      silentLog,
+      MIGRATIONS.filter((m) => m.id <= 13),
+    );
+  });
+  afterAll(async () => {
+    await harness.dropAll();
+  });
+
+  it("leaves a user row rewritten mid-run for the next run, instead of overwriting it", async () => {
+    // An older build changes c1's number, and c2's date of birth, after the read.
+    const res = await backfillUserPii(
+      racingPool("users", () =>
+        pool.query(
+          `UPDATE users SET phone = CASE id WHEN 'c1' THEN '+919300000099' ELSE phone END,
+                            date_of_birth = CASE id WHEN 'c2' THEN '1960-06-06'::date
+                                            ELSE date_of_birth END
+            WHERE id IN ('c1', 'c2')`,
+        ),
+      ),
+      silentLog,
+    );
+    expect(res.sealed).toBe(2); // c3 and the seeded admin
+    expect(res.deferred).toBe(2);
+    // Neither newer value was replaced by the one read before it.
+    const c1 = await columns(pool, "c1");
+    expect(c1.phone).toBe("+919300000099");
+    const c2 = await columns(pool, "c2");
+    expect(c2.date_of_birth_enc).toBeNull();
+
+    // The next boot seals what they hold now.
+    const again = await backfillUserPii(pool, silentLog);
+    expect(again.sealed).toBe(2);
+    expect(again.deferred).toBe(0);
+    const users = createPgUserRepo(pool);
+    expect((await users.getById("c1"))?.phone).toBe("+919300000099");
+    expect((await users.getByPhone("+919300000099"))?.id).toBe("c1");
+    expect(await users.getByPhone("+919300000001")).toBeNull();
+    expect((await users.getById("c2"))?.dateOfBirth).toBe("1960-06-06");
+  });
+
+  it("seals helper applications, and defers one rewritten mid-run", async () => {
+    // The first test sealed both applications already; put them back in the clear the way an
+    // older build would write them, then race a change to one.
+    await pool.query(
+      `UPDATE helper_applications SET phone_enc = NULL,
+              phone = CASE id WHEN 'a1' THEN '+919300000003' ELSE '+919300000033' END`,
+    );
+    const res = await backfillUserPii(
+      racingPool("helper_applications", () =>
+        pool.query(`UPDATE helper_applications SET phone = '+919300000044' WHERE id = 'a2'`),
+      ),
+      silentLog,
+    );
+    expect(res.applicationsSealed).toBe(1);
+    expect(res.deferred).toBe(1);
+    expect(
+      (await pool.query(`SELECT phone FROM helper_applications WHERE id = 'a2'`)).rows[0].phone,
+    ).toBe("+919300000044");
+    await backfillUserPii(pool, silentLog);
+    const apps = createPgApplicationRepo(pool);
+    expect((await apps.getById("a1"))?.phone).toBe("+919300000003");
+    expect((await apps.getById("a2"))?.phone).toBe("+919300000044");
+  });
+});
+
+/** ── helper_applications (migration 13) ─────────────────────────────────────
+ *  Every application keeps its own copy of the applicant's number, so sealing `users` alone
+ *  left a dump of this table listing them all. */
+describe("helper applications: the applicant's number sealed at rest", () => {
+  const harness = new PgHarness();
+  let pool: pg.Pool;
+
+  async function rawApp(id: string): Promise<string> {
+    const { rows } = await pool.query<{ j: string }>(
+      `SELECT row_to_json(a)::text AS j FROM helper_applications a WHERE id = $1`,
+      [id],
+    );
+    expect(rows).toHaveLength(1);
+    return rows[0].j;
+  }
+
+  beforeAll(async () => {
+    await harness.connect();
+    pool = await harness.freshDb("pii_apps");
+    await createPgUserRepo(pool).create(
+      makeUser({ id: "h1", phone: "+919400000001", createdAt: 1 }),
+    );
+  });
+  afterAll(async () => {
+    await harness.dropAll();
+  });
+
+  const APP = {
+    id: "app1",
+    userId: "h1",
+    displayName: "Applicant",
+    phone: "+919400000001",
+    aadhaarLast4: "4321",
+    experience: "",
+    status: "pending" as const,
+    reviewedBy: null,
+    reviewNote: null,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+
+  it("never writes the number in the clear, through create or update", async () => {
+    const apps = createPgApplicationRepo(pool);
+    await apps.create(APP);
+    expect(await rawApp("app1")).not.toContain("9400000001");
+    expect((await apps.getById("app1"))?.phone).toBe("+919400000001");
+
+    await apps.update("app1", { phone: "+919400000002", status: "approved", updatedAt: 2 });
+    const raw = await rawApp("app1");
+    expect(raw).not.toContain("9400000002");
+    expect(raw).not.toContain("9400000001");
+    const back = await apps.getById("app1");
+    expect(back?.phone).toBe("+919400000002");
+    expect(back?.status).toBe("approved");
+  });
+
+  it("will not open an application's number copied onto another row", async () => {
+    const apps = createPgApplicationRepo(pool);
+    await apps.create({ ...APP, id: "app2", phone: "+919400000009" });
+    await pool.query(
+      `UPDATE helper_applications SET phone_enc = (SELECT phone_enc FROM helper_applications
+                                                    WHERE id = 'app2') WHERE id = 'app1'`,
+    );
+    await expect(apps.getById("app1")).rejects.toThrow(/could not be decrypted/);
+    // Nor one taken from the account: the context names the table.
+    await pool.query(
+      `UPDATE helper_applications SET phone_enc = (SELECT phone_enc FROM users WHERE id = 'h1')
+        WHERE id = 'app2'`,
+    );
+    await expect(apps.getById("app2")).rejects.toThrow(/could not be decrypted/);
+  });
+
+  it("still refuses an application with no number in either form", async () => {
+    await expect(
+      pool.query(
+        `INSERT INTO helper_applications
+           (id, user_id, display_name, aadhaar_last4, created_at, updated_at)
+         VALUES ('app3', 'h1', 'X', '1234', 1, 1)`,
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
   });
 });

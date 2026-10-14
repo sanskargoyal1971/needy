@@ -6,6 +6,7 @@ import { requireAuth, requireStaff, type AuthedRequest } from "../auth/middlewar
 import { hashPassword, passwordProblem, PASSWORD_MIN_LENGTH } from "../auth/password.js";
 import type { SessionRepository, UserRepository } from "../auth/repos.js";
 import { makeUser, type User } from "../auth/types.js";
+import { phoneIndex } from "../crypto/pii.js";
 import { phoneSchema, usernameSchema, validateBody } from "../auth/validation.js";
 import { asyncRoute } from "../http/asyncRoute.js";
 import { logger } from "../logger.js";
@@ -175,15 +176,23 @@ export function createStaffRouter(deps: StaffRouterDeps): Router {
         subjectType: "user",
         subjectId: created.id,
         // The password is never recorded. What matters later is who was made an operator, by
-        // whom, and on which number.
-        metadata: { phone: created.phone, username: created.username },
+        // whom, and on which number — but not the number itself. audit_log is append-only and
+        // outside the field encryption, so a number written here would outlive every effort
+        // to seal it in `users`, readable in any dump for as long as the log is kept. The last
+        // four digits are what an operator recognises; the blind index (the same digest
+        // `users.phone_hash` holds) lets an investigation with the key confirm WHICH number,
+        // without the log revealing it to anyone without one. Entries written before this
+        // change hold the number in the clear and, the log being append-only, stay that way.
+        metadata: {
+          phoneLast4: created.phone.replace(/\D/g, "").slice(-4),
+          phoneHash: phoneIndex(created.phone),
+          username: created.username,
+        },
         ip: ip(req),
       });
-      logger.warn("super admin created a staff account", {
-        actorId,
-        userId: created.id,
-        phone: created.phone,
-      });
+      // Not the number here either: log lines are shipped and retained further than the
+      // database is.
+      logger.warn("super admin created a staff account", { actorId, userId: created.id });
 
       res.status(201).json({ staff: staffView({ ...created, passwordSetAt: now }) });
     }),

@@ -46,6 +46,23 @@ export function legacyPhoneHmac(phoneE164: string): string {
     .digest("hex");
 }
 
+/**
+ * How many blocks match no account's `phone_hash` — an upper bound on the blocks that may still
+ * be keyed under the JWT secret, logged at boot so the operators can see the coupling above.
+ *
+ * Only an upper bound: a block stored under the blind index whose account has since gone also
+ * matches no account, and nothing in the row says which key it was written under. But zero is
+ * exact — no unmatched block means no legacy block — and zero is the condition that matters:
+ * once it holds, JWT_SECRET can rotate freely and `legacyPhoneHmac` can be removed.
+ */
+export async function countUnmatchedPhoneBlocks(pool: DbPool): Promise<number> {
+  const { rows } = await pool.query<{ n: string }>(
+    `SELECT COUNT(*) AS n FROM phone_blocks b
+      WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.phone_hash = b.phone_hmac)`,
+  );
+  return Number(rows[0].n);
+}
+
 /** Constant-time compare for the digests. Overkill for a hex string of fixed length, but the
  *  cost is nothing and the habit is what stops a timing oracle appearing the day someone
  *  reuses this helper somewhere it does matter. */

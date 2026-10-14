@@ -1,5 +1,7 @@
 import type { ApplicationStatus, HelperApplication } from "@needy/shared";
 import type { DbPool } from "../db.js";
+import { openApplicationPhone, sealApplicationPhone } from "../auth/userPii.js";
+import { pii, type PiiCipher } from "../crypto/pii.js";
 
 /** Persistence for helper applications. Same interface-with-two-implementations pattern
  *  as every other repository in the codebase. */
@@ -52,7 +54,9 @@ interface ApplicationRow {
   id: string;
   user_id: string;
   display_name: string;
-  phone: string;
+  /** Legacy plaintext; empty once the backfill has sealed the row (migration 13). */
+  phone: string | null;
+  phone_enc: string | null;
   aadhaar_last4: string;
   experience: string;
   status: string;
@@ -62,12 +66,12 @@ interface ApplicationRow {
   updated_at: number | string;
 }
 
-function rowToApp(r: ApplicationRow): HelperApplication {
+function rowToApp(r: ApplicationRow, cipher: PiiCipher): HelperApplication {
   return {
     id: r.id,
     userId: r.user_id,
     displayName: r.display_name,
-    phone: r.phone,
+    phone: openApplicationPhone(r, cipher),
     aadhaarLast4: r.aadhaar_last4,
     experience: r.experience,
     status: r.status as ApplicationStatus,
@@ -78,17 +82,23 @@ function rowToApp(r: ApplicationRow): HelperApplication {
   };
 }
 
-export function createPgApplicationRepo(pool: DbPool): HelperApplicationRepository {
+/** The applicant's number is sealed here and only here, as `users` is by its repository: what
+ *  reaches the table is `phone_enc`, never `phone`. Everything above still sees plaintext. */
+export function createPgApplicationRepo(
+  pool: DbPool,
+  cipher: PiiCipher = pii,
+): HelperApplicationRepository {
+  const toApp = (r: ApplicationRow) => rowToApp(r, cipher);
   return {
     async create(app) {
       await pool.query(
-        `INSERT INTO helper_applications (id, user_id, display_name, phone, aadhaar_last4, experience, status, reviewed_by, review_note, created_at, updated_at)
+        `INSERT INTO helper_applications (id, user_id, display_name, phone_enc, aadhaar_last4, experience, status, reviewed_by, review_note, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
         [
           app.id,
           app.userId,
           app.displayName,
-          app.phone,
+          sealApplicationPhone(app.id, app.phone, cipher),
           app.aadhaarLast4,
           app.experience,
           app.status,
@@ -105,38 +115,39 @@ export function createPgApplicationRepo(pool: DbPool): HelperApplicationReposito
         `SELECT * FROM helper_applications WHERE id = $1`,
         [id],
       );
-      return rows[0] ? rowToApp(rows[0]) : null;
+      return rows[0] ? toApp(rows[0]) : null;
     },
     async getByUserId(userId) {
       const { rows } = await pool.query<ApplicationRow>(
         `SELECT * FROM helper_applications WHERE user_id = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT 1`,
         [userId],
       );
-      return rows[0] ? rowToApp(rows[0]) : null;
+      return rows[0] ? toApp(rows[0]) : null;
     },
     async listByStatus(status) {
       const { rows } = await pool.query<ApplicationRow>(
         `SELECT * FROM helper_applications WHERE status = $1 ORDER BY created_at ASC`,
         [status],
       );
-      return rows.map(rowToApp);
+      return rows.map(toApp);
     },
     async listAll() {
       const { rows } = await pool.query<ApplicationRow>(
         `SELECT * FROM helper_applications ORDER BY created_at DESC`,
       );
-      return rows.map(rowToApp);
+      return rows.map(toApp);
     },
     async update(id, patch) {
       const existing = await this.getById(id);
       if (!existing) throw new Error(`application not found: ${id}`);
       const next: HelperApplication = { ...existing, ...patch, id: existing.id };
       await pool.query(
-        `UPDATE helper_applications SET display_name=$2, phone=$3, aadhaar_last4=$4, experience=$5, status=$6, reviewed_by=$7, review_note=$8, updated_at=$9 WHERE id=$1`,
+        // `phone = NULL` too: re-sealing a row an older build wrote in the clear.
+        `UPDATE helper_applications SET display_name=$2, phone=NULL, phone_enc=$3, aadhaar_last4=$4, experience=$5, status=$6, reviewed_by=$7, review_note=$8, updated_at=$9 WHERE id=$1`,
         [
           next.id,
           next.displayName,
-          next.phone,
+          sealApplicationPhone(next.id, next.phone, cipher),
           next.aadhaarLast4,
           next.experience,
           next.status,

@@ -10,6 +10,7 @@ import {
 } from "../../auth/repos.js";
 import { makeUser } from "../../auth/types.js";
 import { createLoggingAuditLogger, type AuditEntry } from "../../audit/log.js";
+import { phoneIndex } from "../../crypto/pii.js";
 import { createStaffRouter } from "../staff.js";
 
 /** ── Staff administration ──────────────────────────────────────────────────
@@ -175,6 +176,20 @@ describe("staff administration", () => {
     expect(entry).toBeDefined();
     expect(entry!.actorId).toBe("root");
     expect(JSON.stringify(entry)).not.toContain(GOOD);
+  });
+
+  /** audit_log is append-only and not field-encrypted: a number written into it can never be
+   *  sealed afterwards. It records which number by last four and blind index instead. */
+  it("audits the creation without recording the phone number", async () => {
+    await create(NEW_STAFF);
+    const entry = recorded.find((e) => e.action === "admin.staff_created");
+    const json = JSON.stringify(entry);
+    expect(json).not.toContain(NEW_STAFF.phone.slice(1));
+    expect(json).not.toContain("9000000055");
+    expect(entry!.metadata).toMatchObject({
+      phoneLast4: "0055",
+      phoneHash: phoneIndex(NEW_STAFF.phone),
+    });
   });
 
   // ── switching an operator off ──────────────────────────────────────────────

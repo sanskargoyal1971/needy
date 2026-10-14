@@ -55,6 +55,24 @@ describe("pii envelope", () => {
     }
   });
 
+  /** GCM accepts a truncated tag unless told otherwise, and the stored value carries its own
+   *  tag — so without a pinned length, whoever writes the row picks how many bits of integrity
+   *  it has. A genuine tag cut to its first four bytes is a valid 32-bit GCM tag, and opened
+   *  before the length was pinned. */
+  it("refuses a truncated tag, even one that is a genuine prefix", () => {
+    const sealed = cipherOld.encrypt(PHONE, CTX);
+    const parts = sealed.split(".");
+    const tag = Buffer.from(parts[4], "base64url");
+    expect(tag).toHaveLength(16);
+    for (const len of [4, 8, 12, 15]) {
+      const cut = [...parts.slice(0, 4), tag.subarray(0, len).toString("base64url")].join(".");
+      expect(() => cipherOld.decrypt(cut, CTX)).toThrow(PiiDecryptError);
+    }
+    // And a nonce of the wrong length is a format error, not something to try.
+    const shortIv = [parts[0], parts[1], "AAAA", parts[3], parts[4]].join(".");
+    expect(() => cipherOld.decrypt(shortIv, CTX)).toThrow(/unknown format/);
+  });
+
   /** The associated data: a ciphertext lifted onto another row, or into another column, must
    *  not open — otherwise writing your own sealed number onto someone else's row would send
    *  their one-time codes to you. */

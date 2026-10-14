@@ -65,6 +65,7 @@ import {
 import type { UserRepository } from "./auth/repos.js";
 import type { User } from "./auth/types.js";
 import {
+  countUnmatchedPhoneBlocks,
   createInMemoryPhoneBlockRepo,
   createPgPhoneBlockRepo,
   type PhoneBlockRepository,
@@ -145,6 +146,15 @@ async function main(): Promise<void> {
     // key is not in the database, so SQL could not do it). Before serving, under its own
     // advisory lock: a second instance waits, then finds nothing left to do.
     await backfillUserPii(pool, logger);
+    // Every boot, not once: this is the number that says when JWT_SECRET may rotate again
+    // (see config.jwtSecret), so it has to be current wherever an operator looks.
+    const unmatchedBlocks = await countUnmatchedPhoneBlocks(pool);
+    if (unmatchedBlocks > 0) {
+      logger.warn("phone blocks not matched to any account", {
+        count: unmatchedBlocks,
+        note: "may still be keyed under JWT_SECRET; rotating it would lift them",
+      });
+    }
     // Fixture seeding OVERWRITES existing helper rows (ON CONFLICT DO UPDATE), so it must
     // never run against a real database — it would stomp live profiles on every deploy.
     if (config.allowDevRoutes) {
