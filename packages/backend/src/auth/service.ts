@@ -157,6 +157,21 @@ export class AuthService {
   }
 
   /**
+   * End every session the account has and issue one fresh one for the device asking.
+   *
+   * For a change to how the account is protected — adding or removing its second factor. A
+   * session that existed before the change was obtained under the old rules, so it must not
+   * carry over: without this, a session minted on a password alone outlives the authenticator
+   * that was supposed to make that impossible. The caller's own device is re-issued so the
+   * person making the change is not signed out of the browser they are holding, as
+   * `/auth/me/password` does.
+   */
+  async replaceSessions(user: User, userAgent: string): Promise<IssuedTokens> {
+    await this.deps.sessions.revokeAllForUser(user.id, this.deps.now());
+    return this.issue(user, userAgent);
+  }
+
+  /**
    * Set or replace a password.
    *
    * Every existing session is revoked. That is the point of changing a password: the common

@@ -535,6 +535,29 @@ export const MIGRATIONS: readonly Migration[] = [
        )`,
     ],
   },
+  {
+    id: 10,
+    name: "revoke-pre-totp-staff-sessions",
+    statements: [
+      // ── end the sessions a password alone obtained ──────────────────────────────────────
+      //
+      // Migration 9 stops a super admin getting a session on a password alone, but it did
+      // nothing about the sessions already handed out that way. A refresh rotation resets the
+      // expiry each time, so such a session could outlive the change indefinitely — and while
+      // it lived, its holder could enrol THEIR authenticator on the account and lock the real
+      // owner out of enrolling at all.
+      //
+      // Every live staff session ends here, so every member of staff comes back through the
+      // two-factor sign-in once. Ordinary admins are included although theirs were already
+      // two-factor (password and a text message): one extra sign-in is a small price for not
+      // having to reason about which rules a given session was minted under. Participants are
+      // untouched — nothing about how they sign in changed.
+      `UPDATE sessions
+          SET revoked_at = (EXTRACT(EPOCH FROM now()) * 1000)::bigint
+        WHERE revoked_at IS NULL
+          AND user_id IN (SELECT id FROM users WHERE role IN ('admin','super_admin'))`,
+    ],
+  },
 ];
 
 /** Single-quote a string for inline SQL.

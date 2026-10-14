@@ -273,8 +273,13 @@ export function createTotpRouter(
         }
 
         // Single-use, and deleted only once the factor has passed — a mistyped code does not
-        // cost the operator their password step.
-        await deps.redis.del(pending.key);
+        // cost the operator their password step. The session depends on WINNING the delete:
+        // the read above is not a claim, so two requests racing on one token with two valid
+        // proofs (two recovery codes, say) would otherwise both get here and both be signed in.
+        if ((await deps.redis.del(pending.key)) !== 1) {
+          res.status(401).json({ error: "mfa-expired" });
+          return;
+        }
 
         let recoveryCodesRemaining: number | undefined;
         if (usedRecoveryCode) {
@@ -409,16 +414,21 @@ export function createTotpRouter(
       logger.info("authenticator enrolled", { userId: user.id });
 
       res.setHeader("Cache-Control", "no-store");
+      if (pendingKey) await deps.redis.del(pendingKey);
+
+      // Every session that existed before this moment ends, and the device that enrolled gets
+      // the only live one. Those sessions were obtained without the factor the account now
+      // has — for a super admin, on a password alone — and leaving them standing would make
+      // enrolling cosmetic for anyone already holding one.
+      //
+      // On first sign-in this is also the session the password route withheld: both factors
+      // now exist and both have just been demonstrated.
+      const issued = await deps.auth.replaceSessions(user, ua(req));
+      setAuthCookies(res, issued.accessToken, issued.refreshToken);
       if (!pendingKey) {
         res.json({ recoveryCodes });
         return;
       }
-
-      // First sign-in: both factors now exist and both have just been demonstrated, so THIS
-      // is the moment the session the password route withheld is finally issued.
-      await deps.redis.del(pendingKey);
-      const issued = await deps.auth.issueFor(user, ua(req));
-      setAuthCookies(res, issued.accessToken, issued.refreshToken);
       res.json({
         recoveryCodes,
         user: publicUser(issued.user),
@@ -464,6 +474,12 @@ export function createTotpRouter(
         ip: clientIp(req),
       });
       logger.info("authenticator disabled", { userId: user.id });
+      // Every other session ends with the factor that protected it, as a password change ends
+      // them: the usual reason to remove an authenticator is that the phone is gone, and a
+      // session open on that phone must not survive it. The device doing the disabling keeps
+      // a fresh one.
+      const issued = await deps.auth.replaceSessions(user, ua(req));
+      setAuthCookies(res, issued.accessToken, issued.refreshToken);
       // For a super admin this does NOT fall back to a password alone: with no authenticator
       // on the account, the next sign-in stops at enrolment before any session exists.
       res.json({ ok: true });

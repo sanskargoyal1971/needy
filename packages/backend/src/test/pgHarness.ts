@@ -1,5 +1,5 @@
 import pg from "pg";
-import { migrate } from "../migrations.js";
+import { migrate, type Migration } from "../migrations.js";
 
 /** ── Throwaway Postgres databases for tests ────────────────────────────────
  *  Extracted from migrations.test.ts, which had this inline, once a second test needed a
@@ -39,8 +39,9 @@ export class PgHarness {
     await this.admin.query("SELECT 1");
   }
 
-  /** A fresh database with every migration applied. */
-  async freshDb(label: string): Promise<pg.Pool> {
+  /** A fresh database with every migration applied — or only `list`, so a test can put rows
+   *  in place BEFORE a data migration and then watch what it does to them. */
+  async freshDb(label: string, list?: readonly Migration[]): Promise<pg.Pool> {
     if (!this.admin) throw new Error("call connect() first");
     // CREATE DATABASE cannot run inside a transaction or be parameterised, hence the
     // interpolation; `label` is a literal from the calling test plus the pid, never user
@@ -52,7 +53,7 @@ export class PgHarness {
     this.created.push(name);
     const pool = new pg.Pool({ connectionString: urlFor(name) });
     this.pools.push(pool);
-    await migrate(pool, silentLog);
+    await migrate(pool, silentLog, list);
     return pool;
   }
 

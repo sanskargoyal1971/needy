@@ -283,6 +283,9 @@ describe("totp — staff sign-in", () => {
     request(app).post("/auth/password/login").send({ phone: ADMIN_PHONE, password: GOOD });
   const totpLogin = (body: Record<string, unknown>) =>
     request(app).post("/auth/totp/login").send(body);
+  /** Present a session's refresh token, as a browser does when its access token runs out. */
+  const refreshWith = (cookies: string[]) =>
+    request(app).post("/auth/refresh").set("Cookie", cookies).send();
 
   /** Walk the super admin through first-time enrolment. Leaves the clock ten minutes on, so
    *  whatever the test does next is in a fresh code window with fresh attempt budgets. */
@@ -622,6 +625,58 @@ describe("totp — staff sign-in", () => {
     expect(both.status).toBe(400);
   });
 
+  /**
+   * The pending token is read, then the factor is checked, then the token is deleted. Two
+   * requests racing on one token both pass the read, so the delete is the claim: only the
+   * one that actually removed it may be signed in.
+   */
+  it("turns one pending token into one session, even raced with two good recovery codes", async () => {
+    const { recoveryCodes } = await enrolRoot();
+    const { pendingToken } = (await rootLogin()).body;
+
+    // Hold each recovery-code check until both requests have reached it, so both have read
+    // the pending token before either can delete it. Left to the scheduler the first request
+    // usually finishes before the second starts, and the race this pins never happens.
+    const consume = totp.consumeRecoveryCode.bind(totp);
+    let arrived = 0;
+    let releaseBoth!: () => void;
+    const bothArrived = new Promise<void>((resolve) => (releaseBoth = resolve));
+    totp.consumeRecoveryCode = async (...args) => {
+      if (++arrived === 2) releaseBoth();
+      await bothArrived;
+      return consume(...args);
+    };
+
+    const results = await Promise.all([
+      totpLogin({ pendingToken, recoveryCode: recoveryCodes[0] }),
+      totpLogin({ pendingToken, recoveryCode: recoveryCodes[1] }),
+    ]);
+
+    expect(results.filter(hasSession)).toHaveLength(1);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 401]);
+  });
+
+  // ── sessions from before the factor ────────────────────────────────────────
+
+  /**
+   * Before the authenticator existed a super admin's password alone returned a session, and
+   * refresh rotation keeps such a session alive indefinitely. Enrolling has to end it, or the
+   * second factor guards only the sign-ins that happen after it.
+   */
+  it("ends a session the password alone obtained, once the authenticator is enrolled", async () => {
+    // Minted directly, the way the old password route did.
+    const legacy = await auth.issueFor((await users.getById("u-root"))!, "before the change");
+    expect((await refreshWith([`needy_rt=${legacy.refreshToken}`])).status).toBe(200);
+    const stillLegacy = await auth.issueFor((await users.getById("u-root"))!, "before the change");
+
+    const { confirm } = await enrolRoot();
+    expect(hasSession(confirm)).toBe(true);
+
+    const res = await refreshWith([`needy_rt=${stillLegacy.refreshToken}`]);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("refresh-invalid");
+  });
+
   // ── disabling ──────────────────────────────────────────────────────────────
 
   describe("turning it off", () => {
@@ -648,6 +703,28 @@ describe("totp — staff sign-in", () => {
       expect(ok.status).toBe(200);
       expect(await totp.get("u-root")).toBeNull();
       expect(audited.map((a) => a.action)).toContain("auth.totp_disabled");
+    });
+
+    /** The usual reason to remove an authenticator is a lost phone; a session open on that
+     *  phone must not outlive the factor that protected it. */
+    it("ends every other session, and keeps the one doing the disabling", async () => {
+      const { secret, confirm } = await enrolRoot();
+      const elsewhere = await totpLogin({
+        pendingToken: (await rootLogin()).body.pendingToken,
+        code: codeFor(secret),
+      });
+      expect(hasSession(elsewhere)).toBe(true);
+
+      clock += STEP_MS;
+      const off = await request(app)
+        .post("/auth/totp/disable")
+        .set("Cookie", cookieHeader(confirm))
+        .send({ code: codeFor(secret) });
+      expect(off.status).toBe(200);
+      expect(hasSession(off)).toBe(true);
+
+      expect((await refreshWith(cookieHeader(off))).status).toBe(200);
+      expect((await refreshWith(cookieHeader(elsewhere))).status).toBe(401);
     });
 
     it("refuses without a session at all", async () => {
@@ -743,12 +820,18 @@ describe("totp — staff sign-in", () => {
       expect(await totp.get("u-admin")).toBeNull();
     });
 
-    it("enrols from a session and gets recovery codes but no second session", async () => {
-      const { confirm } = await enrolAdmin();
+    it("enrols from a session and gets recovery codes and one fresh session", async () => {
+      const { session, confirm } = await enrolAdmin();
       expect(confirm.status).toBe(200);
       expect(confirm.body.recoveryCodes).toHaveLength(10);
       expect(confirm.body.user).toBeUndefined();
-      expect(hasSession(confirm)).toBe(false);
+      // The enrolling device's session is replaced, not added to: the one it had was obtained
+      // without the authenticator, and is now refused.
+      // (New first: presenting a revoked token past the grace window ends every session, by
+      // the reuse rule, which would take the new one down with it.)
+      expect(hasSession(confirm)).toBe(true);
+      expect((await refreshWith(cookieHeader(confirm))).status).toBe(200);
+      expect((await refreshWith(session)).status).toBe(401);
       expect(audited.find((a) => a.action === "auth.totp_enrolled")).toMatchObject({
         actorId: "u-admin",
         metadata: { via: "session" },
