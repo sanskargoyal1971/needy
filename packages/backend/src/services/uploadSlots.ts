@@ -2,19 +2,26 @@ import type { NextFunction, Request, Response } from "express";
 import { logger } from "../logger.js";
 
 /**
- * A ceiling on how many uploads this process holds in memory at once.
+ * A ceiling on how many uploads this process serves at once.
  *
- * Uploads are read into memory before they go to object storage, and a video may be 60 MB.
- * Each request was bounded; the number of them was not — so a handful of signed-in clients
- * uploading at once could take the process past its memory limit, and with it every live
- * task, chat and alarm on the instance. This makes the worst case a number that can be
- * reasoned about: `MAX_CONCURRENT_UPLOADS × 60 MB`.
+ * Uploads used to be read whole into memory, so the cap was 4 and the worst case was
+ * 4 × 60 MB = 240 MB. They are now streamed (services/uploadStream.ts): what one upload holds
+ * is a few stream buffers on the local adapter and at most one S3 part (`S3_PART_BYTES`,
+ * 8 MiB, plus one socket chunk) in production. Sixteen at once is therefore ~130 MB worst
+ * case — about half the old ceiling, for four times the concurrency, which is what lets a
+ * burst of helpers recording testimony at a launch event go through instead of seeing 503s.
+ *
+ * Why still a cap at all: each slot is also an open socket, an S3 multipart upload and a
+ * share of the instance's upstream bandwidth, and a slow client can hold one for minutes.
+ * Unbounded, a few dozen deliberately slow uploads would starve the realtime traffic (live
+ * tasks, chat, SOS) that shares this process. The memory bound is now `16 × 8 MiB`; the
+ * number to revisit if the instance size changes is that product, not the file-size cap.
  *
  * Refused rather than queued. A queue holds the connection open and the caller waits with no
  * idea why; a 503 with `Retry-After` is something a client can act on. Chain AFTER the auth
  * guard, so an anonymous caller can never occupy a slot.
  */
-export const MAX_CONCURRENT_UPLOADS = 4;
+export const MAX_CONCURRENT_UPLOADS = 16;
 
 let inFlight = 0;
 

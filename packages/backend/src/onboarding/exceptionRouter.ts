@@ -1,5 +1,3 @@
-import { uploadSlot } from "../services/uploadSlots.js";
-import busboy from "busboy";
 import { Router, type Request, type Response } from "express";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -18,8 +16,9 @@ import { config } from "../config.js";
 import type { BookingException, ExceptionRepository } from "../domain/exceptions.js";
 import { asyncRoute } from "../http/asyncRoute.js";
 import { logger } from "../logger.js";
-import { validateUpload } from "../services/fileType.js";
 import { newStorageKey, type StorageProvider } from "../services/storage.js";
+import { uploadSlot } from "../services/uploadSlots.js";
+import { receiveSingleUpload, uploadFailureStatus } from "../services/uploadStream.js";
 
 /** ── Booking exceptions ────────────────────────────────────────────────────
  *  The route around a restricted pairing, and deliberately a slow one.
@@ -73,51 +72,6 @@ function participantView(e: BookingException) {
     /** So the UI can say "by tomorrow" rather than "soon". */
     reviewDueBy: e.submittedAt != null ? e.submittedAt + EXCEPTION_REVIEW_SLA_MS : null,
   };
-}
-
-/** Read one bounded multipart video. Same shape as the onboarding upload reader; kept local
- *  rather than shared because that one is coupled to the document-kind field and this one
- *  takes no fields at all. */
-function readVideo(
-  req: Request,
-  maxBytes: number,
-): Promise<
-  { ok: true; bytes: Buffer } | { ok: false; reason: "no-file" | "too-large" | "malformed" }
-> {
-  return new Promise((resolve) => {
-    let bb: ReturnType<typeof busboy>;
-    try {
-      bb = busboy({ headers: req.headers, limits: { files: 1, fileSize: maxBytes, fields: 2 } });
-    } catch {
-      resolve({ ok: false, reason: "malformed" });
-      return;
-    }
-    const chunks: Buffer[] = [];
-    let sawFile = false;
-    let truncated = false;
-    let settled = false;
-    const settle = (r: Awaited<ReturnType<typeof readVideo>>) => {
-      if (!settled) {
-        settled = true;
-        resolve(r);
-      }
-    };
-    bb.on("file", (_n, stream) => {
-      sawFile = true;
-      stream.on("data", (c: Buffer) => chunks.push(c));
-      stream.on("limit", () => {
-        truncated = true;
-        stream.resume();
-      });
-    });
-    bb.on("close", () => {
-      if (truncated) return settle({ ok: false, reason: "too-large" });
-      if (!sawFile) return settle({ ok: false, reason: "no-file" });
-      settle({ ok: true, bytes: Buffer.concat(chunks) });
-    });
-    bb.on("error", () => settle({ ok: false, reason: "malformed" }));
-    req.pipe(bb);
-  });
 }
 
 export function createExceptionRouter(deps: ExceptionRouterDeps): Router {
@@ -226,26 +180,36 @@ export function createExceptionRouter(deps: ExceptionRouterDeps): Router {
         return;
       }
 
-      const upload = await readVideo(req, MAX_UPLOAD_BYTES.video_testimony);
+      // Streamed straight to storage, sniffed and size-capped on the way — see
+      // services/uploadStream.ts. This form carries no fields, so the policy is fixed.
+      const upload = await receiveSingleUpload(req, {
+        storage: deps.storage,
+        maxBytes: MAX_UPLOAD_BYTES.video_testimony,
+        maxFields: 2,
+        policyFor: () => ({
+          accepted: ACCEPTED_MIME.video_testimony,
+          maxBytes: MAX_UPLOAD_BYTES.video_testimony,
+          keyFor: (ext) => newStorageKey(userId, `exception-${side}`, ext),
+        }),
+      });
       if (!upload.ok) {
-        res.status(upload.reason === "too-large" ? 413 : 400).json({ error: upload.reason });
+        const status = uploadFailureStatus(upload.reason);
+        res.status(status).json({
+          error: upload.reason,
+          ...(status === 415 ? { accepted: ACCEPTED_MIME.video_testimony } : {}),
+        });
         return;
       }
-      const check = validateUpload(
-        upload.bytes,
-        ACCEPTED_MIME.video_testimony,
-        MAX_UPLOAD_BYTES.video_testimony,
-      );
-      if (!check.ok) {
-        res.status(415).json({ error: check.reason, accepted: ACCEPTED_MIME.video_testimony });
-        return;
-      }
-
-      const key = newStorageKey(userId, `exception-${side}`, check.extension);
-      await deps.storage.put(key, upload.bytes, check.mime);
+      const key = upload.stored.key;
 
       const patch = side === "requester" ? { requesterVideoKey: key } : { helperVideoKey: key };
-      let updated = await deps.exceptions.update(exception.id, patch);
+      // As with KYC documents: an object whose row was never written must not stay behind.
+      let updated = await deps.exceptions
+        .update(exception.id, patch)
+        .catch(async (err: unknown) => {
+          await deps.storage.remove(key).catch(() => undefined);
+          throw err;
+        });
 
       // Both present → the packet enters the queue and the SLA clock starts.
       if (updated.requesterVideoKey && updated.helperVideoKey) {

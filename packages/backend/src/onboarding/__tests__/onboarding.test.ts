@@ -1,7 +1,7 @@
 import express from "express";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { REQUIRED_DOCUMENTS } from "@needy/shared";
+import { MAX_UPLOAD_BYTES, REQUIRED_DOCUMENTS } from "@needy/shared";
 import { signAccessToken } from "../../auth/jwt.js";
 import { requireOnboarded } from "../../auth/onboardingGate.js";
 import {
@@ -16,9 +16,13 @@ import { createInMemoryTotpRepo } from "../../auth/totpRepo.js";
 import { makeUser } from "../../auth/types.js";
 import { createLoggingAuditLogger } from "../../audit/log.js";
 import { LocalDiskStorage } from "../../services/storage.js";
+import { uploadSlotsInUse } from "../../services/uploadSlots.js";
 import { createInMemoryKycDocumentRepo, type KycDocumentRepository } from "../repos.js";
 import { ageInYears, createOnboardingRouter } from "../router.js";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -167,7 +171,9 @@ describe("onboarding router", () => {
       });
 
     expect(res.status).toBe(415);
+    expect(res.body.error).toBe("unrecognized-format");
     expect(await documents.listForUser("u5")).toHaveLength(0);
+    expect(await filesFor("u5")).toEqual([]);
   });
 
   it("replaces rather than duplicates when a document is re-uploaded", async () => {
@@ -182,6 +188,168 @@ describe("onboarding router", () => {
     await post();
     await post();
     expect(await documents.listForUser("u6")).toHaveLength(1);
+  });
+
+  // ── streamed uploads ───────────────────────────────────────────────────────
+
+  /** Every file the adapter has left for one user — object, sidecar or `.part-` temp. */
+  const filesFor = async (userId: string): Promise<string[]> =>
+    (await readdir(join(storageRoot, "kyc", userId)).catch(() => [] as string[])).sort();
+
+  const PNG = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    randomBytes(300 * 1024),
+  ]);
+  const MP4 = Buffer.concat([
+    Buffer.from([0, 0, 0, 0x20, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]),
+    randomBytes(2 * 1024 * 1024),
+  ]);
+
+  it.each([
+    ["gov_id", PNG, "image/png", "png"],
+    ["selfie", JPEG, "image/jpeg", "jpg"],
+    ["video_testimony", MP4, "video/mp4", "mp4"],
+  ] as const)(
+    "streams a %s to storage with the sniffed type and its hash",
+    async (kind, bytes, mime, ext) => {
+      const id = `s-${kind}`;
+      await seed(id, { dateOfBirth: "1990-01-01", gender: "male", onboardingStatus: "documents" });
+
+      const res = await request(app)
+        .post("/onboarding/documents")
+        .set("authorization", `Bearer ${token(id)}`)
+        .field("kind", kind)
+        // The declared type is a lie on purpose: only the sniffed one may be stored.
+        .attach("file", bytes, { filename: "x.bin", contentType: "text/html" });
+      expect(res.status).toBe(200);
+
+      const [doc] = await documents.listForUser(id);
+      expect(doc).toMatchObject({ kind, contentType: mime, sizeBytes: bytes.length });
+      expect(doc!.storageKey.endsWith(`.${ext}`)).toBe(true);
+      expect(doc!.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+      expect(await readFile(join(storageRoot, doc!.storageKey))).toEqual(bytes);
+      // The object and its sidecar; no temp file survived the rename.
+      expect((await filesFor(id)).filter((f) => f.includes(".part-"))).toEqual([]);
+    },
+  );
+
+  it("aborts an oversize upload with nothing stored", async () => {
+    await seed("s-big", {
+      dateOfBirth: "1990-01-01",
+      gender: "male",
+      onboardingStatus: "documents",
+    });
+    const tooBig = Buffer.concat([JPEG, Buffer.alloc(MAX_UPLOAD_BYTES.gov_id)]);
+
+    const res = await request(app)
+      .post("/onboarding/documents")
+      .set("authorization", `Bearer ${token("s-big")}`)
+      .field("kind", "gov_id")
+      .attach("file", tooBig, { filename: "id.jpg" });
+
+    expect(res.status).toBe(413);
+    expect(res.body.error).toBe("too-large");
+    expect(await documents.listForUser("s-big")).toHaveLength(0);
+    expect(await filesFor("s-big")).toEqual([]);
+  });
+
+  /** The per-kind cap, not the largest one: 9 MB is fine for an ID scan and too big for a
+   *  selfie, so the kind really did decide the limit while the bytes were arriving. */
+  it("applies the cap of the kind named, not the largest cap", async () => {
+    await seed("s-cap", {
+      dateOfBirth: "1990-01-01",
+      gender: "male",
+      onboardingStatus: "documents",
+    });
+    const nineMb = Buffer.concat([JPEG, Buffer.alloc(9 * 1024 * 1024)]);
+    const res = await request(app)
+      .post("/onboarding/documents")
+      .set("authorization", `Bearer ${token("s-cap")}`)
+      .field("kind", "selfie")
+      .attach("file", nineMb, { filename: "s.jpg" });
+    expect(res.status).toBe(413);
+    expect(await filesFor("s-cap")).toEqual([]);
+  });
+
+  it("refuses a file that arrives before its kind, storing nothing", async () => {
+    await seed("s-order", {
+      dateOfBirth: "1990-01-01",
+      gender: "male",
+      onboardingStatus: "documents",
+    });
+    const res = await request(app)
+      .post("/onboarding/documents")
+      .set("authorization", `Bearer ${token("s-order")}`)
+      .attach("file", JPEG, { filename: "id.jpg" })
+      .field("kind", "gov_id");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("kind-must-precede-file");
+    expect(await filesFor("s-order")).toEqual([]);
+  });
+
+  it("rejects an unknown kind before reading the file", async () => {
+    await seed("s-kind", {
+      dateOfBirth: "1990-01-01",
+      gender: "male",
+      onboardingStatus: "documents",
+    });
+    const res = await request(app)
+      .post("/onboarding/documents")
+      .set("authorization", `Bearer ${token("s-kind")}`)
+      .field("kind", "passport_photo")
+      .attach("file", JPEG, { filename: "id.jpg" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("unknown-document-kind");
+  });
+
+  /** A client that hangs up mid-video. The request never ends, so nothing upstream errors on
+   *  its own: unless the route notices, the temp file stays on disk for good. */
+  it("removes the partial file when the client disconnects mid-upload", async () => {
+    const id = "s-gone";
+    await seed(id, { dateOfBirth: "1990-01-01", gender: "male", onboardingStatus: "documents" });
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise((r) => server.once("listening", r));
+    const { port } = server.address() as AddressInfo;
+
+    const boundary = "needy-test-boundary";
+    const preamble =
+      `--${boundary}\r\nContent-Disposition: form-data; name="kind"\r\n\r\nvideo_testimony\r\n` +
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="v.webm"\r\n` +
+      `Content-Type: video/webm\r\n\r\n`;
+    const client = httpRequest({
+      host: "127.0.0.1",
+      port,
+      method: "POST",
+      path: "/onboarding/documents",
+      headers: {
+        authorization: `Bearer ${token(id)}`,
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+        // Promises 20 MB; delivers about 1.
+        "content-length": String(preamble.length + 20 * 1024 * 1024),
+      },
+    });
+    client.on("error", () => undefined);
+    client.write(preamble);
+    client.write(Buffer.concat([WEBM, Buffer.alloc(1024 * 1024)]));
+
+    const until = async (cond: () => Promise<boolean>) => {
+      for (let i = 0; i < 300 && !(await cond()); i++) await new Promise((r) => setTimeout(r, 10));
+      return cond();
+    };
+    try {
+      // The write really was under way: a temp file exists in the private root.
+      expect(await until(async () => (await filesFor(id)).some((f) => f.includes(".part-")))).toBe(
+        true,
+      );
+      client.destroy();
+
+      expect(await until(async () => (await filesFor(id)).length === 0)).toBe(true);
+      expect(await until(() => Promise.resolve(uploadSlotsInUse() === 0))).toBe(true);
+      expect(await documents.listForUser(id)).toHaveLength(0);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((r) => server.close(r));
+    }
   });
 
   // ── submit ─────────────────────────────────────────────────────────────────

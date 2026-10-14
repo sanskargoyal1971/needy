@@ -1,6 +1,6 @@
 import express from "express";
 import request from "supertest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -208,8 +208,12 @@ describe("booking exceptions", () => {
 
   it("rejects a still image where a video is required", async () => {
     const { body } = await open();
+    const files = () => readdir(storageRoot, { recursive: true }).catch(() => [] as string[]);
+    const before = (await files()).length;
     const res = await upload(body.exception.id, YOUNG_M, JPEG);
     expect(res.status).toBe(415);
+    // Sniffed and refused before storage was touched: no file, partial or whole.
+    expect((await files()).length).toBe(before);
   });
 
   it("does not let a third party upload into someone else's request", async () => {

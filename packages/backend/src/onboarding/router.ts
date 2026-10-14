@@ -1,6 +1,3 @@
-import { createHash } from "node:crypto";
-import { uploadSlot } from "../services/uploadSlots.js";
-import busboy from "busboy";
 import { Router, type Request, type Response } from "express";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -22,8 +19,9 @@ import type { User } from "../auth/types.js";
 import { validateBody } from "../auth/validation.js";
 import { asyncRoute } from "../http/asyncRoute.js";
 import { logger } from "../logger.js";
-import { validateUpload } from "../services/fileType.js";
 import { newStorageKey, type StorageProvider } from "../services/storage.js";
+import { uploadSlot } from "../services/uploadSlots.js";
+import { receiveSingleUpload, uploadFailureStatus } from "../services/uploadStream.js";
 import type { KycDocumentRepository } from "./repos.js";
 
 /** ── Onboarding router ─────────────────────────────────────────────────────
@@ -104,71 +102,6 @@ export function publicOnboarding(user: User, documents: DocumentKind[]) {
     rejectionReason: user.rejectionReason,
     documents,
   };
-}
-
-/**
- * Read one multipart upload into memory, bounded.
- *
- * In memory rather than streamed to disk because the ceiling is 60 MB and the file is going
- * straight back out to object storage — a temp file would add a cleanup path (and a place for
- * an orphaned KYC video to sit on disk) for no benefit at this size.
- *
- * `limits.fileSize` makes busboy stop reading past the cap rather than buffering an unbounded
- * body first and checking afterwards, which is the difference between rejecting a 10 GB upload
- * and being OOM-killed by one.
- */
-function readSingleUpload(
-  req: Request,
-  maxBytes: number,
-): Promise<
-  | { ok: true; kind: string; bytes: Buffer; declaredType: string }
-  | { ok: false; reason: "no-file" | "too-large" | "malformed" }
-> {
-  return new Promise((resolve) => {
-    let bb: ReturnType<typeof busboy>;
-    try {
-      bb = busboy({ headers: req.headers, limits: { files: 1, fileSize: maxBytes, fields: 4 } });
-    } catch {
-      resolve({ ok: false, reason: "malformed" });
-      return;
-    }
-
-    const chunks: Buffer[] = [];
-    let kind = "";
-    let declaredType = "";
-    let sawFile = false;
-    let truncated = false;
-    let settled = false;
-    const settle = (r: Awaited<ReturnType<typeof readSingleUpload>>) => {
-      if (settled) return;
-      settled = true;
-      resolve(r);
-    };
-
-    bb.on("field", (name, value) => {
-      if (name === "kind") kind = value;
-    });
-
-    bb.on("file", (_name, stream, info) => {
-      sawFile = true;
-      declaredType = info.mimeType;
-      stream.on("data", (c: Buffer) => chunks.push(c));
-      stream.on("limit", () => {
-        truncated = true;
-        // Drain rather than destroy: busboy needs the stream consumed to reach 'close'.
-        stream.resume();
-      });
-    });
-
-    bb.on("close", () => {
-      if (truncated) return settle({ ok: false, reason: "too-large" });
-      if (!sawFile) return settle({ ok: false, reason: "no-file" });
-      settle({ ok: true, kind, bytes: Buffer.concat(chunks), declaredType });
-    });
-
-    bb.on("error", () => settle({ ok: false, reason: "malformed" }));
-    req.pipe(bb);
-  });
 }
 
 export function createOnboardingRouter(deps: OnboardingDeps): Router {
@@ -263,51 +196,66 @@ export function createOnboardingRouter(deps: OnboardingDeps): Router {
       const loaded = await loadEditable(req, res);
       if (!loaded) return;
 
-      // Read at the largest ceiling any kind allows, then re-check against the specific kind
-      // below — the `kind` field is a multipart field and may arrive after the file part, so
-      // it is not reliably known before the body has been read.
+      // Streamed straight to storage — see services/uploadStream.ts. The kind has to be
+      // known before the first file byte, because it decides the size cap and the formats
+      // accepted while the bytes are still arriving; a form that sends the file first is
+      // refused rather than stored under a guess.
       const largest = Math.max(...Object.values(MAX_UPLOAD_BYTES));
-      const upload = await readSingleUpload(req, largest);
-      if (!upload.ok) {
-        res.status(upload.reason === "too-large" ? 413 : 400).json({ error: upload.reason });
-        return;
-      }
-      if (!isDocumentKind(upload.kind)) {
-        res.status(400).json({ error: "unknown-document-kind" });
-        return;
-      }
-      const kind: DocumentKind = upload.kind;
-
-      // The declared content-type is attacker-controlled and is used for NOTHING except this
-      // log line. What gets stored and served is the sniffed type. See services/fileType.ts.
-      const check = validateUpload(upload.bytes, ACCEPTED_MIME[kind], MAX_UPLOAD_BYTES[kind]);
-      if (!check.ok) {
-        logger.warn("kyc upload rejected", {
-          kind,
-          reason: check.reason,
-          declaredType: upload.declaredType,
-        });
-        res.status(check.reason === "too-large" ? 413 : 415).json({
-          error: check.reason,
-          accepted: ACCEPTED_MIME[kind],
-        });
-        return;
-      }
-
-      const sha256 = createHash("sha256").update(upload.bytes).digest("hex");
-      const storageKey = newStorageKey(loaded.user.id, kind, check.extension);
-      await deps.storage.put(storageKey, upload.bytes, check.mime);
-
-      const { replacedStorageKey } = await deps.documents.put({
-        id: nanoid(),
-        userId: loaded.user.id,
-        kind,
-        storageKey,
-        contentType: check.mime,
-        sizeBytes: upload.bytes.length,
-        sha256,
-        createdAt: deps.now(),
+      // Captured when the file part begins — the kind the bytes were checked against, which
+      // is therefore the only kind they may be recorded as.
+      // (A holder object rather than a `let`: TypeScript does not see assignments made inside
+      // the callback and would narrow a `let` to its initial null.)
+      const picked: { kind?: DocumentKind } = {};
+      const upload = await receiveSingleUpload(req, {
+        storage: deps.storage,
+        maxBytes: largest,
+        maxFields: 4,
+        policyFor: (fields) => {
+          if (fields.kind === undefined) return "kind-must-precede-file";
+          if (!isDocumentKind(fields.kind)) return "unknown-document-kind";
+          const k: DocumentKind = fields.kind;
+          picked.kind = k;
+          return {
+            accepted: ACCEPTED_MIME[k],
+            maxBytes: MAX_UPLOAD_BYTES[k],
+            keyFor: (ext) => newStorageKey(loaded.user.id, k, ext),
+          };
+        },
       });
+      if (!upload.ok) {
+        // The declared content-type is not consulted at all: what gets stored and served is
+        // the sniffed type. See services/fileType.ts.
+        logger.warn("kyc upload rejected", { kind: picked.kind, reason: upload.reason });
+        const status = uploadFailureStatus(upload.reason);
+        res.status(status).json({
+          error: upload.reason,
+          ...(status === 415 && picked.kind ? { accepted: ACCEPTED_MIME[picked.kind] } : {}),
+        });
+        return;
+      }
+      const { stored } = upload;
+      // Set whenever an upload succeeded: storing requires a policy, which requires a kind.
+      const docKind = picked.kind!;
+
+      // If the row cannot be written, the object it would have pointed at must not outlive
+      // it: an unreferenced ID scan in the bucket is exactly the kind of leftover nobody
+      // notices until a breach inventory does.
+      const placed = await deps.documents
+        .put({
+          id: nanoid(),
+          userId: loaded.user.id,
+          kind: docKind,
+          storageKey: stored.key,
+          contentType: stored.mime,
+          sizeBytes: stored.sizeBytes,
+          sha256: stored.sha256,
+          createdAt: deps.now(),
+        })
+        .catch(async (err: unknown) => {
+          await deps.storage.remove(stored.key).catch(() => undefined);
+          throw err;
+        });
+      const { replacedStorageKey } = placed;
 
       // Delete the displaced object AFTER the row is committed. The other order risks a
       // deleted file still referenced by a row if the write then fails — a broken document in
@@ -320,7 +268,7 @@ export function createOnboardingRouter(deps: OnboardingDeps): Router {
         });
       }
 
-      const documents = [...new Set([...loaded.documents, kind])];
+      const documents = [...new Set([...loaded.documents, docKind])];
       const hasIdentity = loaded.user.dateOfBirth != null;
       await deps.users.update(loaded.user.id, {
         onboardingStatus: deriveOnboardingStatus({ hasIdentity, documents }),
@@ -333,7 +281,7 @@ export function createOnboardingRouter(deps: OnboardingDeps): Router {
         actorRole: loaded.user.role,
         subjectType: "user",
         subjectId: loaded.user.id,
-        metadata: { kind, contentType: check.mime, sizeBytes: upload.bytes.length },
+        metadata: { kind: docKind, contentType: stored.mime, sizeBytes: stored.sizeBytes },
         ip: ip(req),
       });
 

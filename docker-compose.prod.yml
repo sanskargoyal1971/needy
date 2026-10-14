@@ -138,8 +138,13 @@ services:
       STORAGE_DRIVER: s3
       S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET (private, block public access, SSE-KMS)}
       S3_REGION: ${S3_REGION:-ap-south-1}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY}
+      # Optional, and meant to stay unset. With no static keys the backend signs S3 requests
+      # with the EC2 instance role's short-lived credentials (IMDSv2), which rotate on their
+      # own and never sit in an env file. Static keys still work — for a host with no role —
+      # but the backend logs a warning on every production boot while they are set. See
+      # deploy-ec2.sh for the instance profile and IMDS hop limit the role path needs.
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       DIRECTIONS_PROVIDER: ${DIRECTIONS_PROVIDER:-}
       DIRECTIONS_API_KEY: ${DIRECTIONS_API_KEY:-}
     depends_on:

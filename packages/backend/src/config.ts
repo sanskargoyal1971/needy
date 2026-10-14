@@ -190,9 +190,13 @@ export const config = {
     publicBase: process.env.PUBLIC_BASE_URL ?? `http://localhost:${num("PORT", 4000)}`,
     bucket: process.env.S3_BUCKET ?? "",
     region: process.env.S3_REGION ?? "ap-south-1",
+    /** Static keys: optional, and best left unset. When both are empty the S3 adapter uses
+     *  the container credential endpoint or the EC2 instance role — see
+     *  services/awsCredentials.ts. Production logs a warning while these are set. */
     accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "",
     secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "",
-    /** Override for S3-compatible stores (MinIO, R2). Empty = real AWS. */
+    /** Override for S3-compatible stores (MinIO, R2): a bucket host, or a full origin such as
+     *  `http://127.0.0.1:9000`. Plain http is refused in production. Empty = real AWS. */
     endpoint: process.env.S3_ENDPOINT ?? "",
     /** How long an admin's document view link stays valid. Deliberately short: the link is
      *  minted on demand when a reviewer opens a packet, so it never needs to outlive that. */

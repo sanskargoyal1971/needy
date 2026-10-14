@@ -93,6 +93,20 @@ AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2
 
 # 5. Launch EC2 Instance with User Data (Swap file + Docker)
 #    - IMDSv2 only, so a server-side request forgery cannot read instance credentials.
+#    - Hop limit 2, not 1. The backend fetches its S3 credentials from IMDS from inside a
+#      container, and Docker's bridge network is one extra hop: with a limit of 1 the IMDSv2
+#      token response is dropped before it reaches the container and S3 signing fails. 2 is
+#      the value AWS documents for containers; it is still not reachable off-host, and
+#      HttpTokens=required still blocks the IMDSv1 GET an SSRF would use.
+#    - S3 credentials come from the instance role, so the instance needs an instance profile
+#      whose role allows, on the KYC bucket only:
+#          s3:PutObject, s3:GetObject, s3:DeleteObject, s3:AbortMultipartUpload
+#        on  arn:aws:s3:::<S3_BUCKET>/kyc/*
+#      (plus kms:GenerateDataKey / kms:Decrypt on the bucket's key if it uses SSE-KMS).
+#      This script does not create or attach one. Create the role + profile once, then either
+#      add `--iam-instance-profile Name=<profile>` to the run-instances call below or attach
+#      it afterwards with `aws ec2 associate-iam-instance-profile`. Leave S3_ACCESS_KEY_ID /
+#      S3_SECRET_ACCESS_KEY out of needy.env.
 #    - Encrypted root volume: Postgres data (PII) lives on it.
 echo "Launching EC2 instance ($INSTANCE_TYPE)..."
 INSTANCE_ID=$(aws ec2 run-instances \
@@ -101,7 +115,7 @@ INSTANCE_ID=$(aws ec2 run-instances \
     --key-name "$KEY_NAME" \
     --security-group-ids "$SG_ID" \
     --region "$REGION" \
-    --metadata-options "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=1" \
+    --metadata-options "HttpTokens=required,HttpEndpoint=enabled,HttpPutResponseHopLimit=2" \
     --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":30,"VolumeType":"gp3","Encrypted":true,"DeleteOnTermination":true}}]' \
     --user-data "#!/bin/bash
 # Add 2GB Swap to prevent OOM during image builds

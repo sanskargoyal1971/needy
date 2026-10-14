@@ -85,10 +85,25 @@ export function validateUpload(
 ): { ok: true; mime: string; extension: string } | { ok: false; reason: UploadRejection } {
   if (bytes.length === 0) return { ok: false, reason: "empty" };
   if (bytes.length > maxBytes) return { ok: false, reason: "too-large" };
+  return validateHead(bytes, accepted);
+}
 
-  const sniffed = sniffContentType(bytes);
+/** How many leading bytes the sniffer ever looks at. Every signature above sits in the first
+ *  12; the rest is headroom. A streamed upload holds back exactly this much before it knows
+ *  what it is carrying, and nothing goes to storage until it does. */
+export const SNIFF_BYTES = 16;
+
+/**
+ * The format half of `validateUpload`, for a stream: judge the file by its first bytes alone.
+ * Size is the caller's to enforce, because a stream's size is not known until it ends.
+ */
+export function validateHead(
+  head: Buffer,
+  accepted: readonly string[],
+): { ok: true; mime: string; extension: string } | { ok: false; reason: UploadRejection } {
+  if (head.length === 0) return { ok: false, reason: "empty" };
+  const sniffed = sniffContentType(head);
   if (sniffed.mime == null) return { ok: false, reason: "unrecognized-format" };
   if (!accepted.includes(sniffed.mime)) return { ok: false, reason: "wrong-format-for-kind" };
-
   return { ok: true, mime: sniffed.mime, extension: sniffed.extension };
 }
