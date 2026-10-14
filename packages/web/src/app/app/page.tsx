@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, HeartHandshake, Loader2, ShieldCheck } from "lucide-react";
+import { ArrowRight, Loader2, ShieldCheck } from "lucide-react";
 import type { Task, TaskSnapshot } from "@needy/shared";
 import { useAuth } from "@/auth/AuthProvider";
 import { FormError } from "@/components/ui";
+import { MapPin3D } from "@/motion/depth";
 import { relativeTime } from "@/admin/format";
 import { paths } from "@/lib/paths";
 import { taskClient } from "@/lib/taskClient";
@@ -110,7 +111,8 @@ export default function RequesterHome() {
         </section>
       ) : (
         <section className="rounded-3xl border border-gray-100 bg-white p-8 text-center">
-          <HeartHandshake size={32} className="mx-auto mb-3 text-primary" aria-hidden />
+          {/* "Close by", as an object. Decorative; the sentence below says it in words. */}
+          <MapPin3D size={150} className="mx-auto -mt-4" />
           <h2 className="font-display text-xl font-bold text-gray-900">
             Need a hand with something?
           </h2>

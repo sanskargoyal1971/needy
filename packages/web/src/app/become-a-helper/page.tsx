@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
+import { VerifiedShield3D } from "@/motion/depth";
 
 export default function BecomeAHelper() {
   return (
@@ -38,13 +39,19 @@ export default function BecomeAHelper() {
               Start your application
             </Link>
           </div>
-          <div className="relative w-full aspect-square rounded-3xl overflow-hidden bg-background">
-            <Image
-              src="/helper.png"
-              alt="A confident, verified young adult wearing an ID badge"
-              fill
-              className="object-contain p-8"
-            />
+          <div className="relative">
+            <div className="relative w-full aspect-square rounded-3xl overflow-hidden bg-background">
+              <Image
+                src="/helper.png"
+                alt="A confident, verified young adult wearing an ID badge"
+                fill
+                className="object-contain p-8"
+              />
+            </div>
+            {/* The step every applicant goes through — ID, selfie and video, reviewed by a
+                person — as the one object beside the photo. Outside the image box so the
+                rounded clip does not cut its edge off as it turns. */}
+            <VerifiedShield3D size={150} className="absolute -bottom-6 -right-2 sm:-right-6" />
           </div>
         </div>
       </div>

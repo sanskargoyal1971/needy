@@ -35,17 +35,14 @@ const config: Config = {
           "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1), inset 0 -2px 0 0 rgba(0,0,0,0.05), inset 0 2px 0 0 rgba(255,255,255,0.5)",
         glass: "0 8px 32px 0 rgba(31, 38, 135, 0.07)",
       },
+      // Decorative float lives in the shared <Float> / DepthStage components now, which can
+      // pause off screen and honour reduced motion; a utility class can do neither. What is
+      // left here is used only inside Leaflet marker HTML strings, where React cannot reach.
       animation: {
-        float: "float 6s ease-in-out infinite",
-        "float-delayed": "float 6s ease-in-out 3s infinite",
         "pulse-slow": "pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite",
         glow: "glow 3s ease-in-out infinite alternate",
       },
       keyframes: {
-        float: {
-          "0%, 100%": { transform: "translateY(0)" },
-          "50%": { transform: "translateY(-15px)" },
-        },
         glow: {
           "0%": { boxShadow: "0 0 15px rgba(255, 122, 89, 0.2)" },
           "100%": { boxShadow: "0 0 30px rgba(255, 122, 89, 0.6)" },

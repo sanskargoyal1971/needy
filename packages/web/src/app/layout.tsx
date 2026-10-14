@@ -5,6 +5,7 @@ import "./globals.css";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { AuthProvider } from "@/auth/AuthProvider";
+import { MotionPreferencesProvider } from "@/motion/preferences";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -54,12 +55,18 @@ export default async function RootLayout({
       <body
         className={`${inter.variable} ${merriweather.variable} font-sans antialiased bg-background text-foreground min-h-screen flex flex-col`}
       >
-        {/* Wraps everything, including the Header, so the nav can reflect the session. */}
-        <AuthProvider>
-          <Header />
-          <main className="flex-grow">{children}</main>
-          <Footer />
-        </AuthProvider>
+        {/* The motion preference wraps the public pages too, not only the signed-in shells:
+            without a provider its context defaults to "motion allowed", and the landing page's
+            3D objects would ignore an OS-level reduce-motion setting. The shells keep their
+            own provider; the nearer one wins, which changes nothing for them. */}
+        <MotionPreferencesProvider>
+          {/* Wraps everything, including the Header, so the nav can reflect the session. */}
+          <AuthProvider>
+            <Header />
+            <main className="flex-grow">{children}</main>
+            <Footer />
+          </AuthProvider>
+        </MotionPreferencesProvider>
       </body>
     </html>
   );

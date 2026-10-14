@@ -18,3 +18,4 @@ export { TypingDots } from "./TypingDots.js";
 export type { TypingDotsProps } from "./TypingDots.js";
 export { ArrivalHighlight } from "./ArrivalHighlight.js";
 export type { ArrivalHighlightProps } from "./ArrivalHighlight.js";
+export * from "./depth/index.js";

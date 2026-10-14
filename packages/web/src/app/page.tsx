@@ -1,16 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { ShieldCheck, KeyRound, MapPin, Heart, Clock, Star, PhoneCall } from "lucide-react";
+import { ShieldCheck, MapPin, Heart, Clock, Star, PhoneCall } from "lucide-react";
 import { BreathingBackground } from "@/components/BreathingBackground";
+import { Doorstep3D, Float, IconTile3D, MapPin3D, VerifiedShield3D } from "@/motion/depth";
 
 export default function Home() {
   return (
     <div className="overflow-x-hidden">
       {/* 1. Hero Section */}
       <BreathingBackground className="relative border-b border-gray-100">
-        <div className="absolute top-20 left-10 w-64 h-64 bg-primary-100 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-float"></div>
-        <div className="absolute top-40 right-20 w-72 h-72 bg-accent-light/30 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-float-delayed"></div>
+        <Float decorative className="pointer-events-none absolute top-20 left-10" amplitude={14}>
+          <div className="w-64 h-64 bg-primary-100 rounded-full mix-blend-multiply filter blur-3xl opacity-70" />
+        </Float>
+        <Float
+          decorative
+          className="pointer-events-none absolute top-40 right-20"
+          amplitude={14}
+          delay={5}
+        >
+          <div className="w-72 h-72 bg-accent-light/30 rounded-full mix-blend-multiply filter blur-3xl opacity-70" />
+        </Float>
 
         <div className="container mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8 lg:py-32 relative z-10">
           <div className="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:gap-8 items-center">
@@ -68,7 +78,8 @@ export default function Home() {
                   Live tracking
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="p-2 bg-accent/10 rounded-lg animate-pulse-slow">
+                  {/* Still, on purpose: a pulsing alarm icon on a landing page reads as urgency. */}
+                  <div className="p-2 bg-accent/10 rounded-lg">
                     <PhoneCall className="text-accent" size={20} />
                   </div>
                   In-app SOS
@@ -76,34 +87,49 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="relative mx-auto w-full max-w-lg lg:max-w-none lg:pl-10 z-10 animate-float">
-              <div className="relative w-full aspect-square rounded-3xl overflow-hidden shadow-[0_20px_50px_rgba(8,_112,_184,_0.2)] bg-white/30 backdrop-blur-xl border border-white/40 p-4 transform perspective-1000 rotate-y-2 rotate-x-2">
-                <img
-                  src="/hero-3d.jpg"
-                  alt="A 3D neighborhood illustration showing helpers"
-                  className="object-cover rounded-2xl w-full h-full"
-                />
+            {/* The hero illustration: a pin standing on a neighbourhood tile, with the two
+                example cards drifting beside it. All of it is illustration — the claims it
+                stands for are in the copy on the left — so it is hidden from screen readers
+                and its example cards are not read out as if they were live. */}
+            <div
+              aria-hidden="true"
+              className="relative mx-auto flex w-full max-w-lg items-center justify-center lg:max-w-none lg:pl-10 z-10"
+            >
+              <div className="relative flex w-full max-w-[460px] items-center justify-center">
+                <div className="pointer-events-none absolute inset-[8%] rounded-full bg-[radial-gradient(closest-side,_rgba(27,122,122,0.16),_rgba(250,247,242,0))]" />
+                <MapPin3D size={460} />
 
-                {/* Floating UI elements overlaying the image */}
-                <div className="absolute top-8 -left-4 bg-white/90 backdrop-blur-md p-3 rounded-2xl shadow-3d-card flex items-center gap-3 animate-float-delayed z-20">
-                  <div className="h-10 w-10 bg-green-100 text-green-600 rounded-full flex items-center justify-center font-bold">
-                    <ShieldCheck size={20} />
+                <Float
+                  className="absolute top-[10%] left-0 sm:-left-4 z-20 pointer-events-none"
+                  amplitude={8}
+                  delay={2}
+                >
+                  <div className="bg-white/90 backdrop-blur-md p-3 rounded-2xl shadow-3d-card flex items-center gap-3">
+                    <div className="h-10 w-10 bg-green-100 text-green-600 rounded-full flex items-center justify-center font-bold">
+                      <ShieldCheck size={20} />
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 font-bold">Verified Helper</div>
+                      <div className="text-sm font-black text-gray-900">Arriving in 5m</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs text-gray-500 font-bold">Verified Helper</div>
-                    <div className="text-sm font-black text-gray-900">Arriving in 5m</div>
-                  </div>
-                </div>
+                </Float>
 
-                <div className="absolute bottom-10 -right-4 bg-white/90 backdrop-blur-md p-3 rounded-2xl shadow-3d-card flex items-center gap-3 animate-float z-20">
-                  <div className="h-10 w-10 bg-accent/20 text-accent rounded-full flex items-center justify-center font-bold animate-pulse">
-                    <Heart size={20} />
+                <Float
+                  className="absolute bottom-[12%] right-0 sm:-right-4 z-20 pointer-events-none"
+                  amplitude={8}
+                  delay={6}
+                >
+                  <div className="bg-white/90 backdrop-blur-md p-3 rounded-2xl shadow-3d-card flex items-center gap-3">
+                    <div className="h-10 w-10 bg-accent/20 text-accent rounded-full flex items-center justify-center font-bold">
+                      <Heart size={20} />
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500 font-bold">New Request</div>
+                      <div className="text-sm font-black text-gray-900">Hospital Visit</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-xs text-gray-500 font-bold">New Request</div>
-                    <div className="text-sm font-black text-gray-900">Hospital Visit</div>
-                  </div>
-                </div>
+                </Float>
               </div>
             </div>
           </div>
@@ -124,40 +150,41 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-12 relative">
-            <div className="hidden md:block absolute top-12 left-1/8 right-1/8 h-1 bg-gradient-to-r from-primary-100 via-primary to-primary-100 rounded-full -z-10 shadow-sm" />
+            <div className="hidden md:block absolute top-16 left-1/8 right-1/8 h-1 bg-gradient-to-r from-primary-100 via-primary to-primary-100 rounded-full -z-10 shadow-sm" />
 
-            {[
-              {
-                title: "Post a need",
-                desc: "Choose what you need help with and where you are.",
-                icon: <Clock size={28} className="text-white" />,
-                color: "bg-primary",
-              },
-              {
-                title: "See who is coming",
-                desc: "You see your helper's name and rating as soon as they accept, and can message them.",
-                icon: <ShieldCheck size={28} className="text-white" />,
-                color: "bg-primary",
-              },
-              {
-                title: "Track live",
-                desc: "See exactly where they are. You're never in the dark.",
-                icon: <MapPin size={28} className="text-white" />,
-                color: "bg-primary",
-              },
-              {
-                title: "Rate & done",
-                desc: "Leave a rating to help keep our community safe.",
-                icon: <Star size={28} className="text-white" />,
-                color: "bg-accent",
-              },
-            ].map((step, idx) => (
-              <div key={idx} className="relative flex flex-col items-center text-center group">
-                <div
-                  className={`h-24 w-24 rounded-2xl ${step.color} flex items-center justify-center mb-8 shadow-3d-button group-hover:translate-y-1 group-hover:shadow-3d-button-hover transition-all transform rotate-3 group-hover:rotate-0`}
-                >
+            {(
+              [
+                {
+                  title: "Post a need",
+                  desc: "Choose what you need help with and where you are.",
+                  icon: <Clock size={28} />,
+                  tone: "teal",
+                },
+                {
+                  title: "See who is coming",
+                  desc: "You see your helper's name and rating as soon as they accept, and can message them.",
+                  icon: <ShieldCheck size={28} />,
+                  tone: "teal",
+                },
+                {
+                  title: "Track live",
+                  desc: "See exactly where they are. You're never in the dark.",
+                  icon: <MapPin size={28} />,
+                  tone: "teal",
+                },
+                {
+                  title: "Rate & done",
+                  desc: "Leave a rating to help keep our community safe.",
+                  icon: <Star size={28} />,
+                  tone: "coral",
+                },
+              ] as const
+            ).map((step, idx) => (
+              <div key={idx} className="relative flex flex-col items-center text-center">
+                {/* Staggered by a quarter cycle each, so the row ripples rather than marches. */}
+                <IconTile3D tone={step.tone} size={128} delay={idx * 2.5} className="mb-4">
                   {step.icon}
-                </div>
+                </IconTile3D>
                 <h3 className="text-2xl font-black text-gray-900 mb-3">{step.title}</h3>
                 <p className="text-gray-600 font-medium leading-relaxed">{step.desc}</p>
               </div>
@@ -168,7 +195,7 @@ export default function Home() {
 
       {/* 3. Trust & Safety band */}
       <section className="py-24 bg-primary text-white overflow-hidden relative">
-        <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white via-transparent to-transparent animate-pulse-slow" />
+        <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-white via-transparent to-transparent" />
         <div className="absolute top-0 right-0 -mt-20 -mr-20 w-96 h-96 bg-primary-dark rounded-full filter blur-3xl opacity-50"></div>
         <div className="absolute bottom-0 left-0 -mb-20 -ml-20 w-80 h-80 bg-accent/20 rounded-full filter blur-3xl opacity-30"></div>
 
@@ -194,9 +221,7 @@ export default function Home() {
             </div>
             <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-8 perspective-1000">
               <div className="bg-gradient-to-br from-primary-dark/80 to-primary/80 p-8 rounded-3xl backdrop-blur-xl border border-white/20 shadow-3d-card hover:shadow-3d-card-hover transition-all transform hover:-translate-y-2 hover:rotate-1">
-                <div className="h-16 w-16 bg-white/10 rounded-2xl flex items-center justify-center mb-6 shadow-inner">
-                  <ShieldCheck size={32} className="text-accent" />
-                </div>
+                <VerifiedShield3D size={136} className="-mt-4 mb-2 -ml-4" />
                 <h3 className="text-2xl font-black mb-3">Every helper is verified</h3>
                 <p className="text-primary-100 font-medium leading-relaxed">
                   Every helper submits a government ID, a live selfie and a short video, and a
@@ -204,9 +229,7 @@ export default function Home() {
                 </p>
               </div>
               <div className="bg-gradient-to-br from-primary-dark/80 to-primary/80 p-8 rounded-3xl backdrop-blur-xl border border-white/20 shadow-3d-card hover:shadow-3d-card-hover transition-all transform hover:-translate-y-2 hover:-rotate-1">
-                <div className="h-16 w-16 bg-white/10 rounded-2xl flex items-center justify-center mb-6 shadow-inner">
-                  <KeyRound size={32} className="text-accent" />
-                </div>
+                <Doorstep3D size={136} delay={5} className="-mt-4 mb-2 -ml-4" />
                 <h3 className="text-2xl font-black mb-3">A code at your door</h3>
                 <p className="text-primary-100 font-medium leading-relaxed">
                   Nothing starts until you say so. Your helper tells you what they will do, and the
@@ -237,7 +260,7 @@ export default function Home() {
                 >
                   <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary to-accent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                   <div className="h-20 w-20 rounded-2xl bg-gradient-to-br from-accent/20 to-accent/5 flex items-center justify-center mb-6 text-accent group-hover:scale-110 transition-transform shadow-inner group-hover:shadow-md">
-                    <Heart size={32} className="group-hover:animate-pulse" />
+                    <Heart size={32} />
                   </div>
                   <h3 className="text-xl font-black text-gray-900">{cat}</h3>
                 </Link>
@@ -343,7 +366,7 @@ export default function Home() {
       {/* 6. Volunteer/social-service callout */}
       <section className="py-32 bg-gradient-to-br from-orange-50 to-orange-100 border-y border-orange-200 relative overflow-hidden">
         <div className="absolute top-0 right-0 p-12 opacity-10 transform translate-x-1/4 -translate-y-1/4">
-          <Heart size={400} className="text-accent animate-pulse-slow" />
+          <Heart size={400} className="text-accent" />
         </div>
         <div className="absolute bottom-0 left-0 p-12 opacity-5 transform -translate-x-1/4 translate-y-1/4">
           <Heart size={300} className="text-accent" />

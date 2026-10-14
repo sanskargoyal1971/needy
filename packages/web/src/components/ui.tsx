@@ -2,6 +2,7 @@
 
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
+import { Float, VerifiedShield3D } from "@/motion/depth";
 
 /** ── Form primitives ───────────────────────────────────────────────────────
  *  The marketing pages spell their Tailwind out inline, which is fine for a page rendered
@@ -149,8 +150,23 @@ export function AuthCard({
 }) {
   return (
     <div className="flex min-h-[calc(100vh-16rem)] items-center justify-center bg-background px-4 py-12 sm:px-6 lg:px-8 relative overflow-hidden">
-      <div className="absolute top-20 -left-20 w-64 h-64 bg-primary-100 rounded-full mix-blend-multiply filter blur-3xl opacity-50 animate-float"></div>
-      <div className="absolute bottom-20 -right-20 w-72 h-72 bg-accent-light/20 rounded-full mix-blend-multiply filter blur-3xl opacity-50 animate-float-delayed"></div>
+      {/* Backdrop only: decorative, and never in the way of the form. */}
+      <Float decorative className="pointer-events-none absolute top-20 -left-20" amplitude={12}>
+        <div className="w-64 h-64 bg-primary-100 rounded-full mix-blend-multiply filter blur-3xl opacity-50" />
+      </Float>
+      <Float
+        decorative
+        className="pointer-events-none absolute bottom-20 -right-20"
+        amplitude={12}
+        delay={5}
+      >
+        <div className="w-72 h-72 bg-accent-light/20 rounded-full mix-blend-multiply filter blur-3xl opacity-50" />
+      </Float>
+      <VerifiedShield3D
+        size={120}
+        interactive={false}
+        className="absolute right-[6%] top-10 hidden opacity-80 lg:block"
+      />
       <div className="w-full max-w-md space-y-6 rounded-3xl border border-white/40 bg-white/60 backdrop-blur-xl p-8 shadow-3d-card relative z-10 transform perspective-1000 transition-all hover:shadow-3d-card-hover hover:-translate-y-1">
         <div className="text-center">
           <h1 className="font-display text-3xl font-black tracking-tight text-gray-900">{title}</h1>
