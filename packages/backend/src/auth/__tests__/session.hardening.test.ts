@@ -43,6 +43,7 @@ describe("session hardening", () => {
     users,
     sessions,
     phoneBlocks: createInMemoryPhoneBlockRepo(),
+    totp: createInMemoryTotpRepo(),
     now: () => clock,
   });
 

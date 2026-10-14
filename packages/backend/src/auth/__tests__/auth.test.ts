@@ -66,7 +66,13 @@ describe("Stage A — auth", () => {
     app.use(express.json());
     app.use(
       createAuthRouter({
-        auth: new AuthService({ users, sessions, phoneBlocks, now }),
+        auth: new AuthService({
+          users,
+          sessions,
+          phoneBlocks,
+          totp: createInMemoryTotpRepo(),
+          now,
+        }),
         otp: new OtpService(
           redis,
           new ConsoleSmsProvider(),

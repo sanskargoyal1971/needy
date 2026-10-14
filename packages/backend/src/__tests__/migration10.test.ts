@@ -54,7 +54,14 @@ describe("migration 10 — staff sessions from before the second factor end", ()
       [farFuture],
     );
 
-    expect(await migrate(pool, silentLog)).toEqual([10]);
+    // Only up to 10: later migrations are not what this test is about.
+    expect(
+      await migrate(
+        pool,
+        silentLog,
+        MIGRATIONS.filter((m) => m.id <= 10),
+      ),
+    ).toEqual([10]);
   });
 
   afterAll(async () => {

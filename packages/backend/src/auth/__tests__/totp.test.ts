@@ -31,6 +31,7 @@ import {
   verifyTotp,
 } from "../totp.js";
 import { makeUser } from "../types.js";
+import { requireAuth, requireStaff } from "../middleware.js";
 
 /** ── Authenticator-app second factor ───────────────────────────────────────
  *  Two halves. The first pins the algorithm to the RFCs' own published vectors, because a
@@ -222,6 +223,7 @@ describe("totp — staff sign-in", () => {
       users,
       sessions: createInMemorySessionRepo(),
       phoneBlocks: createInMemoryPhoneBlockRepo(),
+      totp,
       now,
     });
 
@@ -275,6 +277,10 @@ describe("totp — staff sign-in", () => {
         now,
       }),
     );
+    // Stands in for the admin console: guarded exactly as every admin route is.
+    app.get("/staff-probe", requireAuth, requireStaff(users), (_req, res) => {
+      res.json({ ok: true });
+    });
   });
 
   const rootLogin = (password = GOOD) =>
@@ -286,6 +292,9 @@ describe("totp — staff sign-in", () => {
   /** Present a session's refresh token, as a browser does when its access token runs out. */
   const refreshWith = (cookies: string[]) =>
     request(app).post("/auth/refresh").set("Cookie", cookies).send();
+  /** Reach a staff-only route with whatever access token these cookies carry. */
+  const probeWith = (cookies: string[]) =>
+    request(app).get("/staff-probe").set("Cookie", cookies).send();
 
   /** Walk the super admin through first-time enrolment. Leaves the clock ten minutes on, so
    *  whatever the test does next is in a fresh code window with fresh attempt budgets. */
@@ -666,15 +675,39 @@ describe("totp — staff sign-in", () => {
   it("ends a session the password alone obtained, once the authenticator is enrolled", async () => {
     // Minted directly, the way the old password route did.
     const legacy = await auth.issueFor((await users.getById("u-root"))!, "before the change");
-    expect((await refreshWith([`needy_rt=${legacy.refreshToken}`])).status).toBe(200);
-    const stillLegacy = await auth.issueFor((await users.getById("u-root"))!, "before the change");
 
     const { confirm } = await enrolRoot();
     expect(hasSession(confirm)).toBe(true);
 
-    const res = await refreshWith([`needy_rt=${stillLegacy.refreshToken}`]);
+    const res = await refreshWith([`needy_rt=${legacy.refreshToken}`]);
     expect(res.status).toBe(401);
     expect(res.body.error).toBe("refresh-invalid");
+  });
+
+  /**
+   * Enrolling is not the only way out of that state, and nobody has to enrol. Migration 10
+   * ends such sessions at deploy, but the rule has to hold wherever a session is rotated: a
+   * super admin with no active authenticator is a password-only account, and refresh used to
+   * slide its session forward indefinitely.
+   */
+  it("will not rotate a super admin session while no authenticator is active", async () => {
+    const legacy = await auth.issueFor((await users.getById("u-root"))!, "before the change");
+
+    const res = await refreshWith([`needy_rt=${legacy.refreshToken}`]);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("refresh-invalid");
+    // Cookies cleared, not rotated.
+    expect(cookieHeader(res).sort()).toEqual(["needy_at=", "needy_rt="]);
+
+    // A pending enrolment is not a factor either: the app has not proven it holds the secret.
+    const another = await auth.issueFor((await users.getById("u-root"))!, "before the change");
+    await totp.savePending("u-root", encryptTotpSecret(generateTotpSecret(), "u-root"), clock);
+    expect((await refreshWith([`needy_rt=${another.refreshToken}`])).status).toBe(401);
+  });
+
+  it("still rotates an enrolled super admin's session", async () => {
+    const { confirm } = await enrolRoot();
+    expect((await refreshWith(cookieHeader(confirm))).status).toBe(200);
   });
 
   // ── disabling ──────────────────────────────────────────────────────────────
@@ -705,15 +738,20 @@ describe("totp — staff sign-in", () => {
       expect(audited.map((a) => a.action)).toContain("auth.totp_disabled");
     });
 
-    /** The usual reason to remove an authenticator is a lost phone; a session open on that
-     *  phone must not outlive the factor that protected it. */
-    it("ends every other session, and keeps the one doing the disabling", async () => {
+    /**
+     * A super admin has no other second factor, so the moment theirs is removed every session
+     * on the account is one no second factor stands behind — including the one doing the
+     * removing. Handing that device a fresh session would leave the account single-factor
+     * for as long as it kept refreshing. Everything ends; the next sign-in is enrolment.
+     */
+    it("signs a super admin out everywhere, the device doing it included", async () => {
       const { secret, confirm } = await enrolRoot();
       const elsewhere = await totpLogin({
         pendingToken: (await rootLogin()).body.pendingToken,
         code: codeFor(secret),
       });
       expect(hasSession(elsewhere)).toBe(true);
+      expect((await probeWith(cookieHeader(confirm))).status).toBe(200);
 
       clock += STEP_MS;
       const off = await request(app)
@@ -721,10 +759,17 @@ describe("totp — staff sign-in", () => {
         .set("Cookie", cookieHeader(confirm))
         .send({ code: codeFor(secret) });
       expect(off.status).toBe(200);
-      expect(hasSession(off)).toBe(true);
+      expect(off.body).toEqual({ ok: true, signedOut: true });
+      // Both cookies cleared, none re-issued.
+      expect(cookieHeader(off).sort()).toEqual(["needy_at=", "needy_rt="]);
 
-      expect((await refreshWith(cookieHeader(off))).status).toBe(200);
+      // Neither the access token it held nor the one on the other device opens the console,
+      // although both are well inside their lifetime ...
+      expect((await probeWith(cookieHeader(confirm))).status).toBe(401);
+      expect((await probeWith(cookieHeader(elsewhere))).status).toBe(401);
+      // ... and neither refresh token buys a new one.
       expect((await refreshWith(cookieHeader(elsewhere))).status).toBe(401);
+      expect((await refreshWith(cookieHeader(confirm))).status).toBe(401);
     });
 
     it("refuses without a session at all", async () => {
@@ -879,12 +924,67 @@ describe("totp — staff sign-in", () => {
       expect(viaApp.body.user.role).toBe("admin");
     });
 
+    /**
+     * An admin falls back to the text message, so they keep the device they disabled from.
+     * Every other device loses the console at once — its refresh token AND the access token
+     * it already holds, which used to stay good for up to its fifteen-minute lifetime: long
+     * enough for whoever has the lost phone to read the verification queue.
+     */
+    it("on disabling, keeps this device and shuts every other out at once", async () => {
+      const { secret, confirm } = await enrolAdmin();
+      const first = await adminLogin();
+      const elsewhere = await totpLogin({
+        pendingToken: first.body.pendingToken,
+        code: codeFor(secret),
+      });
+      expect((await probeWith(cookieHeader(elsewhere))).status).toBe(200);
+
+      clock += STEP_MS;
+      const off = await request(app)
+        .post("/auth/totp/disable")
+        .set("Cookie", cookieHeader(confirm))
+        .send({ code: codeFor(secret) });
+      expect(off.status).toBe(200);
+      expect(off.body).toEqual({ ok: true });
+      expect(hasSession(off)).toBe(true);
+
+      expect((await probeWith(cookieHeader(off))).status).toBe(200);
+      expect((await probeWith(cookieHeader(elsewhere))).status).toBe(401);
+      expect((await refreshWith(cookieHeader(off))).status).toBe(200);
+      expect((await refreshWith(cookieHeader(elsewhere))).status).toBe(401);
+    });
+
+    /** Enrolling ends the other devices' sessions too, and their access tokens with them. */
+    it("on enrolling, shuts the other devices' access tokens out as well", async () => {
+      const elsewhere = await adminSession();
+      expect((await probeWith(elsewhere)).status).toBe(200);
+      const { confirm } = await enrolAdmin();
+
+      expect((await probeWith(cookieHeader(confirm))).status).toBe(200);
+      expect((await probeWith(elsewhere)).status).toBe(401);
+    });
+
+    /** A password change already ended the other sessions; it now ends their access too. */
+    it("on a password change, shuts the other devices' access tokens out", async () => {
+      const elsewhere = await adminSession();
+      const here = await adminSession();
+      const changed = await request(app)
+        .post("/auth/me/password")
+        .set("Cookie", here)
+        .send({ currentPassword: GOOD, newPassword: "a different long passphrase" });
+      expect(changed.status).toBe(200);
+
+      expect((await probeWith(cookieHeader(changed))).status).toBe(200);
+      expect((await probeWith(elsewhere)).status).toBe(401);
+    });
+
     it("cannot replace a working authenticator by enrolling again", async () => {
-      const { session } = await enrolAdmin();
+      // The session enrolling issued: the one it started from was ended by it.
+      const { confirm } = await enrolAdmin();
       const before = (await totp.get("u-admin"))?.secretEnc;
       const res = await request(app)
         .post("/auth/totp/enrol/start")
-        .set("Cookie", session)
+        .set("Cookie", cookieHeader(confirm))
         .send({ password: GOOD });
       expect(res.status).toBe(409);
       expect(res.body.error).toBe("totp-already-enabled");

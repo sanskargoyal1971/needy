@@ -590,8 +590,10 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
 
       await deps.auth.setPassword(user.id, newPassword);
       // Every other session was just revoked, so re-issue for the device doing the changing —
-      // otherwise changing your password signs you out of the browser you are holding.
-      const issued = await deps.auth.issueFor(user, ua(req));
+      // otherwise changing your password signs you out of the browser you are holding. From a
+      // fresh read: the change moved the account's session epoch, and a token minted from the
+      // row read above would carry the old one and be refused by the staff guards.
+      const issued = await deps.auth.issueFor((await deps.users.getById(user.id)) ?? user, ua(req));
       setAuthCookies(res, issued.accessToken, issued.refreshToken);
       logger.info("password set by account holder", { userId: user.id });
       res.json({ ok: true, passwordSetAt: deps.now() });
@@ -609,7 +611,8 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
         return;
       }
       await deps.auth.clearPassword(user.id);
-      const issued = await deps.auth.issueFor(user, ua(req));
+      // Fresh read, for the session epoch — as above.
+      const issued = await deps.auth.issueFor((await deps.users.getById(user.id)) ?? user, ua(req));
       setAuthCookies(res, issued.accessToken, issued.refreshToken);
       logger.info("password removed by account holder", { userId: user.id });
       res.json({ ok: true });

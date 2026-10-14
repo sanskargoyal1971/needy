@@ -5,6 +5,7 @@ import { signAccessToken } from "./jwt.js";
 import type { PhoneBlockRepository } from "./phoneBlocks.js";
 import type { SessionRepository, UserRepository } from "./repos.js";
 import { burnVerification, hashPassword, verifyPassword } from "./password.js";
+import type { TotpRepository } from "./totpRepo.js";
 import { makeUser, type User } from "./types.js";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -20,6 +21,10 @@ export interface AuthServiceDeps {
   /** Consulted before find-or-create. A number rejected at review must not be able to open a
    *  fresh account, which is the whole reason rejection is a terminal state. */
   phoneBlocks: PhoneBlockRepository;
+  /** Read on refresh: a super admin's session is only rotated while their authenticator is
+   *  active. Required rather than optional so that leaving it out fails to compile instead of
+   *  quietly rotating password-only sessions. */
+  totp: Pick<TotpRepository, "get">;
   now: () => number;
 }
 
@@ -167,8 +172,20 @@ export class AuthService {
    * `/auth/me/password` does.
    */
   async replaceSessions(user: User, userAgent: string): Promise<IssuedTokens> {
-    await this.deps.sessions.revokeAllForUser(user.id, this.deps.now());
-    return this.issue(user, userAgent);
+    const sessionEpoch = await this.endAllSessions(user.id);
+    return this.issue({ ...user, sessionEpoch }, userAgent);
+  }
+
+  /**
+   * End every session the account has, access tokens included, and issue nothing.
+   *
+   * Revokes the refresh sessions and moves the account to a new session epoch, which is what
+   * makes the staff guards refuse the access tokens already out there (they would otherwise
+   * work until they expired). Returns the new epoch, for a caller that re-issues.
+   */
+  async endAllSessions(userId: string): Promise<number> {
+    await this.deps.sessions.revokeAllForUser(userId, this.deps.now());
+    return this.deps.users.bumpSessionEpoch(userId);
   }
 
   /**
@@ -177,7 +194,8 @@ export class AuthService {
    * Every existing session is revoked. That is the point of changing a password: the common
    * reason to do it is that someone else may have had it, and leaving their session alive
    * would make the change cosmetic. The caller's own session is re-issued by the route so the
-   * person changing it is not signed out of the device they are holding.
+   * person changing it is not signed out of the device they are holding — from a FRESH read of
+   * the user, since the epoch moves here and a token minted under the old one is refused.
    */
   async setPassword(
     userId: string,
@@ -187,16 +205,14 @@ export class AuthService {
     const now = this.deps.now();
     const hash = await hashPassword(password);
     await this.deps.users.setPasswordHash(userId, hash, now, opts.setBy ?? null);
-    if (opts.revokeSessions !== false) {
-      await this.deps.sessions.revokeAllForUser(userId, now);
-    }
+    if (opts.revokeSessions !== false) await this.endAllSessions(userId);
   }
 
   /** Remove a password, leaving the account reachable by one-time code only. */
   async clearPassword(userId: string): Promise<void> {
     const now = this.deps.now();
     await this.deps.users.setPasswordHash(userId, null, now, null);
-    await this.deps.sessions.revokeAllForUser(userId, now);
+    await this.endAllSessions(userId);
   }
 
   async refresh(refreshToken: string, userAgent: string): Promise<IssuedTokens | null> {
@@ -211,7 +227,7 @@ export class AuthService {
       // holding the *current* token — so every session for the account ends and the real
       // owner signs in again.
       if (now - session.revokedAt > REFRESH_REUSE_GRACE_MS) {
-        await this.deps.sessions.revokeAllForUser(session.userId, now);
+        await this.endAllSessions(session.userId);
       }
       return null;
     }
@@ -221,6 +237,16 @@ export class AuthService {
     // A blocked account does not get a new access token. Blocking already revokes sessions;
     // this is the same rule stated where the token is minted.
     if (!user || user.blockedAt != null) return null;
+
+    // A super admin's only second factor is the authenticator, so a super admin without an
+    // active one holds a session no second factor stands behind — one minted on the password
+    // alone before the factor existed, say. Rotation used to slide such a session forward for
+    // ever; it ends here instead, and the next sign-in goes through enrolment. A `pending`
+    // credential does not count: the app has not yet proven it holds the secret.
+    if (user.role === "super_admin" && (await this.deps.totp.get(user.id))?.status !== "active") {
+      await this.deps.sessions.revoke(session.id, now);
+      return null;
+    }
 
     // Rotate. Only the call that actually flips the row may issue — two concurrent refreshes
     // used to both read "not revoked" and both walk away with a live session.
@@ -251,6 +277,7 @@ export class AuthService {
       role: user.role,
       displayName: user.displayName,
       kyc: user.kycStatus,
+      epoch: user.sessionEpoch,
     });
     return { accessToken, refreshToken, user };
   }

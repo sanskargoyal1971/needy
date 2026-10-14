@@ -6,9 +6,14 @@ import { asyncRoute } from "../http/asyncRoute.js";
 import { logger } from "../logger.js";
 import type { RedisClient } from "../redis.js";
 import { consumeToken, type RateLimit } from "../services/ratelimit.js";
-import { setAuthCookies } from "./cookies.js";
+import { clearAuthCookies, setAuthCookies } from "./cookies.js";
 import { issueCsrfToken } from "./csrf.js";
-import { readAccessClaims, requireAuth, type AuthedRequest } from "./middleware.js";
+import {
+  accessTokenIsCurrent,
+  readAccessClaims,
+  requireAuth,
+  type AuthedRequest,
+} from "./middleware.js";
 import { verifyPassword } from "./password.js";
 import type { UserRepository } from "./repos.js";
 import type { AuthService } from "./service.js";
@@ -196,6 +201,7 @@ export function createTotpRouter(
     const { pendingToken } = req.body as { pendingToken?: string };
     let userId: string;
     let pendingKey: string | null = null;
+    let epoch: number | null = null;
     if (pendingToken) {
       const pending = await readPending(pendingToken, "enrol");
       if (!pending) {
@@ -211,13 +217,21 @@ export function createTotpRouter(
         return null;
       }
       userId = claims.sub;
+      epoch = claims.epoch ?? 0;
     }
 
     // Role and block state from the DATABASE, as `requireStaff` does and for its reason: a
     // token says what someone was when it was minted, and a demoted or deactivated operator
     // must not be able to attach a fresh credential to the account on the way out.
     const user = await deps.users.getById(userId);
-    if (!user || user.blockedAt != null) {
+    // An access token from before the account's sessions were ended is refused here as by
+    // `requireStaff`: attaching a credential is a staff action, and the device whose session
+    // just ended — a lost phone — must not be able to take it on the way out.
+    if (
+      !user ||
+      user.blockedAt != null ||
+      (epoch != null && !accessTokenIsCurrent({ epoch }, user))
+    ) {
       res.status(401).json({ error: "unauthorized" });
       return null;
     }
@@ -445,7 +459,7 @@ export function createTotpRouter(
     asyncRoute(async (req: AuthedRequest, res) => {
       const { code } = req.body as { code: string };
       const user = await deps.users.getById(req.user!.sub);
-      if (!user || user.blockedAt != null) {
+      if (!user || user.blockedAt != null || !accessTokenIsCurrent(req.user!, user)) {
         res.status(401).json({ error: "unauthorized" });
         return;
       }
@@ -474,14 +488,27 @@ export function createTotpRouter(
         ip: clientIp(req),
       });
       logger.info("authenticator disabled", { userId: user.id });
-      // Every other session ends with the factor that protected it, as a password change ends
+
+      if (user.role === "super_admin") {
+        // A super admin has no other second factor. With this one gone, ANY session on the
+        // account — the disabling device's included — is one no second factor stands behind,
+        // and re-issuing it would leave the account single-factor for as long as it kept
+        // refreshing. So nothing is re-issued: every session and access token ends, and the
+        // next sign-in stops at enrolment before any session exists. This is also the way to
+        // REPLACE a super admin's authenticator: disable with the old one, sign in, enrol.
+        await deps.auth.endAllSessions(user.id);
+        clearAuthCookies(res);
+        res.json({ ok: true, signedOut: true });
+        return;
+      }
+
+      // An admin falls back to the text-message code, so they are still two-factor. Every
+      // other session ends with the factor that protected it, as a password change ends
       // them: the usual reason to remove an authenticator is that the phone is gone, and a
       // session open on that phone must not survive it. The device doing the disabling keeps
       // a fresh one.
       const issued = await deps.auth.replaceSessions(user, ua(req));
       setAuthCookies(res, issued.accessToken, issued.refreshToken);
-      // For a super admin this does NOT fall back to a password alone: with no authenticator
-      // on the account, the next sign-in stops at enrolment before any session exists.
       res.json({ ok: true });
     }),
   );

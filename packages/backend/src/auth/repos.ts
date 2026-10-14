@@ -36,6 +36,16 @@ export interface UserRepository {
     at: number,
     setBy?: string | null,
   ): Promise<void>;
+
+  /**
+   * Move the account to a new session epoch and return it, so every access token minted
+   * before now is refused by the staff guards (see `User.sessionEpoch`).
+   *
+   * Its own method, not a field `update()` writes: `update()` rewrites the row from a snapshot
+   * read earlier, and a snapshot taken before a bump must not be able to roll it back and
+   * revive the tokens it ended.
+   */
+  bumpSessionEpoch(userId: string): Promise<number>;
 }
 
 export interface SessionRepository {
@@ -99,10 +109,23 @@ export function createInMemoryUserRepo(): InMemoryUserRepository {
         updatedAt: at,
       });
     },
+    async bumpSessionEpoch(userId) {
+      const user = byId.get(userId);
+      if (!user) throw new Error(`user not found: ${userId}`);
+      const sessionEpoch = user.sessionEpoch + 1;
+      byId.set(userId, { ...user, sessionEpoch });
+      return sessionEpoch;
+    },
     async update(id, patch) {
       const existing = byId.get(id);
       if (!existing) throw new Error(`user not found: ${id}`);
-      const next = { ...existing, ...patch, id: existing.id };
+      // The epoch is kept from the stored row, as the Postgres twin's UPDATE never writes it.
+      const next = {
+        ...existing,
+        ...patch,
+        id: existing.id,
+        sessionEpoch: existing.sessionEpoch,
+      };
       byId.set(id, next);
       byPhone.set(next.phone, id);
       return next;
@@ -163,6 +186,7 @@ interface UserRow {
   password_set_at: number | string | null;
   password_set_by: string | null;
   username: string | null;
+  session_epoch: number | string;
 }
 
 const numOrNull = (v: number | string | null | undefined): number | null =>
@@ -211,6 +235,7 @@ function rowToUser(r: UserRow): User {
     passwordSetAt: numOrNull(r.password_set_at),
     passwordSetBy: r.password_set_by ?? null,
     username: r.username ?? null,
+    sessionEpoch: Number(r.session_epoch),
   };
 }
 
@@ -266,7 +291,13 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
     async update(id, patch) {
       const existing = await this.getById(id);
       if (!existing) throw new Error(`user not found: ${id}`);
-      const next: User = { ...existing, ...patch, id: existing.id };
+      // `session_epoch` is not in the SET list below; the returned row must not claim otherwise.
+      const next: User = {
+        ...existing,
+        ...patch,
+        id: existing.id,
+        sessionEpoch: existing.sessionEpoch,
+      };
       await pool.query(
         `UPDATE users SET phone=$2, email=$3, display_name=$4, role=$5, kyc_status=$6, updated_at=$7,
                           onboarding_status=$8, date_of_birth=$9, gender=$10, area_label=$11,
@@ -323,6 +354,16 @@ export function createPgUserRepo(pool: DbPool): UserRepository {
         [userId, hash, at, setBy],
       );
       if (rowCount === 0) throw new Error(`user not found: ${userId}`);
+    },
+    async bumpSessionEpoch(userId) {
+      // Incremented in the database, not read-then-written here, so two bumps racing each
+      // other both land and neither can hand back an epoch the other already passed.
+      const { rows } = await pool.query<{ session_epoch: number | string }>(
+        `UPDATE users SET session_epoch = session_epoch + 1 WHERE id = $1 RETURNING session_epoch`,
+        [userId],
+      );
+      if (!rows[0]) throw new Error(`user not found: ${userId}`);
+      return Number(rows[0].session_epoch);
     },
   };
 }

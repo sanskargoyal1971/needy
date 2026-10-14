@@ -558,6 +558,23 @@ export const MIGRATIONS: readonly Migration[] = [
           AND user_id IN (SELECT id FROM users WHERE role IN ('admin','super_admin'))`,
     ],
   },
+  {
+    id: 11,
+    name: "users-session-epoch",
+    statements: [
+      // ── end the access tokens, not only the sessions ────────────────────────────────────
+      //
+      // Revoking an account's sessions stops their refresh tokens, but an access token is
+      // checked by its signature alone and kept working for the rest of its lifetime. So a
+      // member of staff who switched off an authenticator because the phone was stolen left
+      // that phone on the console for up to fifteen minutes. Every access token now carries
+      // the epoch it was minted under, and the staff guards refuse one older than this.
+      //
+      // Starts at 0, which is also what a token minted before this deploy is read as carrying,
+      // so nobody is signed out by the deploy itself.
+      `ALTER TABLE users ADD COLUMN IF NOT EXISTS session_epoch INTEGER NOT NULL DEFAULT 0`,
+    ],
+  },
 ];
 
 /** Single-quote a string for inline SQL.

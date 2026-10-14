@@ -91,6 +91,19 @@ export interface User {
    * case-insensitively; the unique index is on `lower(username)`.
    */
   username: string | null;
+
+  // ── session epoch (migration 11) ──────────────────────────────────────────
+  /**
+   * Bumped whenever every session on the account is ended for cause — a second factor added
+   * or removed, a password changed, a refresh token replayed. Each access token carries the
+   * epoch it was minted under, and the staff guards refuse one that is behind.
+   *
+   * Revoking the refresh sessions alone is not enough: an access token is checked by
+   * signature only, so a device that had just lost its session kept the console for the rest
+   * of the token's lifetime (fifteen minutes by default). A counter rather than a timestamp so
+   * that the token issued in the same millisecond as the bump is unambiguously on the new side.
+   */
+  sessionEpoch: number;
 }
 
 /**
@@ -129,6 +142,7 @@ export function makeUser(seed: Pick<User, "id" | "phone"> & Partial<User>): User
     passwordSetAt: null,
     passwordSetBy: null,
     username: null,
+    sessionEpoch: 0,
     ...seed,
   };
 }

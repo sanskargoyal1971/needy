@@ -80,4 +80,22 @@ describe("postgres auth repositories", () => {
     await sessions.revokeAllForUser("u1", 1_700_000_070_000);
     expect((await sessions.getByHash("hash-def"))?.revokedAt).toBe(1_700_000_070_000);
   });
+
+  /** The staff guards refuse an access token minted under an older epoch, so a bump that a
+   *  stale `update()` snapshot could undo would revive every token it was meant to end. */
+  it("moves the session epoch forward, and a stale snapshot cannot move it back", async () => {
+    const before = (await users.getById("u1"))!;
+    expect(before.sessionEpoch).toBe(0);
+
+    expect(await users.bumpSessionEpoch("u1")).toBe(1);
+    expect(await users.bumpSessionEpoch("u1")).toBe(2);
+
+    // Written from the snapshot read before either bump.
+    const written = await users.update("u1", { ...before, displayName: "Renamed" });
+    expect(written.sessionEpoch).toBe(2);
+    expect((await users.getById("u1"))?.sessionEpoch).toBe(2);
+    expect((await users.getById("u1"))?.displayName).toBe("Renamed");
+
+    await expect(users.bumpSessionEpoch("nobody")).rejects.toThrow();
+  });
 });

@@ -12,6 +12,7 @@ import {
 import { createInMemorySessionRepo, createInMemoryUserRepo } from "../../auth/repos.js";
 import type { UserRepository } from "../../auth/repos.js";
 import { AuthService, PhoneBlockedError } from "../../auth/service.js";
+import { createInMemoryTotpRepo } from "../../auth/totpRepo.js";
 import { makeUser } from "../../auth/types.js";
 import { createLoggingAuditLogger } from "../../audit/log.js";
 import { LocalDiskStorage } from "../../services/storage.js";
@@ -348,7 +349,13 @@ describe("phone blocklist", () => {
   it("refuses login for a blocked number, whether or not an account exists", async () => {
     const users = createInMemoryUserRepo();
     const sessions = createInMemorySessionRepo();
-    const auth = new AuthService({ users, sessions, phoneBlocks: blocks, now: () => NOW });
+    const auth = new AuthService({
+      users,
+      sessions,
+      phoneBlocks: blocks,
+      totp: createInMemoryTotpRepo(),
+      now: () => NOW,
+    });
 
     // An existing, previously fine account.
     await users.create(

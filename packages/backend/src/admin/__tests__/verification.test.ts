@@ -14,6 +14,7 @@ import {
   type SessionRepository,
 } from "../../auth/repos.js";
 import { AuthService, PhoneBlockedError } from "../../auth/service.js";
+import { createInMemoryTotpRepo } from "../../auth/totpRepo.js";
 import { makeUser } from "../../auth/types.js";
 import { createLoggingAuditLogger, type AuditEntry } from "../../audit/log.js";
 import {
@@ -115,7 +116,13 @@ describe("admin verification surface", () => {
         services,
         storage,
         audit,
-        auth: new AuthService({ users, sessions, phoneBlocks, now: () => NOW }),
+        auth: new AuthService({
+          users,
+          sessions,
+          phoneBlocks,
+          totp: createInMemoryTotpRepo(),
+          now: () => NOW,
+        }),
         pool: null,
         now: () => NOW,
       }),
@@ -317,7 +324,13 @@ describe("admin verification surface", () => {
           storage,
           audit: createLoggingAuditLogger(),
 
-          auth: new AuthService({ users, sessions, phoneBlocks, now: () => NOW }),
+          auth: new AuthService({
+            users,
+            sessions,
+            phoneBlocks,
+            totp: createInMemoryTotpRepo(),
+            now: () => NOW,
+          }),
           pool: null,
           now: () => NOW,
         }),
@@ -333,7 +346,13 @@ describe("admin verification surface", () => {
   describe("reject", () => {
     it("blocks the phone and revokes every session, not just the status", async () => {
       await seedApplicant("u1", "+919000000001");
-      const auth = new AuthService({ users, sessions, phoneBlocks, now: () => NOW });
+      const auth = new AuthService({
+        users,
+        sessions,
+        phoneBlocks,
+        totp: createInMemoryTotpRepo(),
+        now: () => NOW,
+      });
       const issued = await auth.loginWithPhone("+919000000001", "vitest");
 
       const res = await asAdmin(
@@ -406,7 +425,13 @@ describe("admin verification surface", () => {
   describe("block and unblock", () => {
     it("blocks an account, optionally its phone, and kills its sessions", async () => {
       await seedApplicant("u1", "+919000000001");
-      const auth = new AuthService({ users, sessions, phoneBlocks, now: () => NOW });
+      const auth = new AuthService({
+        users,
+        sessions,
+        phoneBlocks,
+        totp: createInMemoryTotpRepo(),
+        now: () => NOW,
+      });
       const issued = await auth.loginWithPhone("+919000000001", "vitest");
 
       const res = await asAdmin(
@@ -509,7 +534,13 @@ describe("admin verification surface", () => {
           storage,
           audit: createLoggingAuditLogger(),
 
-          auth: new AuthService({ users, sessions, phoneBlocks, now: () => NOW }),
+          auth: new AuthService({
+            users,
+            sessions,
+            phoneBlocks,
+            totp: createInMemoryTotpRepo(),
+            now: () => NOW,
+          }),
           pool: null,
           now: () => NOW + 60 * 60 * 1000,
         }),

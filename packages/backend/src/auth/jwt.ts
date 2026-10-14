@@ -10,6 +10,9 @@ export interface AuthClaims {
   role: Role;
   displayName: string;
   kyc?: KycStatus;
+  /** The account's `sessionEpoch` when this token was minted. Absent on tokens from before
+   *  the field existed, which read as 0 — the epoch every account started at. */
+  epoch?: number;
 }
 
 /** Pinned on both sides. `jsonwebtoken` would otherwise accept any HMAC variant the token's
@@ -42,13 +45,14 @@ export function verifyAccessToken(token: string): AuthClaims | null {
   try {
     const decoded = verifyWithKnownKeys(token);
     if (decoded === null || typeof decoded === "string") return null;
-    const { sub, role, displayName, kyc } = decoded as jwt.JwtPayload & Partial<AuthClaims>;
+    const { sub, role, displayName, kyc, epoch } = decoded as jwt.JwtPayload & Partial<AuthClaims>;
     if (typeof sub !== "string" || !isRole(role)) return null;
     return {
       sub,
       role,
       displayName: displayName ?? "Someone",
       kyc: (kyc as KycStatus | undefined) ?? undefined,
+      epoch: Number.isInteger(epoch) ? epoch : 0,
     };
   } catch {
     return null;

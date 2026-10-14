@@ -210,6 +210,7 @@ async function main(): Promise<void> {
     users: userRepo,
     sessions: sessionRepo,
     phoneBlocks: phoneBlockRepo,
+    totp: totpRepo,
     now,
   });
   // Refuses to construct in production unless S3 is configured — see createStorageProvider.

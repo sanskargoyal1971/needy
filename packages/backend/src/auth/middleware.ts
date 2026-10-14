@@ -65,6 +65,21 @@ export function requireRole(required: Role) {
 }
 
 /**
+ * Was this access token minted under the account's current session epoch?
+ *
+ * False once every session on the account has been ended for cause (a second factor added or
+ * removed, a password changed): the refresh sessions are revoked at that moment, and this is
+ * what makes the access tokens they had already handed out stop too, instead of running out
+ * their lifetime. Only usable where the user row has been loaded anyway.
+ */
+export function accessTokenIsCurrent(
+  claims: Pick<AuthClaims, "epoch">,
+  user: { sessionEpoch: number },
+): boolean {
+  return (claims.epoch ?? 0) === user.sessionEpoch;
+}
+
+/**
  * Require a member of staff, decided by the DATABASE.
  *
  * `requireRole` reads the role out of the access token, which stays valid for its whole
@@ -74,11 +89,18 @@ export function requireRole(required: Role) {
  * authority is the one thing that must be withdrawn the moment someone withdraws it, so it is
  * read from the row each time. One primary-key lookup per admin request.
  *
- * Chain AFTER `requireAuth`. Fails closed: no account, a blocked account, or a role below
- * `required` are all refused.
+ * The same lookup also checks the token's session epoch, so a device whose session was ended
+ * — the lost phone someone just removed as their authenticator — loses the console at once.
+ *
+ * Chain AFTER `requireAuth`. Fails closed: no account, a blocked account, a token from before
+ * the account's sessions were ended, or a role below `required` are all refused.
  */
 export function requireStaff(
-  users: { getById(id: string): Promise<{ role: Role; blockedAt: number | null } | null> },
+  users: {
+    getById(
+      id: string,
+    ): Promise<{ role: Role; blockedAt: number | null; sessionEpoch: number } | null>;
+  },
   required: "admin" | "super_admin" = "admin",
 ): RequestHandler {
   return (req, res, next) => {
@@ -97,6 +119,12 @@ export function requireStaff(
         const isStaff = user.role === "admin" || user.role === "super_admin";
         if (!isStaff || !satisfiesRole(user.role, required)) {
           res.status(403).json({ error: "forbidden", required });
+          return;
+        }
+        // 401, not 403: the token is stale, and the client's answer to that is to refresh —
+        // which fails too if the session was ended, and lands them at sign-in.
+        if (!accessTokenIsCurrent(claims, user)) {
+          res.status(401).json({ error: "unauthorized" });
           return;
         }
         // Downstream handlers read the role from here; make it the current one.

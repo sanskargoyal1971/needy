@@ -51,7 +51,7 @@ describe("password sign-in", () => {
     const phoneBlocks = createInMemoryPhoneBlockRepo();
     abuse = createInMemoryAbuseRepo();
     const now = () => NOW;
-    auth = new AuthService({ users, sessions, phoneBlocks, now });
+    auth = new AuthService({ users, sessions, phoneBlocks, totp: createInMemoryTotpRepo(), now });
 
     await users.create(
       makeUser({
