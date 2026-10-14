@@ -109,7 +109,7 @@ jobs:
       - run: npm run test:prod-gate --workspace @needy/backend
 
   web:
-    name: Web tests
+    name: Web tests and served-CSP check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,6 +120,15 @@ jobs:
       - run: npm ci
       - run: npm run build:shared
       - run: npm run test --workspace @needy/web
+      # The unit tests pin the CSP header the proxy writes; only the built output can show that
+      # Next stamped the same nonce on its own scripts. Without that the build is green and
+      # every page is blank in a browser, so the production build is served and checked here.
+      # The API origin is a placeholder: it is inlined into the bundle and never called.
+      - run: npm run build --workspace @needy/web
+        env:
+          NEXT_PUBLIC_API_URL: https://api.example.test
+          NEXT_TELEMETRY_DISABLED: "1"
+      - run: npm run check:csp --workspace @needy/web
 
   # ── Prove the images build. Not pushed anywhere; this only guards against a Dockerfile
   #    that rots because nobody builds it until a deploy is urgent.

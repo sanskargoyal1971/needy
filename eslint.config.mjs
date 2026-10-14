@@ -1,6 +1,7 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import globals from "globals";
+import reactHooks from "eslint-plugin-react-hooks";
 
 /** ── Lint policy ───────────────────────────────────────────────────────────
  *  Flat config, one file for the whole workspace. The rule set is deliberately small: the
@@ -44,7 +45,7 @@ export default tseslint.config(
   // Manual dev tooling: plain Node ESM scripts run by hand against a local stack. Same reason
   // as the config files above — without Node globals, `process` and `fetch` read as undefined.
   {
-    files: ["scripts/**/*.mjs"],
+    files: ["scripts/**/*.mjs", "packages/*/scripts/**/*.mjs"],
     languageOptions: { globals: { ...globals.node, ...globals.es2022 } },
   },
 
@@ -111,6 +112,30 @@ export default tseslint.config(
       "@typescript-eslint/no-explicit-any": "warn",
       eqeqeq: ["error", "always", { null: "ignore" }],
       "no-console": ["warn", { allow: ["warn", "error"] }],
+    },
+  },
+
+  // ── Web: the hook rules. Nothing else checks them — Next 16 removed `next lint`, and the
+  //    `.eslintrc.json` that used to name `next/core-web-vitals` was never read by ESLint 9
+  //    anyway, so the move to React 19 happened with no hook linting at all.
+  //
+  //    `rules-of-hooks` is an error because a conditional hook is a bug every time: React
+  //    matches hooks to state by call order, so one skipped call hands every later hook the
+  //    wrong state. The tree is clean against it today, and this keeps it that way.
+  //
+  //    Everything else in the plugin's recommended set is a WARNING, on purpose. Those are the
+  //    React Compiler rules (set-state-in-effect, refs, purity, …). They report real patterns
+  //    in the existing components, but fixing them is a refactor of those components, not a
+  //    lint change, and as errors they would turn CI red for code that works. Warnings keep
+  //    them visible in every lint run; promote each to "error" as its findings are cleared.
+  {
+    files: ["packages/web/src/**/*.{ts,tsx}"],
+    plugins: { "react-hooks": reactHooks },
+    rules: {
+      ...Object.fromEntries(
+        Object.keys(reactHooks.configs.flat.recommended.rules).map((rule) => [rule, "warn"]),
+      ),
+      "react-hooks/rules-of-hooks": "error",
     },
   },
 
