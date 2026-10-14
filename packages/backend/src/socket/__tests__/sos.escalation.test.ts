@@ -29,7 +29,9 @@ import { keys } from "../../domain/keys.js";
 import {
   assertSosEscalationReachable,
   escalationMessage,
+  isEscalationTooLate,
   nextEscalationDue,
+  participantSosView,
   scheduleSosEscalation,
   TOP_TIER_REPEATS,
 } from "../../domain/sosEscalation.js";
@@ -85,6 +87,7 @@ const ESC_CONFIG = {
     escalateAfterSeconds: 60,
     escalationStepsSeconds: [120, 300],
     oncallTiers: [TIER1, TIER2],
+    maxLatenessSeconds: 3600,
     consoleOrigin: "https://console.needy.test",
   },
 } as Config;
@@ -104,6 +107,29 @@ function recordingAudit(): AuditLogger & { entries: AuditEntry[] } {
       entries.push(entry);
     },
   };
+}
+
+function recordingLogger(): Logger & { errors: { msg: string; meta?: Record<string, unknown> }[] } {
+  const errors: { msg: string; meta?: Record<string, unknown> }[] = [];
+  return { ...silentLogger, errors, error: (msg, meta) => void errors.push({ msg, meta }) };
+}
+
+/** The same client with its NEXT `zadd` rejected, as a Redis that dropped the connection would.
+ *  Everything else — the claim script included — goes through untouched. */
+function zaddFailsOnce(client: RedisClient): RedisClient {
+  let failed = false;
+  return new Proxy(client, {
+    get(target, prop) {
+      if (prop === "zadd" && !failed) {
+        return async () => {
+          failed = true;
+          throw new Error("Connection is closed.");
+        };
+      }
+      const v = Reflect.get(target, prop, target) as unknown;
+      return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    },
+  });
 }
 
 /** Records what would have gone out. `failFor` makes a number's carrier refuse it. */
@@ -406,6 +432,108 @@ describe("SOS escalation sweep", () => {
     }
   });
 
+  it("still pages and audits the tier when the re-arm fails after the step is recorded", async () => {
+    const sms = recordingSms();
+    const logger = recordingLogger();
+    await raiseAt("a-rearm", T0);
+    // The step's compare-and-set commits to the row, then the re-arm ZADD fails. That throw used
+    // to escape before the SMS and the audit row: the row said "tier 1 paged" and nobody was.
+    const flaky = { ...redis, client: zaddFailsOnce(redis.client) } as RedisClients;
+    const sweep = createSosEscalationSweep(depsWith({ redis: flaky, logger }), { sms });
+    clock = T0 + 60_000;
+    await sweep.sweepOnce();
+
+    expect(sms.sent.map((s) => s.phone).sort()).toEqual([...TIER1].sort());
+    const rows = audit.entries.filter((e) => e.action === "sos.escalated");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.metadata).toMatchObject({ step: 1, tier: 1, delivered: 2 });
+    expect(logger.errors.some((e) => e.msg.includes("could not be re-armed"))).toBe(true);
+    expect(logger.errors.some((e) => e.msg === "sos escalation failed")).toBe(false);
+
+    // The schedule entry was lost; reconcile puts it back from the row, and tier 2 follows on
+    // time rather than being skipped.
+    expect(await scheduled("a-rearm")).toBeNull();
+    await sweep.reconcile();
+    expect(Number(await scheduled("a-rearm"))).toBe(T0 + 60_000 + 120_000);
+    clock = T0 + 60_000 + 120_000;
+    await sweep.sweepOnce();
+    expect(sms.sent.slice(2).map((s) => s.phone)).toEqual(TIER2);
+  });
+
+  it("re-arms a lost raised alarm behind more than a page of acknowledged ones", async () => {
+    // 501 acknowledged-but-unresolved alerts, all older than the one raised alarm. Reconcile
+    // used to read the console's open queue (raised AND acknowledged, oldest first, 500 rows),
+    // so the newest raised alarm never made the cut.
+    for (let i = 0; i < 501; i++) {
+      await sos.create(
+        makeSosAlert({
+          id: `a-acked-backlog-${i}`,
+          taskId: "task-backlog",
+          raisedBy: "req-esc",
+          kind: "other",
+          status: "acknowledged",
+          createdAt: T0 - 10_000 + i,
+          updatedAt: T0,
+        }),
+      );
+    }
+    await raiseAt("a-behind-backlog", T0);
+    await redis.client.del(keys.sosEscalationQueue());
+
+    const sweep = createSosEscalationSweep(depsWith(), { sms: recordingSms() });
+    await sweep.reconcile();
+    expect(Number(await scheduled("a-behind-backlog"))).toBe(T0 + 60_000);
+    expect(await redis.client.zcard(keys.sosEscalationQueue())).toBe(1);
+  });
+
+  it("pages through every raised alert on reconcile, not only the first page", async () => {
+    for (let i = 0; i < 5; i++) await raiseAt(`a-paged-${i}`, T0 + i);
+    // Same created_at for two of them, so the keyset tiebreak on id is exercised too.
+    await raiseAt("a-paged-tie", T0 + 2);
+    await redis.client.del(keys.sosEscalationQueue());
+
+    const sweep = createSosEscalationSweep(depsWith(), {
+      sms: recordingSms(),
+      reconcilePageSize: 2,
+    });
+    await sweep.reconcile();
+    expect(await redis.client.zcard(keys.sosEscalationQueue())).toBe(6);
+    expect(Number(await scheduled("a-paged-tie"))).toBe(T0 + 2 + 60_000);
+  });
+
+  it("does not page about an alarm whose page fell due long ago, and logs it instead", async () => {
+    const sms = recordingSms();
+    const logger = recordingLogger();
+    const sweep = createSosEscalationSweep(depsWith({ logger }), { sms });
+    // Left `raised` from before escalation existed, or raised just before a long outage: its
+    // first page fell due more than the cap ago.
+    await raiseAt("a-too-late", T0);
+    clock = T0 + 60_000 + 3600_000 + 1;
+    await sweep.sweepOnce();
+
+    expect(sms.sent).toHaveLength(0);
+    expect(audit.entries).toHaveLength(0);
+    expect((await sos.get("a-too-late"))!.escalationStep).toBe(0);
+    expect(logger.errors.some((e) => e.meta?.alertId === "a-too-late")).toBe(true);
+    // Not put back by reconcile either, but named in its error line every pass.
+    await sweep.reconcile();
+    expect(await scheduled("a-too-late")).toBeNull();
+    const line = logger.errors.find(
+      (e) => e.msg.includes("too late to page on-call") && e.meta?.count,
+    );
+    expect(line?.meta).toMatchObject({ count: 1, alertIds: ["a-too-late"] });
+  });
+
+  it("still pages an alarm raised during a short outage", async () => {
+    const sms = recordingSms();
+    const sweep = createSosEscalationSweep(depsWith(), { sms });
+    await raiseAt("a-outage", T0);
+    // Twenty minutes late: the sweep was down for a deploy. Well inside the cap.
+    clock = T0 + 60_000 + 20 * 60_000;
+    await sweep.sweepOnce();
+    expect(sms.sent.map((s) => s.phone).sort()).toEqual([...TIER1].sort());
+  });
+
   it("does nothing in development when there is no on-call list (production refuses to boot)", async () => {
     const sms = recordingSms();
     const empty = { ...ESC_CONFIG, sos: { ...ESC_CONFIG.sos, oncallTiers: [] } } as Config;
@@ -453,6 +581,78 @@ describe("SOS escalation rules", () => {
         log,
       ),
     ).not.toThrow();
+  });
+
+  it("refuses a production console link that is plain http or points at localhost", () => {
+    const withOrigin = (consoleOrigin: string) => ({ ...ESC_CONFIG.sos, consoleOrigin });
+    const prod = { isProduction: true, smsProvider: "twilio" };
+    // What webOrigin() falls back to with PUBLIC_WEB_ORIGIN and CORS_ORIGIN unset.
+    expect(() =>
+      assertSosEscalationReachable(withOrigin("http://localhost:3000"), prod, silentLogger),
+    ).toThrow(/https/);
+    expect(() =>
+      assertSosEscalationReachable(withOrigin("http://app.needy.test"), prod, silentLogger),
+    ).toThrow(/https/);
+    for (const local of [
+      "https://localhost:3000",
+      "https://127.0.0.1",
+      "https://[::1]:3000",
+      "https://web.localhost",
+      "https://0.0.0.0",
+    ]) {
+      expect(() => assertSosEscalationReachable(withOrigin(local), prod, silentLogger)).toThrow(
+        /localhost/,
+      );
+    }
+    expect(() =>
+      assertSosEscalationReachable(withOrigin("https://app.needy.test"), prod, silentLogger),
+    ).not.toThrow();
+    // Development keeps the laptop default.
+    expect(() =>
+      assertSosEscalationReachable(
+        withOrigin("http://localhost:3000"),
+        { isProduction: false, smsProvider: "twilio" },
+        silentLogger,
+      ),
+    ).not.toThrow();
+  });
+
+  it("measures lateness from when the page fell due, so a running ladder is never cut short", () => {
+    const cfg = ESC_CONFIG.sos;
+    expect(isEscalationTooLate(T0, T0 + 3600_000, cfg)).toBe(false);
+    expect(isEscalationTooLate(T0, T0 + 3600_000 + 1, cfg)).toBe(true);
+    // A ladder whose steps are longer than the cap still runs: each page is on time.
+    const slow = { ...cfg, escalationStepsSeconds: [7200] };
+    const alert = makeSosAlert({
+      id: "x",
+      taskId: "t",
+      raisedBy: "u",
+      kind: "panic",
+      createdAt: T0,
+      escalationStep: 1,
+      escalationTier: 1,
+      escalatedAt: T0 + 60_000,
+    });
+    const due = nextEscalationDue(alert, slow)!;
+    expect(isEscalationTooLate(due, due + 1_000, slow)).toBe(false);
+  });
+
+  it("hides the escalation state from the participant view and nothing else", () => {
+    const alert = makeSosAlert({
+      id: "x",
+      taskId: "t",
+      raisedBy: "u",
+      kind: "panic",
+      createdAt: T0,
+      acknowledgedBy: "op",
+      escalationStep: 3,
+      escalationTier: 2,
+      escalatedAt: T0 + 1,
+    });
+    const view = participantSosView(alert);
+    expect(view).toEqual({ ...alert, escalationStep: 0, escalationTier: 0, escalatedAt: null });
+    // The operator's copy is untouched.
+    expect(alert.escalationStep).toBe(3);
   });
 
   it("says out loud that the console provider delivers nothing", () => {
@@ -553,6 +753,45 @@ describe("SOS escalation against Postgres", () => {
     expect(await repo.recordEscalation("pg-a", 1, 2, T0 + 2)).toBeNull();
   });
 
+  it("lists only raised alerts still owed a page, keyset-paged oldest first", async () => {
+    const repo = createPgSosRepo(pool);
+    const at = 1_000;
+    const mk = (id: string, createdAt: number, extra: Partial<SosAlert> = {}) =>
+      repo.create(
+        makeSosAlert({
+          id,
+          taskId: "esc-task",
+          raisedBy: "esc-req",
+          kind: "panic",
+          createdAt,
+          updatedAt: createdAt,
+          ...extra,
+        }),
+      );
+    await mk("ls-acked", at, { status: "acknowledged" });
+    await mk("ls-1", at + 1);
+    await mk("ls-2b", at + 2);
+    await mk("ls-2a", at + 2);
+    await mk("ls-exhausted", at + 3, { escalationStep: 5, escalationTier: 2, escalatedAt: at });
+    await mk("ls-4", at + 4, { escalationStep: 1, escalationTier: 1, escalatedAt: at });
+
+    const seen: string[] = [];
+    let after: { createdAt: number; id: string } | null = null;
+    for (;;) {
+      const page = await repo.listEscalatable({ belowStep: 5, after, limit: 2 });
+      seen.push(...page.map((a) => a.id));
+      if (page.length < 2) break;
+      after = { createdAt: page.at(-1)!.createdAt, id: page.at(-1)!.id };
+    }
+    // Other cases in this file share the database; keep to this case's rows.
+    expect(seen.filter((id) => id.startsWith("ls-"))).toEqual(["ls-1", "ls-2a", "ls-2b", "ls-4"]);
+
+    // Close them, so the sweep cases below that share this database never see them.
+    for (const id of ["ls-acked", "ls-1", "ls-2b", "ls-2a", "ls-exhausted", "ls-4"]) {
+      await repo.resolve(id, "esc-req", "test fixture", at + 10);
+    }
+  });
+
   it("pages once when two sweeps race over the real store", async () => {
     const repo = createPgSosRepo(pool);
     await repo.create(
@@ -616,6 +855,9 @@ describe("SOS escalation wiring", () => {
   let redis: RedisClients;
   let app: express.Express;
   let requester: SosSocketClient;
+  let operator: SosSocketClient;
+  let port: number;
+  const wiringSos = createInMemorySosRepo();
 
   const token = (id: string, role: Role) =>
     signAccessToken({ sub: id, role, displayName: id, kyc: "verified" });
@@ -667,7 +909,7 @@ describe("SOS escalation wiring", () => {
       tasks,
       messages: createInMemoryMessageRepo(),
       helpers: createInMemoryHelperProfileRepo(),
-      sos: createInMemorySosRepo(),
+      sos: wiringSos,
       users,
       services: createInMemoryServiceCatalog(),
       exceptions: createInMemoryExceptionRepo(),
@@ -682,7 +924,7 @@ describe("SOS escalation wiring", () => {
     app.use(createSosAdminRouter(deps));
 
     await new Promise<void>((r) => httpServer.listen(0, r));
-    const port = (httpServer.address() as AddressInfo).port;
+    port = (httpServer.address() as AddressInfo).port;
     requester = ioClient(`http://localhost:${port}${NS.sos}`, {
       transports: ["websocket"],
       auth: { token: token(REQUESTER_ID, "requester") },
@@ -696,6 +938,7 @@ describe("SOS escalation wiring", () => {
 
   afterAll(async () => {
     requester?.disconnect();
+    operator?.disconnect();
     await io.close();
     await new Promise<void>((r) => httpServer.close(() => r()));
     const found = await redisRaw.keys(`${WIRING_PREFIX}*`);
@@ -733,6 +976,60 @@ describe("SOS escalation wiring", () => {
       .send({ note: "called, fine" });
     expect(res.status).toBe(200);
     expect(await scheduled(alert!.id)).toBeNull();
+  });
+
+  it("tells operators how far an alarm was escalated, and the participants nothing", async () => {
+    operator = ioClient(`http://localhost:${port}${NS.sos}`, {
+      transports: ["websocket"],
+      auth: { token: token(ADMIN_ID, "admin") },
+      forceNew: true,
+    });
+    await new Promise<void>((resolve, reject) => {
+      operator.on("connect", () => resolve());
+      operator.on("connect_error", reject);
+    });
+    const watched = await new Promise<{ ok: boolean }>((resolve) =>
+      operator.emit("watch", resolve as never),
+    );
+    expect(watched.ok).toBe(true);
+
+    const { alert } = await raise();
+    // The sweep paged tier 1 while nobody was at the console.
+    await wiringSos.recordEscalation(alert!.id, 0, 1, clock + 60_000);
+
+    const updateFor = (sock: SosSocketClient) =>
+      new Promise<SosAlert>((resolve) => {
+        const on = (a: SosAlert) => {
+          if (a.id !== alert!.id) return;
+          sock.off("sos-updated", on);
+          resolve(a);
+        };
+        sock.on("sos-updated", on);
+      });
+    const seenByRequester = updateFor(requester);
+    const seenByOperator = updateFor(operator);
+
+    const res = await request(app)
+      .post(`/admin/sos/${alert!.id}/acknowledge`)
+      .set("Authorization", `Bearer ${token(ADMIN_ID, "admin")}`)
+      .send({});
+    expect(res.status).toBe(200);
+    // The admin API is staff-facing and carries the truth.
+    expect(res.body.alert).toMatchObject({ escalationStep: 1, escalationTier: 1 });
+
+    expect(await seenByOperator).toMatchObject({
+      status: "acknowledged",
+      escalationStep: 1,
+      escalationTier: 1,
+      escalatedAt: clock + 60_000,
+    });
+    // The raiser learns a person has it — and not who else on staff was woken up.
+    expect(await seenByRequester).toMatchObject({
+      status: "acknowledged",
+      escalationStep: 0,
+      escalationTier: 0,
+      escalatedAt: null,
+    });
   });
 
   it("disarms it when the raiser cancels", async () => {

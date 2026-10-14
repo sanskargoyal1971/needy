@@ -325,7 +325,15 @@ export const config = {
     /** Ordered tiers of on-call numbers. Production refuses to boot with none — see
      *  `assertSosEscalationReachable`. These are staff numbers and are never logged unmasked. */
     oncallTiers: parseOncallTiers("SOS_ONCALL_PHONES", process.env.SOS_ONCALL_PHONES),
-    /** Where the page's link points. Origin only; the path is fixed by the sweep. */
+    /** How late a page may be and still go out. Measured from when the page fell DUE, not from
+     *  the raise, so it never cuts a running ladder short however long the steps are; it only
+     *  bites when the sweep was not running (an outage) or the alert predates escalation.
+     *  Either way a burst of pages about hour-old alarms teaches on-call staff to ignore the
+     *  pager, so those alerts are logged loudly instead. An hour, so a sweep that was down for
+     *  a deploy or a short incident still pages about what was raised meanwhile. */
+    maxLatenessSeconds: positiveNum("SOS_ESCALATION_MAX_LATENESS_SECONDS", 3600),
+    /** Where the page's link points. Origin only; the path is fixed by the sweep. Production
+     *  requires https on a non-loopback host — checked in `assertSosEscalationReachable`. */
     consoleOrigin: webOrigin(),
   },
   env: nodeEnv,

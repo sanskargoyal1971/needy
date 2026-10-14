@@ -11,7 +11,11 @@ import { emitSignal } from "../domain/abuseStore.js";
 import type { Deps, NamespaceRegistrar } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
 import { getTaskLocation } from "../domain/location-store.js";
-import { cancelSosEscalation, scheduleSosEscalation } from "../domain/sosEscalation.js";
+import {
+  cancelSosEscalation,
+  participantSosView,
+  scheduleSosEscalation,
+} from "../domain/sosEscalation.js";
 import { consumeToken } from "../services/ratelimit.js";
 import { requireParticipant } from "./guards.js";
 import { joinRoom, leaveRoom } from "./rooms.js";
@@ -52,6 +56,29 @@ type SosSocket = Socket<
 export const personalRoom = (userId: string) => `user:${userId}`;
 /** Operators join this room to watch every live alert (trust & safety surface, Stage B). */
 export const SOS_OPERATOR_ROOM = "sos:operators";
+
+/**
+ * Fan an alert out to its participants AND the operator room, each seeing what they may.
+ *
+ * Two emits where there used to be one, because the two audiences are owed different things:
+ * operators get the whole alert, participants get `participantSosView` — the escalation state
+ * (who on the staff side was paged, how often) is internal, and the other participant may be
+ * the person the alarm is about. The participant emit EXCEPTS the operator room, so a socket in
+ * both (an operator who is also on the task) receives one event, the full one, exactly as the
+ * single chained emit used to deliver it once.
+ */
+export function emitToParticipantsAndOperators(
+  nsp: Namespace<SosClientEvents, SosServerEvents>,
+  userIds: string[],
+  event: "sos-raised" | "sos-updated",
+  alert: SosAlert,
+): void {
+  nsp
+    .to(userIds.map(personalRoom))
+    .except(SOS_OPERATOR_ROOM)
+    .emit(event, participantSosView(alert));
+  nsp.to(SOS_OPERATOR_ROOM).emit(event, alert);
+}
 
 /** Generous but non-zero: a panicking user may well hit the button repeatedly, and each
  *  press should get through. This only exists to stop a compromised client turning the
@@ -174,7 +201,7 @@ export const registerSos: NamespaceRegistrar = (deps) => {
           alert.id,
           now + deps.config.sos.escalateAfterSeconds * 1000,
         );
-        ack({ ok: true, alert });
+        ack({ ok: true, alert: participantSosView(alert) });
 
         // Log at error level: an SOS should trip alerting, not sit in a debug stream.
         deps.logger.error("SOS RAISED", {
@@ -185,11 +212,12 @@ export const registerSos: NamespaceRegistrar = (deps) => {
         });
 
         const { task } = part;
-        nsp
-          .to(personalRoom(task.requesterId))
-          .to(personalRoom(task.helperId ?? task.requesterId))
-          .to(SOS_OPERATOR_ROOM)
-          .emit("sos-raised", alert);
+        emitToParticipantsAndOperators(
+          nsp,
+          [task.requesterId, task.helperId ?? task.requesterId],
+          "sos-raised",
+          alert,
+        );
 
         // AGENTS.md requires an audit row for "every SOS trigger". The action constant has
         // existed in audit/log.ts since the log was written and nothing ever recorded it, so
@@ -252,7 +280,7 @@ export const registerSos: NamespaceRegistrar = (deps) => {
         if (!updated) return ack({ ok: false, error: "not-found" });
         // Nobody should be woken about an alarm its raiser has withdrawn. Never throws.
         await cancelSosEscalation(deps.redis.client, deps.logger, updated.id);
-        ack({ ok: true, alert: updated });
+        ack({ ok: true, alert: participantSosView(updated) });
 
         deps.logger.warn("SOS cancelled by raiser", {
           alertId: updated.id,
@@ -271,12 +299,16 @@ export const registerSos: NamespaceRegistrar = (deps) => {
         }
 
         const task = await deps.tasks.get(updated.taskId);
-        nsp
-          .to(personalRoom(updated.raisedBy))
-          .to(personalRoom(task?.requesterId ?? updated.raisedBy))
-          .to(personalRoom(task?.helperId ?? updated.raisedBy))
-          .to(SOS_OPERATOR_ROOM)
-          .emit("sos-updated", updated);
+        emitToParticipantsAndOperators(
+          nsp,
+          [
+            updated.raisedBy,
+            task?.requesterId ?? updated.raisedBy,
+            task?.helperId ?? updated.raisedBy,
+          ],
+          "sos-updated",
+          updated,
+        );
       } catch (err) {
         deps.logger.error("sos cancel failed", { err, alertId: p.alertId, userId });
         ack({ ok: false, error: "internal" });

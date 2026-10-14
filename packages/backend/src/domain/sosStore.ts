@@ -67,6 +67,21 @@ export interface SosRepository {
     tier: number,
     at: number,
   ): Promise<SosAlert | null>;
+
+  /**
+   * Alerts the escalation sweep may still owe a page: `raised`, with fewer than `belowStep`
+   * pages sent. Oldest first, keyset-paged by (createdAt, id) after `after`.
+   *
+   * Its own query rather than `listOpen`, because `listOpen` is the CONSOLE's queue and holds
+   * acknowledged alerts too. Acknowledged-but-unresolved alerts collect at the old end of that
+   * list, and once there were a page's worth of them the reconcile pass never reached a raised
+   * alert behind them — the newest alarm, the one most likely to have somebody still in danger.
+   */
+  listEscalatable(filter: {
+    belowStep: number;
+    after: { createdAt: number; id: string } | null;
+    limit: number;
+  }): Promise<SosAlert[]>;
 }
 
 // ── in-memory ────────────────────────────────────────────────────────────────
@@ -147,6 +162,18 @@ export function createInMemorySosRepo(): SosRepository {
       };
       byId.set(alertId, next);
       return next;
+    },
+    async listEscalatable({ belowStep, after, limit }) {
+      return [...byId.values()]
+        .filter((a) => a.status === "raised" && a.escalationStep < belowStep)
+        .filter(
+          (a) =>
+            after == null ||
+            a.createdAt > after.createdAt ||
+            (a.createdAt === after.createdAt && a.id > after.id),
+        )
+        .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .slice(0, limit);
     },
   };
 }
@@ -313,6 +340,20 @@ export function createPgSosRepo(pool: DbPool): SosRepository {
         [alertId, fromStep, tier, at],
       );
       return rows[0] ? rowToAlert(rows[0]) : null;
+    },
+    async listEscalatable({ belowStep, after, limit }) {
+      // Served by idx_sos_open_queue (created_at, partial on the open statuses); `raised` is a
+      // subset of that predicate. The row-value comparison is the keyset cursor. `COLLATE "C"`
+      // so the tiebreak orders ids by byte, the same way the in-memory twin compares strings.
+      const { rows } = await pool.query<SosRow>(
+        `SELECT * FROM sos_alerts
+          WHERE status = 'raised' AND escalation_step < $1::int
+            AND ($2::bigint IS NULL OR (created_at, id COLLATE "C") > ($2::bigint, $3::text COLLATE "C"))
+          ORDER BY created_at ASC, id COLLATE "C" ASC
+          LIMIT $4`,
+        [belowStep, after?.createdAt ?? null, after?.id ?? null, limit],
+      );
+      return rows.map(rowToAlert);
     },
   };
 }

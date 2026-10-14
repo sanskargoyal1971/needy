@@ -20,6 +20,7 @@ import type { Deps } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
 import { getTaskLocation } from "../domain/location-store.js";
 import { readPresence } from "../domain/presence-store.js";
+import { participantSosView } from "../domain/sosEscalation.js";
 import { signAccessToken, type AuthClaims } from "../auth/jwt.js";
 import { readAccessClaims } from "../auth/middleware.js";
 import { requireOnboarded, REQUESTER_ROLES } from "../auth/onboardingGate.js";
@@ -461,7 +462,9 @@ async function buildTaskSnapshot(deps: Deps, task: Task, callerId: string): Prom
   // The live alarm, if any. Oldest first so a task that somehow carries two surfaces the one
   // that has been waiting longest rather than whichever the store happened to return first.
   const alarms = await deps.sos.activeForTask(task.id);
-  const sos = [...alarms].sort((a, b) => a.createdAt - b.createdAt)[0] ?? null;
+  const oldest = [...alarms].sort((a, b) => a.createdAt - b.createdAt)[0];
+  // A participant's view: who on the staff side has been paged about it is not theirs to see.
+  const sos = oldest ? participantSosView(oldest) : null;
 
   // Presence is only surfaced to the requester, showing the matched helper's status.
   const presence =

@@ -176,7 +176,12 @@ export interface SosAlert {
   resolutionNote: string | null;
   /** How many on-call pages have gone out because nobody acknowledged this alert. 0 means
    *  none yet. Kept apart from `escalationTier` because once every tier has been tried the
-   *  top one is paged again rather than left alone, so the two stop moving together. */
+   *  top one is paged again rather than left alone, so the two stop moving together.
+   *
+   *  STAFF-ONLY, like the two fields after it. Only the operator feed and the admin API carry
+   *  the real values; every channel that reaches a participant resets all three to their
+   *  unescalated values (the backend's `participantSosView`). There, 0 means "not disclosed",
+   *  not "nobody was paged". */
   escalationStep: number;
   /** The on-call tier most recently paged (1 = first). 0 until the first page. */
   escalationTier: number;

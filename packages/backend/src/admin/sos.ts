@@ -6,7 +6,7 @@ import { validateBody } from "../auth/validation.js";
 import type { Deps } from "../domain/deps.js";
 import { cancelSosEscalation } from "../domain/sosEscalation.js";
 import { asyncRoute } from "../http/asyncRoute.js";
-import { personalRoom, SOS_OPERATOR_ROOM } from "../socket/sos.js";
+import { emitToParticipantsAndOperators } from "../socket/sos.js";
 
 /** ── SOS operator console ──────────────────────────────────────────────────
  *  The other half of the alarm. Raising an SOS was already durable and already fanned out to
@@ -143,13 +143,13 @@ export function createSosAdminRouter(deps: Deps): Router {
    *  alarm in parallel. */
   async function fanOut(alert: SosAlert): Promise<void> {
     const task = await deps.tasks.get(alert.taskId);
-    const nsp = deps.io.of(NS.sos);
-    nsp
-      .to(personalRoom(alert.raisedBy))
-      .to(personalRoom(task?.requesterId ?? alert.raisedBy))
-      .to(personalRoom(task?.helperId ?? alert.raisedBy))
-      .to(SOS_OPERATOR_ROOM)
-      .emit("sos-updated", alert);
+    // Participants get the alert without its escalation state; operators get all of it.
+    emitToParticipantsAndOperators(
+      deps.io.of(NS.sos),
+      [alert.raisedBy, task?.requesterId ?? alert.raisedBy, task?.helperId ?? alert.raisedBy],
+      "sos-updated",
+      alert,
+    );
   }
 
   // ── the queue ──────────────────────────────────────────────────────────────

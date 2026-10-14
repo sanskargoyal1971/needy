@@ -6,6 +6,7 @@ import {
   claimDueEscalation,
   escalationMessage,
   intervalAfterStepMs,
+  isEscalationTooLate,
   maxEscalationSteps,
   nextEscalationDue,
   tierForStep,
@@ -43,9 +44,13 @@ const SWEEP_INTERVAL_MS = 1_000;
  *  data loss, so it can be slow; it runs once at start regardless. */
 const RECONCILE_INTERVAL_MS = 60_000;
 
-/** Upper bound on alerts reconciled per pass. Far beyond any real backlog of unanswered
- *  alarms; if it is ever reached, the oldest are the ones re-armed, which is the right end. */
-const RECONCILE_LIMIT = 500;
+/** Alerts read per reconcile query. A page size, not a cap: reconcile keeps paging until it
+ *  has seen every raised alert, so no alarm is left un-armed behind a long backlog. */
+const RECONCILE_PAGE_SIZE = 500;
+
+/** How many skipped alert ids one "too late to page" log line names. The count is always
+ *  exact; the ids are there so somebody can go and find them. */
+const TOO_LATE_IDS_LOGGED = 20;
 
 export interface SosEscalationSweep {
   /** Page everything due now. Exposed for tests; `start` drives it on an interval. */
@@ -58,7 +63,12 @@ export interface SosEscalationSweep {
 
 export function createSosEscalationSweep(
   deps: Deps,
-  opts: { sms: SmsProvider; sweepIntervalMs?: number; reconcileIntervalMs?: number },
+  opts: {
+    sms: SmsProvider;
+    sweepIntervalMs?: number;
+    reconcileIntervalMs?: number;
+    reconcilePageSize?: number;
+  },
 ): SosEscalationSweep {
   const cfg = deps.config.sos;
   const redis = deps.redis.client;
@@ -95,6 +105,21 @@ export function createSosEscalationSweep(
       await redis.zadd(keys.sosEscalationQueue(), "NX", due, alertId);
       return;
     }
+    // Fell due while nothing was sweeping (see `isEscalationTooLate`). Not paged and not
+    // re-armed — the claim already removed the entry, and reconcile skips it too — but said at
+    // error level, because it is still an alarm nobody has answered.
+    if (isEscalationTooLate(due, now, cfg)) {
+      deps.logger.error(
+        "SOS UNACKNOWLEDGED and too late to page on-call — answer it at the console",
+        {
+          alertId,
+          taskId: alert.taskId,
+          step: alert.escalationStep,
+          lateMs: now - due,
+        },
+      );
+      return;
+    }
 
     const step = alert.escalationStep + 1;
     const tier = tierForStep(cfg, step);
@@ -104,11 +129,24 @@ export function createSosEscalationSweep(
     // this step. Either way somebody else owns what happens next.
     if (!updated) return;
 
-    // Re-arm BEFORE paging. A crash after this point still escalates to the next tier; a
-    // crash before it is caught by reconcile, which derives the same deadline from the row.
+    // Re-arm BEFORE paging, so a crash after this point still escalates to the next tier.
+    //
+    // Best-effort, like `scheduleSosEscalation`. The step is already committed to the row, so
+    // the page below is now the only chance this tier gets: a Redis error here used to throw
+    // out of the function, leaving the row saying "tier N paged" with nobody paged and no
+    // audit row, and the next reconcile arming step N+1 — tier N skipped for good. Reconcile
+    // derives the next deadline from the row whether or not this write landed.
     const final = step >= maxEscalationSteps(cfg);
     if (!final) {
-      await redis.zadd(keys.sosEscalationQueue(), now + intervalAfterStepMs(cfg, step), alertId);
+      try {
+        await redis.zadd(keys.sosEscalationQueue(), now + intervalAfterStepMs(cfg, step), alertId);
+      } catch (err) {
+        deps.logger.error("sos escalation could not be re-armed (reconcile will re-arm it)", {
+          alertId,
+          step,
+          err: String(err),
+        });
+      }
     }
 
     const phones = cfg.oncallTiers[tier - 1]!;
@@ -136,7 +174,8 @@ export function createSosEscalationSweep(
 
     // The console learns it has been escalated over its feed, operators only. The participants
     // are not told: "on-call has been paged" is an internal fact, and the raiser's screen
-    // already says what is true for them.
+    // already says what is true for them. Every participant channel strips these fields
+    // (`participantSosView`), so a later fan-out does not tell them either.
     deps.io.of(NS.sos).to(SOS_OPERATOR_ROOM).emit("sos-updated", updated);
 
     await deps.audit.record({
@@ -178,13 +217,38 @@ export function createSosEscalationSweep(
 
   async function reconcile(): Promise<void> {
     try {
-      const open = await deps.sos.listOpen(RECONCILE_LIMIT);
-      for (const alert of open) {
-        const due = nextEscalationDue(alert, cfg);
-        if (due == null) continue;
-        // NX: never move an existing deadline. If an instance is mid-way through this alert's
-        // step, the row's compare-and-set makes whatever this adds harmless.
-        await redis.zadd(keys.sosEscalationQueue(), "NX", due, alert.id);
+      const max = maxEscalationSteps(cfg);
+      if (max === 0) return;
+      const pageSize = opts.reconcilePageSize ?? RECONCILE_PAGE_SIZE;
+      const now = deps.now();
+      const tooLate: string[] = [];
+      let tooLateCount = 0;
+      let after: { createdAt: number; id: string } | null = null;
+      for (;;) {
+        const page = await deps.sos.listEscalatable({ belowStep: max, after, limit: pageSize });
+        for (const alert of page) {
+          const due = nextEscalationDue(alert, cfg);
+          if (due == null) continue;
+          if (isEscalationTooLate(due, now, cfg)) {
+            tooLateCount++;
+            if (tooLate.length < TOO_LATE_IDS_LOGGED) tooLate.push(alert.id);
+            continue;
+          }
+          // NX: never move an existing deadline. If an instance is mid-way through this alert's
+          // step, the row's compare-and-set makes whatever this adds harmless.
+          await redis.zadd(keys.sosEscalationQueue(), "NX", due, alert.id);
+        }
+        if (page.length < pageSize) break;
+        const last = page[page.length - 1]!;
+        after = { createdAt: last.createdAt, id: last.id };
+      }
+      // One line per pass, not one per alert: repeated every reconcile for as long as they sit
+      // unanswered, which is the point, but without burying the log in them.
+      if (tooLateCount > 0) {
+        deps.logger.error("SOS alerts UNACKNOWLEDGED and too late to page on-call", {
+          count: tooLateCount,
+          alertIds: tooLate,
+        });
       }
     } catch (err) {
       deps.logger.error("sos escalation reconcile failed", { err: String(err) });

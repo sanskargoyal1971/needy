@@ -56,6 +56,52 @@ export function nextEscalationDue(alert: SosAlert, cfg: SosEscalationConfig): nu
   return last + intervalAfterStepMs(cfg, alert.escalationStep);
 }
 
+/**
+ * True when the page due at `due` is too late to be worth sending at `now`.
+ *
+ * Lateness, not age: in normal running a page is late by at most a sweep interval, so this
+ * never truncates a ladder. It is true only when the sweep was not running when the page fell
+ * due — a long outage, or a first deploy over alerts left `raised` from before escalation
+ * existed (stale test and seed alarms among them). Paging those would send on-call a burst
+ * about hour-old alarms and then walk each one up the whole ladder, which is how staff learn
+ * to ignore the pager. They are logged at error level instead, so they are still looked at.
+ */
+export function isEscalationTooLate(due: number, now: number, cfg: SosEscalationConfig): boolean {
+  return now - due > cfg.maxLatenessSeconds * 1000;
+}
+
+/**
+ * The alert as a PARTICIPANT may see it: the escalation fields reset to their unescalated
+ * values.
+ *
+ * Who on the staff side has been woken up, how many times and when is internal. The raiser's
+ * screen already says what is true for them (an operator has, or has not, acknowledged), and
+ * the other participant may be the very person the alarm is about — they have no business
+ * learning how hard the platform is looking. So every channel that reaches a participant (the
+ * personal-room fan-outs, the raise and cancel acks, the task snapshot) sends this, and only
+ * the operator room and the admin API carry the real values.
+ *
+ * Reset rather than removed so the wire type stays `SosAlert`, which the participant clients
+ * are written against; their UI does not read these fields. The values a participant sees
+ * therefore mean "not disclosed", NOT "nobody was paged".
+ */
+export function participantSosView(alert: SosAlert): SosAlert {
+  return { ...alert, escalationStep: 0, escalationTier: 0, escalatedAt: null };
+}
+
+/** Hosts a link sent to someone's phone must never point at: it would open on THEIR device. */
+function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return (
+    h === "localhost" ||
+    h.endsWith(".localhost") ||
+    h === "0.0.0.0" ||
+    h === "[::1]" ||
+    h === "[::]" ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)
+  );
+}
+
 // ── the schedule ────────────────────────────────────────────────────────────
 
 /**
@@ -188,12 +234,35 @@ export function escalationMessage(
  * The console SMS adapter is called out separately, at error level in production: it is the
  * same no-one-is-reached outcome by another route, but refusing it here would also refuse
  * every OTP sign-in, which is a separate decision from this one (see `createSmsProvider`).
+ *
+ * A page that does reach somebody must also be something they can act on, so production
+ * refuses a console link that is not https or that points at localhost.
  */
 export function assertSosEscalationReachable(
   cfg: SosEscalationConfig,
   env: { isProduction: boolean; smsProvider: string },
   logger: Logger,
 ): void {
+  // The page's console link. `webOrigin()` falls back to the first CORS origin and then to
+  // http://localhost:3000, which is right for a laptop and a dead link in a page that wakes
+  // someone at 3 a.m. — or, as plain http, a staff login over a connection anyone on the path
+  // can read. Checked here rather than in config so the config module still loads under a
+  // production NODE_ENV in tests that never boot the server.
+  if (env.isProduction) {
+    const url = new URL(cfg.consoleOrigin);
+    if (url.protocol !== "https:") {
+      throw new Error(
+        "The SOS page's console link is not https in production. Set PUBLIC_WEB_ORIGIN to the " +
+          "web app's public https origin.",
+      );
+    }
+    if (isLoopbackHost(url.hostname)) {
+      throw new Error(
+        "The SOS page's console link points at localhost in production, which opens on the " +
+          "on-call person's own phone. Set PUBLIC_WEB_ORIGIN to the web app's public origin.",
+      );
+    }
+  }
   if (cfg.oncallTiers.length === 0) {
     if (env.isProduction) {
       throw new Error(
