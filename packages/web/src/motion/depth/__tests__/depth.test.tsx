@@ -3,6 +3,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MotionPreferencesProvider, useMotionPreferences } from "../../preferences";
 import { Doorstep3D, Float, IconTile3D, MapPin3D, VerifiedShield3D } from "../index";
+import { BreathingBackground } from "@/components/BreathingBackground";
 
 /**
  * jsdom has no IntersectionObserver, which is itself one of the cases worth pinning (no
@@ -221,5 +222,77 @@ describe("Float", () => {
     );
     emitAll(true);
     expect(container.querySelector<HTMLElement>("[data-motion]")?.dataset.motion).toBe("static");
+  });
+});
+
+describe("Doorstep3D — the code tag", () => {
+  /** The tag is the face holding the key icon. Its depth may sit on it or on a wrapper, but
+   *  something between it and the stage must carry the translateZ. */
+  function tagDepth(container: HTMLElement): string[] {
+    const icon = container.querySelector("svg");
+    const root = stage(container);
+    const transforms: string[] = [];
+    for (let el = icon?.parentElement ?? null; el && el !== root; el = el.parentElement) {
+      if (el.style.transform) transforms.push(el.style.transform);
+    }
+    return transforms;
+  }
+
+  it("floats in front of the door when still", () => {
+    const { container } = render(<Doorstep3D />);
+    // framer-motion overwrites a transform string in a motion.div's style with its own; if
+    // the depth lived there the tag would sit flat on the wall's plane.
+    expect(tagDepth(container).some((t) => t.includes("translateZ(38px)"))).toBe(true);
+  });
+
+  it("keeps its depth while the idle loop runs", () => {
+    (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = FakeObserver;
+    const { container } = render(
+      <MotionPreferencesProvider defaultOverride="allow">
+        <Doorstep3D />
+      </MotionPreferencesProvider>,
+    );
+    emitAll(true);
+    expect(stage(container).dataset.motion).toBe("running");
+    expect(tagDepth(container).some((t) => t.includes("translateZ(38px)"))).toBe(true);
+  });
+});
+
+describe("BreathingBackground", () => {
+  beforeEach(() => {
+    (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = FakeObserver;
+  });
+
+  it("does not breathe under reduced motion, even on screen", () => {
+    const { container } = render(
+      <MotionPreferencesProvider defaultOverride="reduce">
+        <BreathingBackground>hero</BreathingBackground>
+      </MotionPreferencesProvider>,
+    );
+    emitAll(true);
+    expect(stage(container).dataset.motion).toBe("static");
+  });
+
+  it("follows the operating system's reduce-motion setting", () => {
+    systemReduce = true;
+    const { container } = render(
+      <MotionPreferencesProvider>
+        <BreathingBackground>hero</BreathingBackground>
+      </MotionPreferencesProvider>,
+    );
+    emitAll(true);
+    expect(stage(container).dataset.motion).toBe("static");
+  });
+
+  it("breathes on screen and stops when scrolled away", () => {
+    const { container } = render(
+      <MotionPreferencesProvider defaultOverride="allow">
+        <BreathingBackground>hero</BreathingBackground>
+      </MotionPreferencesProvider>,
+    );
+    emitAll(true);
+    expect(stage(container).dataset.motion).toBe("running");
+    emitAll(false);
+    expect(stage(container).dataset.motion).toBe("paused");
   });
 });

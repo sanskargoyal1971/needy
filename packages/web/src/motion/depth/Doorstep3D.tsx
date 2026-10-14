@@ -130,9 +130,23 @@ function Door() {
 function CodeTag() {
   const { running } = useStageMotion();
   return (
+    // The depth sits on a plain wrapper, not on the motion.div: framer-motion writes its own
+    // `transform` from the values it animates and drops any transform string in `style`, so a
+    // translateZ there is silently lost and the tag lands flat on the wall's plane, where it
+    // z-fights the wall front as the stage sways.
+    <div style={at(120, 40, 70, 42, "translateZ(38px)")}>
+      <CodeTagFace running={running} />
+    </div>
+  );
+}
+
+function CodeTagFace({ running }: { running: boolean }) {
+  return (
     <motion.div
       style={{
-        ...at(120, 40, 70, 42, "translateZ(38px)"),
+        position: "absolute",
+        inset: 0,
+        transformStyle: "preserve-3d",
         borderRadius: 14,
         background: "#FFFFFF",
         boxShadow: "0 10px 20px -6px rgba(15,92,92,0.35), 0 2px 4px rgba(15,92,92,0.12)",
