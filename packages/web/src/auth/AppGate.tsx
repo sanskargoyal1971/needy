@@ -19,11 +19,15 @@ import type { Role } from "@/lib/authClient";
  *  correct outcome. What this fixes is the experience: without it a rejected user clicking a
  *  bookmark gets a 404 or a broken dashboard instead of being told where they stand.
  *
- *  Deliberately NOT Next middleware. Middleware runs at the edge with only the cookies, and
- *  onboarding status lives in Postgres precisely so a reviewer's decision takes effect
- *  immediately rather than at token expiry. Putting the status in the JWT to make middleware
- *  possible would reintroduce exactly the staleness the server-side gate was designed to
- *  avoid — a user rejected at 10:00 keeping access until their token expired.
+ *  Deliberately NOT in `proxy.ts` (Next 16's name for middleware). The runtime is not the
+ *  reason: a Next 16 proxy runs on Node, not the edge. The reason is what the gate has to
+ *  know. Onboarding status lives in Postgres precisely so a reviewer's decision takes effect
+ *  immediately rather than at token expiry, and a proxy sees nothing but the incoming request.
+ *  To gate there it would have to either trust a status baked into the JWT — reintroducing
+ *  exactly the staleness the server-side gate was designed to avoid, a user rejected at 10:00
+ *  keeping access until their token expired — or call the API on every request the matcher
+ *  covers to learn what this component already gets once from `/auth/me`. And it would still
+ *  only be a redirect; the API's 403 remains the control either way.
  */
 /** Roles allowed on an admin surface. Kept next to the gate so the two checks below cannot
  *  drift apart. */

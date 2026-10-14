@@ -66,6 +66,25 @@ describe("proxy — companion headers", () => {
     );
   });
 
+  it("makes no access decision: a protected path passes through with or without a cookie", () => {
+    // AppGate's comment explains why the route gate is NOT here: a proxy sees only the
+    // request, not the live onboarding status in Postgres. This pins that the proxy really
+    // does stay out of it, so the comment and the code cannot quietly disagree — a cookie- or
+    // JWT-based redirect added here would be the token-lifetime gate that design rules out.
+    const anonymous = run("/admin/queue");
+    const withCookie = proxy(
+      new NextRequest(new URL("/admin/queue", "http://localhost:3000"), {
+        headers: { cookie: "session=not-a-real-token" },
+      }),
+    );
+    for (const res of [anonymous, withCookie]) {
+      expect(res.status).toBe(200);
+      expect(res.headers.get("location")).toBeNull();
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+      expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+    }
+  });
+
   it("matches documents but not Next's hashed build output", () => {
     const pattern = new RegExp(`^${config.matcher[0].source}$`);
     expect(pattern.test("/")).toBe(true);
