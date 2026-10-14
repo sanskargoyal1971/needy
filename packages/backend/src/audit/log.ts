@@ -1,14 +1,19 @@
+import type { PoolClient } from "pg";
 import type { DbPool } from "../db.js";
 import { logger } from "../logger.js";
+import { AUDIT_CHAIN_LOCK_KEY, auditRowHash, GENESIS_HASH, type ChainedRow } from "./chain.js";
 
 /** ── Audit log ─────────────────────────────────────────────────────────────
  *  AGENTS.md: "Immutable, append-only audit log for every SOS trigger, KYC review action, and
  *  admin override." This is that log.
  *
- *  Append-only is enforced in the DATABASE (migration 3 installs `DO INSTEAD NOTHING` rules on
- *  UPDATE and DELETE), not by the convention that this module has no update method. A log the
- *  application can rewrite is not evidence of anything — the first thing a compromised admin
- *  session does is delete its own trail.
+ *  Append-only is enforced in the DATABASE, not by the convention that this module has no
+ *  update method: migration 3 installs `DO INSTEAD NOTHING` rules on UPDATE and DELETE, and the
+ *  runtime role (dbRoles.ts) holds only SELECT and INSERT on the table and owns nothing, so it
+ *  can neither rewrite rows nor drop the rules. A log the application can rewrite is not
+ *  evidence of anything — the first thing a compromised admin session does is delete its own
+ *  trail. For whoever gets past that, every row is hash-chained (chain.ts), so the rewriting
+ *  shows.
  *
  *  Reading a KYC document is itself an audited action. "Who looked at this person's Aadhaar,
  *  and when" is a question a trust & safety platform must be able to answer about its own
@@ -75,6 +80,21 @@ export interface AuditLogger {
 /**
  * Postgres-backed writer.
  *
+ * Every row is chained to the one before it (see chain.ts). The chain only means anything if
+ * "the row before it" is well defined, so an insert is: take the chain lock, read the newest
+ * hash, draw the id, hash, insert, commit — all in one transaction. Two concurrent inserts
+ * that skipped the lock would both chain onto the same parent and the log would fork, which
+ * the verifier cannot tell apart from tampering. The cost is that audit writes queue behind
+ * each other; they are a handful per admin action, not per request.
+ *
+ * The id is drawn with `nextval` before the INSERT, under the lock, because it is part of what
+ * is hashed: a row cannot be renumbered without the hash noticing. Drawing it under the lock is
+ * also what makes id order and chain order the same.
+ *
+ * The lock is an advisory one, not `LOCK TABLE`: a lock mode strong enough to exclude other
+ * inserters needs UPDATE or DELETE on the table, which is exactly what the runtime role is
+ * denied.
+ *
  * A failed audit write is logged loudly but does NOT throw. That is a deliberate trade and it
  * cuts against the usual instinct, so the reasoning matters: the alternative is that a full
  * disk or a lock timeout on this table turns every admin approval into a 500. Losing one audit
@@ -87,22 +107,55 @@ export interface AuditLogger {
 export function createPgAuditLogger(pool: DbPool, now: () => number): AuditLogger {
   return {
     async record(entry) {
+      let client: PoolClient | null = null;
       try {
-        await pool.query(
-          `INSERT INTO audit_log (actor_id, actor_role, action, subject_type, subject_id, metadata, ip, at)
-           VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8)`,
+        client = await pool.connect();
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock($1)", [AUDIT_CHAIN_LOCK_KEY]);
+        const head = await client.query<{ row_hash: string }>(
+          `SELECT row_hash FROM audit_log WHERE row_hash IS NOT NULL ORDER BY id DESC LIMIT 1`,
+        );
+        const prevHash = head.rows[0]?.row_hash ?? GENESIS_HASH;
+        const { rows } = await client.query<{ id: string }>(
+          `SELECT nextval(pg_get_serial_sequence('audit_log', 'id'))::text AS id`,
+        );
+        // Through JSON once, so what is hashed is what JSONB will hand back: Dates become
+        // strings and undefined members disappear here, exactly as they do in the column.
+        const metadata = JSON.parse(JSON.stringify(entry.metadata ?? {})) as unknown;
+        const at = now();
+        const row: ChainedRow = {
+          id: rows[0]!.id,
+          at: String(at),
+          action: entry.action,
+          actorId: entry.actorId,
+          actorRole: entry.actorRole ?? null,
+          subjectType: entry.subjectType ?? null,
+          subjectId: entry.subjectId ?? null,
+          ip: entry.ip ?? null,
+          metadata,
+        };
+        await client.query(
+          `INSERT INTO audit_log
+             (id, actor_id, actor_role, action, subject_type, subject_id, metadata, ip, at,
+              prev_hash, row_hash)
+           VALUES ($1::bigint,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11)`,
           [
-            entry.actorId,
-            entry.actorRole ?? null,
-            entry.action,
-            entry.subjectType ?? null,
-            entry.subjectId ?? null,
-            JSON.stringify(entry.metadata ?? {}),
-            entry.ip ?? null,
-            now(),
+            row.id,
+            row.actorId,
+            row.actorRole,
+            row.action,
+            row.subjectType,
+            row.subjectId,
+            JSON.stringify(metadata),
+            row.ip,
+            at,
+            prevHash,
+            auditRowHash(prevHash, row),
           ],
         );
+        await client.query("COMMIT");
       } catch (err) {
+        await client?.query("ROLLBACK").catch(() => undefined);
         logger.error("AUDIT WRITE FAILED — event recorded here instead", {
           action: entry.action,
           actorId: entry.actorId,
@@ -110,6 +163,8 @@ export function createPgAuditLogger(pool: DbPool, now: () => number): AuditLogge
           subjectId: entry.subjectId,
           err: String(err),
         });
+      } finally {
+        client?.release();
       }
     },
   };

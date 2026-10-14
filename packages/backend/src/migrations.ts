@@ -1,6 +1,7 @@
 import { SEED_SERVICES } from "@needy/shared";
 import type { DbPool } from "./db.js";
 import { CONSTRAINTS_SQL, SCHEMA_SQL } from "./db.js";
+import { RUNTIME_GRANTS_SQL } from "./dbRoles.js";
 
 /** ── Migrations ────────────────────────────────────────────────────────────
  *  A real versioned migration runner, replacing "execute the whole DDL file on every boot".
@@ -647,6 +648,33 @@ export const MIGRATIONS: readonly Migration[] = [
       `ALTER TABLE helper_applications ALTER COLUMN phone DROP NOT NULL`,
       `ALTER TABLE helper_applications ADD CONSTRAINT chk_applications_has_phone
          CHECK (phone IS NOT NULL OR phone_enc IS NOT NULL)`,
+    ],
+  },
+  {
+    id: 14,
+    name: "audit-hash-chain-and-runtime-role",
+    statements: [
+      // ── a log whose rewriting shows ─────────────────────────────────────────────────────
+      //
+      // The rules from migration 3 stop the app's role rewriting audit_log once it no longer
+      // owns the table (below). They do not stop a superuser, or anyone with the owner's
+      // password, from disabling them for a moment. These two columns make that visible: each
+      // row carries the hash of the one before it and a hash over itself, computed by the app
+      // in the inserting transaction (audit/chain.ts), so an edited, removed or inserted row
+      // breaks the chain at the place it happened.
+      //
+      // Nullable. Rows written before this migration have no hash and cannot be given one
+      // without rewriting the log, which is the thing this table exists to forbid; they stay
+      // as an unchained prefix and the verifier reports how many there are.
+      `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS prev_hash TEXT`,
+      `ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS row_hash TEXT`,
+
+      // ── what the app may do as itself ───────────────────────────────────────────────────
+      //
+      // See dbRoles.ts. Skipped without error when no runtime role is configured or it does
+      // not exist yet; the boot step re-applies the same grants every start, so creating the
+      // role later is enough.
+      RUNTIME_GRANTS_SQL,
     ],
   },
 ];

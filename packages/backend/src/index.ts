@@ -43,6 +43,7 @@ import {
 } from "./admin/repos.js";
 import { createPool, seedHelperProfiles, type DbPool } from "./db.js";
 import { migrate } from "./migrations.js";
+import { inspectRuntimeRole, resolveRuntimeRole, syncRuntimeGrants } from "./dbRoles.js";
 import { backfillUserPii } from "./auth/userPii.js";
 import { createAuthRouter, KYC_CALLBACK_PATH, kycRawBodyParser } from "./auth/router.js";
 import { createInMemoryTotpRepo, createPgTotpRepo, type TotpRepository } from "./auth/totpRepo.js";
@@ -138,22 +139,72 @@ async function main(): Promise<void> {
   let abuseRepo: AbuseRepository;
   if (config.databaseUrl) {
     pool = createPool(config.databaseUrl);
-    // Versioned, advisory-locked migrations (see migrations.ts). Replaces re-executing the
-    // whole DDL on every boot, which had no way to express a non-idempotent change and raced
-    // itself when two instances started together during a rolling deploy.
-    await migrate(pool, logger);
-    // Seal any phone number or date of birth still in the clear (migration 12 made room; the
-    // key is not in the database, so SQL could not do it). Before serving, under its own
-    // advisory lock: a second instance waits, then finds nothing left to do.
-    await backfillUserPii(pool, logger);
-    // Every boot, not once: this is the number that says when JWT_SECRET may rotate again
-    // (see config.jwtSecret), so it has to be current wherever an operator looks.
-    const unmatchedBlocks = await countUnmatchedPhoneBlocks(pool);
-    if (unmatchedBlocks > 0) {
-      logger.warn("phone blocks not matched to any account", {
-        count: unmatchedBlocks,
-        note: "may still be keyed under JWT_SECRET; rotating it would lift them",
-      });
+    // Two roles: the owner migrates, the runtime role serves (see dbRoles.ts for why). One
+    // role doing both is tolerated in development, where the database is disposable, and
+    // refused in production, where it would let the process that writes audit_log erase it.
+    const separated =
+      config.databaseMigrationUrl !== "" && config.databaseMigrationUrl !== config.databaseUrl;
+    if (!separated) {
+      if (config.isProduction) {
+        throw new Error(
+          "DATABASE_MIGRATION_URL is required in production and must connect as a different " +
+            "role from DATABASE_URL (refusing to serve as the schema owner)",
+        );
+      }
+      logger.warn(
+        "DATABASE_MIGRATION_URL unset: serving as the schema owner, which can drop audit_log's " +
+          "append-only rules. Development only.",
+      );
+    }
+    const ownerPool = separated
+      ? createPool(config.databaseMigrationUrl, {
+          runtimeRole: resolveRuntimeRole(config.databaseUrl, config.databaseRuntimeRole),
+        })
+      : pool;
+    let ownerRole: string | null = null;
+    try {
+      // Versioned, advisory-locked migrations (see migrations.ts). Replaces re-executing the
+      // whole DDL on every boot, which had no way to express a non-idempotent change and raced
+      // itself when two instances started together during a rolling deploy.
+      await migrate(ownerPool, logger);
+      if (separated) {
+        // Every boot, not only in migration 14: the runtime role may have been created since,
+        // and a hand-added privilege should not outlive a restart.
+        await syncRuntimeGrants(ownerPool, logger);
+        const { rows } = await ownerPool.query<{ role: string }>("SELECT current_user AS role");
+        ownerRole = rows[0]!.role;
+      }
+      // Seal any phone number or date of birth still in the clear (migration 12 made room; the
+      // key is not in the database, so SQL could not do it). Before serving, under its own
+      // advisory lock: a second instance waits, then finds nothing left to do.
+      await backfillUserPii(ownerPool, logger);
+      // Every boot, not once: this is the number that says when JWT_SECRET may rotate again
+      // (see config.jwtSecret), so it has to be current wherever an operator looks.
+      const unmatchedBlocks = await countUnmatchedPhoneBlocks(ownerPool);
+      if (unmatchedBlocks > 0) {
+        logger.warn("phone blocks not matched to any account", {
+          count: unmatchedBlocks,
+          note: "may still be keyed under JWT_SECRET; rotating it would lift them",
+        });
+      }
+    } finally {
+      // The owner's connections end here. Nothing that serves a request can reach them.
+      if (separated) await ownerPool.end();
+    }
+    if (separated) {
+      // Asked of the database, not inferred from the URLs: two different user names can still
+      // both be superusers, or the runtime role can have been granted the table by hand.
+      const problems = await inspectRuntimeRole(pool);
+      const { rows } = await pool.query<{ role: string }>("SELECT current_user AS role");
+      if (rows[0]!.role === ownerRole) {
+        problems.unshift(`DATABASE_URL and DATABASE_MIGRATION_URL both connect as ${ownerRole}`);
+      }
+      if (problems.length > 0) {
+        if (config.isProduction) {
+          throw new Error(`runtime database role is not least-privilege: ${problems.join("; ")}`);
+        }
+        logger.warn("runtime database role is not least-privilege", { problems });
+      }
     }
     // Fixture seeding OVERWRITES existing helper rows (ON CONFLICT DO UPDATE), so it must
     // never run against a real database — it would stomp live profiles on every deploy.

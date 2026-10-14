@@ -3,6 +3,7 @@ import { z } from "zod";
 import { DOCUMENT_LABELS, isOnboardingStatus, REQUIRED_DOCUMENTS } from "@needy/shared";
 import type { AuditLogger } from "../audit/log.js";
 import { readAuditLog } from "../audit/log.js";
+import { verifyAuditChain } from "../audit/chain.js";
 import { requireAuth, requireStaff, type AuthedRequest } from "../auth/middleware.js";
 import type { PhoneBlockRepository } from "../auth/phoneBlocks.js";
 import type { SessionRepository, UserRepository } from "../auth/repos.js";
@@ -498,6 +499,29 @@ export function createVerificationRouter(deps: VerificationRouterDeps): Router {
         }),
       );
       res.json({ entries, names, durable: true });
+    }),
+  );
+
+  // ── audit chain check ──────────────────────────────────────────────────────
+  //
+  // Walks the whole hash chain (audit/chain.ts) and names the first row where it stops
+  // holding. 200 whatever the outcome: a broken chain is the finding, not a server error, and
+  // `ok: false` must reach the reviewer rather than turn into a generic failure screen.
+  //
+  // The response includes the head hash. Write it down somewhere this database's
+  // administrators cannot edit; the chain alone cannot show rows cut from its end, or a
+  // rewrite by someone who recomputed every hash after it, and a remembered head can.
+  router.get(
+    "/admin/audit/verify",
+    ...adminOnly,
+    asyncRoute(async (_req: AuthedRequest, res: Response) => {
+      if (!deps.pool) {
+        // Same honesty as /admin/audit: no database means nothing durable to verify, which is
+        // not the same as a chain that verified.
+        res.json({ durable: false, ok: null });
+        return;
+      }
+      res.json({ durable: true, ...(await verifyAuditChain(deps.pool)) });
     }),
   );
 

@@ -1,5 +1,6 @@
 import pg from "pg";
 import type { MatchedHelper } from "@needy/shared";
+import { RUNTIME_ROLE_SETTING } from "./dbRoles.js";
 import { logger } from "./logger.js";
 
 const { Pool } = pg;
@@ -147,8 +148,17 @@ export const CONSTRAINTS_SQL: readonly string[] = [
      LENGTH(aadhaar_last4) = 4 AND aadhaar_last4 ~ '^[0-9]{4}$')`,
 ];
 
-export function createPool(databaseUrl: string): DbPool {
-  return new Pool({ connectionString: databaseUrl });
+/**
+ * `runtimeRole` is set only on the OWNER pool: it names the role migration 14 and the boot-time
+ * grant step give privileges to (see dbRoles.ts), as a session setting because a migration is
+ * fixed SQL and cannot take a parameter. The caller validates it (`resolveRuntimeRole`) — it
+ * travels in the startup options, where a space would split it into a second option.
+ */
+export function createPool(databaseUrl: string, opts: { runtimeRole?: string } = {}): DbPool {
+  return new Pool({
+    connectionString: databaseUrl,
+    ...(opts.runtimeRole ? { options: `-c ${RUNTIME_ROLE_SETTING}=${opts.runtimeRole}` } : {}),
+  });
 }
 
 /**

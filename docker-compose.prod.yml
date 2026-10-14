@@ -69,12 +69,22 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    # Two roles. POSTGRES_USER owns the schema and is used only by the backend's migrations;
+    # NEEDY_APP_DB_USER is what the backend serves traffic as, and may only SELECT and INSERT
+    # on audit_log and abuse_signals (packages/backend/src/dbRoles.ts). The init script makes
+    # that role on a NEW volume only. On an existing volume, create it once by hand:
+    #   docker compose -f docker-compose.prod.yml exec -T postgres \
+    #     sh /docker-entrypoint-initdb.d/10-runtime-role.sh
+    # then restart the backend, which grants it its privileges at boot.
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-needy}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-needy}
+      NEEDY_APP_DB_USER: ${NEEDY_APP_DB_USER:-needy_app}
+      NEEDY_APP_DB_PASSWORD: ${NEEDY_APP_DB_PASSWORD:?set NEEDY_APP_DB_PASSWORD (different from POSTGRES_PASSWORD)}
     volumes:
       - pg-data:/var/lib/postgresql/data
+      - ./deploy/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
@@ -89,7 +99,12 @@ services:
     environment:
       NODE_ENV: production
       PORT: "4000"
-      DATABASE_URL: postgresql://${POSTGRES_USER:-needy}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-needy}
+      # Serves traffic as the least-privilege role; migrates as the owner, whose connections are
+      # closed before the server listens. Boot refuses production if these are the same role,
+      # or if the runtime role could UPDATE, DELETE or TRUNCATE the audit log. Both passwords
+      # go into URLs, so generate them URL-safe (hex), or percent-encode them.
+      DATABASE_URL: postgresql://${NEEDY_APP_DB_USER:-needy_app}:${NEEDY_APP_DB_PASSWORD:?set NEEDY_APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-needy}
+      DATABASE_MIGRATION_URL: postgresql://${POSTGRES_USER:-needy}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-needy}
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET to at least 32 random characters}
       # Only while rotating JWT_SECRET: the outgoing key, accepted for verification only.

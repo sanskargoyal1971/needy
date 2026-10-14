@@ -135,7 +135,20 @@ export const config = {
    *  later. Empty means no rotation is in progress. */
   jwtSecretPrevious: process.env.JWT_SECRET_PREVIOUS ?? "",
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
+  /** The RUNTIME role: every query the server makes while serving traffic. In production it
+   *  must be a different role from the one below, and boot refuses one that owns, or may
+   *  UPDATE/DELETE/TRUNCATE, the append-only tables (see dbRoles.ts). */
   databaseUrl: process.env.DATABASE_URL ?? "",
+  /**
+   * The schema OWNER: used only for migrations and the boot-time backfills, then closed before
+   * the server listens. Unset means one role does both, which is how development runs and is
+   * refused in production — an owner can drop the rules that make audit_log append-only, so
+   * the role that writes the log must not be one.
+   */
+  databaseMigrationUrl: process.env.DATABASE_MIGRATION_URL ?? "",
+  /** The runtime role's name, for the owner's grants. Defaults to the user in DATABASE_URL;
+   *  set it only if that URL carries no user (a pgpass file, say). */
+  databaseRuntimeRole: process.env.DATABASE_RUNTIME_ROLE ?? "",
   match: {
     /**
      * The hard ceiling, not the search radius.

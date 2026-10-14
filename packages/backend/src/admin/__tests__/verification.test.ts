@@ -135,7 +135,12 @@ describe("admin verification surface", () => {
 
   describe("access control", () => {
     it("refuses anonymous callers", async () => {
-      for (const path of ["/admin/verifications", "/admin/users", "/admin/audit"]) {
+      for (const path of [
+        "/admin/verifications",
+        "/admin/users",
+        "/admin/audit",
+        "/admin/audit/verify",
+      ]) {
         expect((await request(app).get(path)).status).toBe(401);
       }
     });
@@ -150,6 +155,7 @@ describe("admin verification surface", () => {
         "/admin/verifications/u1",
         "/admin/users",
         "/admin/audit",
+        "/admin/audit/verify",
       ];
       for (const p of paths) {
         expect((await request(app).get(p).set("authorization", t)).status).toBe(403);
@@ -160,6 +166,14 @@ describe("admin verification surface", () => {
         .send({ decision: "approve" });
       expect(post.status).toBe(403);
     });
+  });
+
+  /** Without a database there is no chain to check. Saying `ok: true` here would read as "the
+   *  log verified" to a reviewer when there is no durable log at all. */
+  it("reports an audit chain check as not durable when there is no database", async () => {
+    const res = await asAdmin(request(app).get("/admin/audit/verify"));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ durable: false, ok: null });
   });
 
   // ── queue ──────────────────────────────────────────────────────────────────
