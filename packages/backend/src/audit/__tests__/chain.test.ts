@@ -6,7 +6,8 @@ import { createVerificationRouter, type VerificationRouterDeps } from "../../adm
 import { signAccessToken } from "../../auth/jwt.js";
 import { createInMemoryUserRepo } from "../../auth/repos.js";
 import { makeUser } from "../../auth/types.js";
-import { PgHarness } from "../../test/pgHarness.js";
+import { MIGRATIONS, migrate } from "../../migrations.js";
+import { PgHarness, silentLog } from "../../test/pgHarness.js";
 import {
   auditRowHash,
   canonicalJson,
@@ -35,16 +36,19 @@ function entry(i: number, metadata: Record<string, unknown> = {}): AuditEntry {
   };
 }
 
-/** The owner disabling the rule for a moment is exactly the tampering the chain is for: the
- *  role separation stops the app doing this, and nothing in Postgres stops a superuser. */
+/** The owner disabling the rules and the insert guard for a moment is exactly the tampering
+ *  the chain is for: the role separation stops the app doing this, and nothing in Postgres
+ *  stops a superuser. */
 async function asOwnerBypassingRules(owner: pg.Pool, sql: string, params: unknown[] = []) {
   await owner.query(`ALTER TABLE audit_log DISABLE RULE audit_log_no_update`);
   await owner.query(`ALTER TABLE audit_log DISABLE RULE audit_log_no_delete`);
+  await owner.query(`ALTER TABLE audit_log DISABLE TRIGGER audit_log_chain_guard`);
   try {
     await owner.query(sql, params);
   } finally {
     await owner.query(`ALTER TABLE audit_log ENABLE RULE audit_log_no_update`);
     await owner.query(`ALTER TABLE audit_log ENABLE RULE audit_log_no_delete`);
+    await owner.query(`ALTER TABLE audit_log ENABLE TRIGGER audit_log_chain_guard`);
   }
 }
 
@@ -90,7 +94,15 @@ describe("audit hash chain", () => {
     await audit.record({ action: "sos.raised", actorId: null });
 
     const report = await verifyAuditChain(runtime);
-    expect(report).toMatchObject({ ok: true, checked: 4, legacyUnchained: 0, firstBroken: null });
+    expect(report).toMatchObject({
+      ok: true,
+      checked: 4,
+      legacyUnchained: 0,
+      legacyRecorded: 0,
+      firstBroken: null,
+      lastBroken: null,
+      brokenCount: 0,
+    });
     const { rows } = await runtime.query<{ id: string; row_hash: string; prev_hash: string }>(
       `SELECT id::text, row_hash, prev_hash FROM audit_log ORDER BY id`,
     );
@@ -122,7 +134,7 @@ describe("audit hash chain", () => {
       for (let i = 0; i < 5; i++) await audit.record(entry(i));
     }
 
-    it("names the edited row, at its position", async () => {
+    it("names the edited row, at its position, and still verifies the rows after it", async () => {
       await writeFive();
       const all = await ids(runtime);
       await asOwnerBypassingRules(
@@ -130,10 +142,13 @@ describe("audit hash chain", () => {
         `UPDATE audit_log SET metadata = '{"i": 99}'::jsonb WHERE id = $1`,
         [all[2]],
       );
+      const broken = { id: all[2], position: 3, reason: "row_hash_mismatch" };
       expect(await verifyAuditChain(runtime)).toMatchObject({
         ok: false,
-        checked: 2,
-        firstBroken: { id: all[2], position: 3, reason: "row_hash_mismatch" },
+        checked: 4,
+        firstBroken: broken,
+        lastBroken: broken,
+        brokenCount: 1,
       });
     });
 
@@ -174,7 +189,9 @@ describe("audit hash chain", () => {
       ]);
       expect(await verifyAuditChain(runtime)).toMatchObject({
         ok: false,
+        checked: 4,
         firstBroken: { id: all[3], position: 4, reason: "prev_hash_mismatch" },
+        brokenCount: 1,
       });
     });
   });
@@ -187,9 +204,10 @@ describe("audit hash chain", () => {
     await asOwnerBypassingRules(owner, `DELETE FROM audit_log WHERE id = $1`, [all[1]]);
     expect(await verifyAuditChain(runtime)).toMatchObject({
       ok: false,
-      checked: 1,
+      checked: 3,
       // The row that WAS third is now second in the table.
       firstBroken: { id: all[2], position: 2, reason: "prev_hash_mismatch" },
+      brokenCount: 1,
     });
   });
 
@@ -198,24 +216,106 @@ describe("audit hash chain", () => {
     const audit = createPgAuditLogger(runtime, () => NOW);
     await audit.record(entry(1));
     await audit.record(entry(2));
-    const { rows } = await owner.query<{ id: string }>(
-      `INSERT INTO audit_log (action, actor_id, at) VALUES ('admin.role_changed', 'ghost', 1)
-       RETURNING id::text`,
+    const ghost = await owner.query<{ id: string }>(
+      `SELECT nextval('audit_log_id_seq')::text AS id`,
+    );
+    await asOwnerBypassingRules(
+      owner,
+      `INSERT INTO audit_log (id, action, actor_id, at) VALUES ($1, 'admin.role_changed', 'ghost', 1)`,
+      [ghost.rows[0]!.id],
     );
     await audit.record(entry(3));
     expect(await verifyAuditChain(runtime)).toMatchObject({
       ok: false,
-      checked: 2,
-      firstBroken: { id: rows[0]!.id, position: 3, reason: "unchained_row" },
+      checked: 3,
+      firstBroken: { id: ghost.rows[0]!.id, position: 3, reason: "unchained_row" },
+      brokenCount: 1,
+    });
+  });
+
+  /** Migration 14 worked out where the unhashed prefix ends from the rows themselves, so
+   *  nulling every hash made the whole log "legacy" and it verified with nothing checked. */
+  it("fails when the owner strips every hash", async () => {
+    const { owner, runtime } = await harness.freshDbWithRuntimeRole("chain_strip");
+    const audit = createPgAuditLogger(runtime, () => NOW);
+    for (let i = 0; i < 3; i++) await audit.record(entry(i));
+    const all = await ids(runtime);
+    await asOwnerBypassingRules(owner, `UPDATE audit_log SET prev_hash = NULL, row_hash = NULL`);
+    expect(await verifyAuditChain(runtime)).toMatchObject({
+      ok: false,
+      checked: 0,
+      legacyUnchained: 0,
+      firstBroken: { id: all[0], position: 1, reason: "unchained_row" },
+      lastBroken: { id: all[2], position: 3, reason: "unchained_row" },
+      brokenCount: 3,
+    });
+  });
+
+  /** The walk used to start above id 0, so a row there was never looked at. */
+  it("fails when a row is slipped in below the chain, at id 0", async () => {
+    const { owner, runtime } = await harness.freshDbWithRuntimeRole("chain_zero");
+    const audit = createPgAuditLogger(runtime, () => NOW);
+    await audit.record(entry(1));
+    await asOwnerBypassingRules(
+      owner,
+      `INSERT INTO audit_log (id, action, actor_id, at) VALUES (0, 'admin.role_changed', 'ghost', 1)`,
+    );
+    expect(await verifyAuditChain(runtime)).toMatchObject({
+      ok: false,
+      checked: 1,
+      legacyUnchained: 1,
+      legacyRecorded: 0,
+      brokenCount: 0,
+    });
+  });
+
+  /** The trigger cannot recompute a row's hash, so the runtime role CAN still insert a row
+   *  whose hash is garbage. It used to stop the verifier there for good; now it marks one row
+   *  and a later edit by the owner is still found. */
+  it("a planted row does not hide tampering after it", async () => {
+    const { owner, runtime } = await harness.freshDbWithRuntimeRole("chain_planted");
+    const audit = createPgAuditLogger(runtime, () => NOW);
+    await audit.record(entry(1));
+    const client = await runtime.connect();
+    let planted: string;
+    try {
+      await client.query("BEGIN");
+      const head = await client.query<{ row_hash: string }>(
+        `SELECT row_hash FROM audit_log ORDER BY id DESC LIMIT 1`,
+      );
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO audit_log (id, action, actor_id, at, prev_hash, row_hash)
+         VALUES (nextval('audit_log_id_seq'), 'admin.role_changed', 'ghost', 1, $1, $2)
+         RETURNING id::text`,
+        [head.rows[0]!.row_hash, "f".repeat(64)],
+      );
+      planted = rows[0]!.id;
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    for (let i = 2; i < 5; i++) await audit.record(entry(i));
+    const all = await ids(runtime);
+    await asOwnerBypassingRules(owner, `UPDATE audit_log SET actor_id = 'nobody' WHERE id = $1`, [
+      all[3],
+    ]);
+    expect(await verifyAuditChain(runtime)).toMatchObject({
+      ok: false,
+      checked: 3,
+      firstBroken: { id: planted, position: 2, reason: "row_hash_mismatch" },
+      lastBroken: { id: all[3], position: 4, reason: "row_hash_mismatch" },
+      brokenCount: 2,
     });
   });
 
   it("counts rows from before the chain existed and verifies from there", async () => {
-    const { owner, runtime } = await harness.freshDbWithRuntimeRole("chain_legacy");
+    const before15 = MIGRATIONS.filter((m) => m.id < 15);
+    const { owner, runtime } = await harness.freshDbWithRuntimeRole("chain_legacy", before15);
     // What a database that ran migrations 1–13 holds: rows with no hash at all.
     await owner.query(
       `INSERT INTO audit_log (action, actor_id, at) VALUES ('sos.raised','u1',1), ('sos.resolved','a1',2)`,
     );
+    await migrate(owner, silentLog);
     const audit = createPgAuditLogger(runtime, () => NOW);
     await audit.record(entry(1));
     await audit.record(entry(2));
@@ -223,6 +323,19 @@ describe("audit hash chain", () => {
       ok: true,
       checked: 2,
       legacyUnchained: 2,
+      legacyRecorded: 2,
+    });
+
+    // One more unhashed row in the prefix: unverifiable on its own, but the count shows it.
+    await asOwnerBypassingRules(
+      owner,
+      `INSERT INTO audit_log (id, action, actor_id, at) VALUES (-5, 'sos.resolved', 'a2', 3)`,
+    );
+    expect(await verifyAuditChain(runtime)).toMatchObject({
+      ok: false,
+      legacyUnchained: 3,
+      legacyRecorded: 2,
+      brokenCount: 0,
     });
   });
 

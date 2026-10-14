@@ -184,6 +184,21 @@ describe("migration 14 — least-privilege runtime role", () => {
     expect(problems.join("\n")).toMatch(/can UPDATE\/DELETE\/TRUNCATE audit_log/);
   });
 
+  /** Before Postgres 16 a CREATEROLE role can grant itself the owner role, which undoes every
+   *  refusal above; the boot check used to pass it. Attributes are cluster-wide, so each is
+   *  taken away again before the next test looks. */
+  it("fails a runtime role holding CREATEROLE, REPLICATION or BYPASSRLS", async () => {
+    for (const attr of ["CREATEROLE", "REPLICATION", "BYPASSRLS"]) {
+      await owner.query(`ALTER ROLE ${role} ${attr}`);
+      try {
+        expect(await inspectRuntimeRole(runtime)).toEqual([`role ${role} has ${attr}`]);
+      } finally {
+        await owner.query(`ALTER ROLE ${role} NO${attr}`);
+      }
+    }
+    expect(await inspectRuntimeRole(runtime)).toEqual([]);
+  });
+
   it("notices a privilege granted by hand, and the next boot's sync takes it away", async () => {
     await owner.query(`GRANT UPDATE, TRUNCATE ON audit_log TO ${role}`);
     expect(await inspectRuntimeRole(runtime)).toEqual([

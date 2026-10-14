@@ -89,7 +89,9 @@ export interface AuditLogger {
  *
  * The id is drawn with `nextval` before the INSERT, under the lock, because it is part of what
  * is hashed: a row cannot be renumbered without the hash noticing. Drawing it under the lock is
- * also what makes id order and chain order the same.
+ * also what makes id order and chain order the same. Migration 15's trigger holds every
+ * inserter to this — the drawn id, after every existing row, onto the current head — so the
+ * runtime role's INSERT privilege is not also a way to pick those columns.
  *
  * The lock is an advisory one, not `LOCK TABLE`: a lock mode strong enough to exclude other
  * inserters needs UPDATE or DELETE on the table, which is exactly what the runtime role is
@@ -108,6 +110,10 @@ export function createPgAuditLogger(pool: DbPool, now: () => number): AuditLogge
   return {
     async record(entry) {
       let client: PoolClient | null = null;
+      // Set when ROLLBACK itself failed: the connection is broken, or still inside an aborted
+      // transaction, and handing it back to the pool would fail whichever unrelated request
+      // drew it next. Released with the error instead, which makes pg destroy it.
+      let discard: Error | undefined;
       try {
         client = await pool.connect();
         await client.query("BEGIN");
@@ -155,7 +161,9 @@ export function createPgAuditLogger(pool: DbPool, now: () => number): AuditLogge
         );
         await client.query("COMMIT");
       } catch (err) {
-        await client?.query("ROLLBACK").catch(() => undefined);
+        await client?.query("ROLLBACK").catch((rollbackErr: unknown) => {
+          discard = rollbackErr instanceof Error ? rollbackErr : new Error(String(rollbackErr));
+        });
         logger.error("AUDIT WRITE FAILED — event recorded here instead", {
           action: entry.action,
           actorId: entry.actorId,
@@ -164,7 +172,7 @@ export function createPgAuditLogger(pool: DbPool, now: () => number): AuditLogge
           err: String(err),
         });
       } finally {
-        client?.release();
+        client?.release(discard);
       }
     },
   };

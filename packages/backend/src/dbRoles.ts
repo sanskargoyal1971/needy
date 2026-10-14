@@ -26,8 +26,10 @@ import type { MigrationLog } from "./migrations.js";
 export const APPEND_ONLY_TABLES: readonly string[] = ["audit_log", "abuse_signals"];
 
 /** Tables the runtime role reads and never writes. The migration ledger is the owner's: a
- *  runtime role that could insert into it could mark a migration applied that never ran. */
-export const READ_ONLY_TABLES: readonly string[] = ["schema_migrations"];
+ *  runtime role that could insert into it could mark a migration applied that never ran. Nor
+ *  may it move where the audit chain starts (migration 15): every unhashed row it could push
+ *  below that line would stop counting as a break. */
+export const READ_ONLY_TABLES: readonly string[] = ["schema_migrations", "audit_chain_start"];
 
 /** The session setting that names the runtime role. A setting rather than a literal in the SQL
  *  because the role's name is a deployment choice, and a migration cannot be parameterised. The
@@ -179,8 +181,14 @@ export async function syncRuntimeGrants(owner: DbPool, log: MigrationLog): Promi
 
 /**
  * What is wrong with the role this pool connects as, for serving traffic. Empty means it is
- * fit: not a superuser, owns none of the append-only tables, and can neither UPDATE, DELETE
- * nor TRUNCATE them.
+ * fit: not a superuser, none of CREATEROLE, REPLICATION or BYPASSRLS, owns none of the
+ * append-only tables, and can neither UPDATE, DELETE nor TRUNCATE them.
+ *
+ * The attributes because each is a way round the rest of this check. Before Postgres 16 a
+ * CREATEROLE role can grant itself membership in any non-superuser role, the owner included;
+ * REPLICATION can stream the whole cluster out, or drive a replication slot; BYPASSRLS voids
+ * any row-level policy added later. The init script creates the role without them, and this
+ * is what notices when a hand-made role did not.
  *
  * Asked of the database rather than inferred from configuration, because the configuration is
  * what is being checked: two URLs with different user names can still both be superusers.
@@ -189,6 +197,9 @@ export async function inspectRuntimeRole(pool: DbPool): Promise<string[]> {
   const { rows } = await pool.query<{
     role: string;
     superuser: boolean;
+    createrole: boolean;
+    replication: boolean;
+    bypassrls: boolean;
     relname: string;
     present: boolean;
     owner: string | null;
@@ -199,6 +210,9 @@ export async function inspectRuntimeRole(pool: DbPool): Promise<string[]> {
   }>(
     `SELECT current_user AS role,
             r.rolsuper AS superuser,
+            r.rolcreaterole AS createrole,
+            r.rolreplication AS replication,
+            r.rolbypassrls AS bypassrls,
             t.relname,
             c.oid IS NOT NULL AS present,
             pg_get_userbyid(c.relowner) AS owner,
@@ -213,7 +227,14 @@ export async function inspectRuntimeRole(pool: DbPool): Promise<string[]> {
     [APPEND_ONLY_TABLES],
   );
   const problems: string[] = [];
-  if (rows[0]?.superuser) problems.push(`role ${rows[0].role} is a superuser`);
+  const self = rows[0];
+  if (self?.superuser) problems.push(`role ${self.role} is a superuser`);
+  const attributes = [
+    self?.createrole && "CREATEROLE",
+    self?.replication && "REPLICATION",
+    self?.bypassrls && "BYPASSRLS",
+  ].filter(Boolean);
+  if (self && attributes.length > 0) problems.push(`role ${self.role} has ${attributes.join("/")}`);
   for (const r of rows) {
     if (!r.present) {
       problems.push(`${r.relname} does not exist (migrations not applied?)`);

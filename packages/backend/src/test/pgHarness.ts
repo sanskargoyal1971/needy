@@ -61,9 +61,13 @@ export class PgHarness {
    * ran the migrations (the harness's admin user), `runtime` connects as a separate login role
    * that migration 14 granted to. Use `runtime` for anything the app does at request time —
    * the point of these tests is what that role is refused.
+   *
+   * `list` stops short as `freshDb`'s does, so rows can be put in place before a later
+   * migration runs; `migrate(owner, ...)` then finishes the job.
    */
   async freshDbWithRuntimeRole(
     label: string,
+    list?: readonly Migration[],
   ): Promise<{ owner: pg.Pool; runtime: pg.Pool; role: string }> {
     if (!this.admin) throw new Error("call connect() first");
     // Roles are cluster-wide, unlike databases, so the pid keeps parallel test files apart.
@@ -73,7 +77,7 @@ export class PgHarness {
       `CREATE ROLE ${role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '${TEST_RUNTIME_PASSWORD}'`,
     );
     this.roles.push(role);
-    const { pool: owner, name } = await this.createDb(label, undefined, role);
+    const { pool: owner, name } = await this.createDb(label, list, role);
     const runtime = new pg.Pool({
       connectionString: urlFor(name, { user: role, password: TEST_RUNTIME_PASSWORD }),
     });

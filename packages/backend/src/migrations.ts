@@ -1,6 +1,7 @@
 import { SEED_SERVICES } from "@needy/shared";
 import type { DbPool } from "./db.js";
 import { CONSTRAINTS_SQL, SCHEMA_SQL } from "./db.js";
+import { AUDIT_CHAIN_LOCK_KEY, GENESIS_HASH } from "./audit/chain.js";
 import { RUNTIME_GRANTS_SQL } from "./dbRoles.js";
 
 /** ── Migrations ────────────────────────────────────────────────────────────
@@ -674,6 +675,97 @@ export const MIGRATIONS: readonly Migration[] = [
       // See dbRoles.ts. Skipped without error when no runtime role is configured or it does
       // not exist yet; the boot step re-applies the same grants every start, so creating the
       // role later is enough.
+      RUNTIME_GRANTS_SQL,
+    ],
+  },
+  {
+    id: 15,
+    name: "audit-chain-guard-and-start",
+    statements: [
+      // ── where the chain starts, written down once ───────────────────────────────────────
+      //
+      // Migration 14 left the verifier to work out where the unhashed prefix ends from the
+      // data. That made the boundary editable: null every hash and the whole log reads as
+      // "legacy", verifying ok with nothing checked. So the boundary is recorded now, while
+      // it is still true, and the verifier treats any unhashed row above it as a break, and
+      // any change in how many rows sit at or below it as one too.
+      //
+      // `legacy_max_id` is the id just before the first hashed row, or the newest id when
+      // nothing is hashed yet (every row so far predates the chain). Owner-written only: the
+      // runtime role gets SELECT (READ_ONLY_TABLES in dbRoles.ts). One row, ever.
+      `CREATE TABLE audit_chain_start (
+         singleton     BOOLEAN PRIMARY KEY DEFAULT true CHECK (singleton),
+         legacy_max_id BIGINT NOT NULL,
+         legacy_rows   BIGINT NOT NULL,
+         recorded_at   BIGINT NOT NULL
+       )`,
+      `INSERT INTO audit_chain_start (legacy_max_id, legacy_rows, recorded_at)
+       SELECT b.max_id,
+              (SELECT count(*) FROM audit_log WHERE id <= b.max_id),
+              (extract(epoch FROM clock_timestamp()) * 1000)::bigint
+         FROM (SELECT coalesce((SELECT min(id) - 1 FROM audit_log WHERE row_hash IS NOT NULL),
+                               (SELECT max(id) FROM audit_log),
+                               0) AS max_id) b`,
+
+      // ── the chain columns are not the inserter's to choose ──────────────────────────────
+      //
+      // The runtime role must hold INSERT on audit_log, and with it every column: id,
+      // prev_hash and row_hash included. Nothing checked them, so one INSERT from a
+      // compromised process could plant a row the verifier stopped at (no hash), a huge id
+      // that every later honest row then chained onto out of id order, or an id at or below
+      // zero that the walk never reached.
+      //
+      // This trigger refuses all of those, for every inserter: both hashes present and
+      // well-formed, prev_hash equal to the current head's row_hash, and the id the one this
+      // session just drew from the sequence, sorting after every row already there. It takes
+      // the writer's advisory lock (audit/log.ts), so "the current head" is the row this one
+      // will actually follow; taking a lock the transaction already holds is a no-op.
+      //
+      // It cannot check row_hash itself, which needs the app's canonical JSON, so a garbage
+      // hash still goes in. The verifier names that row and keeps walking from it, so a bad
+      // hash marks one row instead of hiding everything after it.
+      //
+      // Owned by the owner and not SECURITY DEFINER: it needs nothing the inserter lacks.
+      // Only the owner or a superuser can disable it, and that is the tampering the chain is
+      // there to show.
+      `CREATE FUNCTION audit_log_chain_guard() RETURNS trigger LANGUAGE plpgsql AS $guard$
+       DECLARE
+         drawn bigint;
+         head_hash text;
+       BEGIN
+         PERFORM pg_advisory_xact_lock(${AUDIT_CHAIN_LOCK_KEY});
+         IF NEW.prev_hash IS NULL OR NEW.row_hash IS NULL
+            OR NEW.prev_hash !~ '^[0-9a-f]{64}$' OR NEW.row_hash !~ '^[0-9a-f]{64}$' THEN
+           RAISE EXCEPTION 'audit_log: prev_hash and row_hash are required'
+             USING ERRCODE = 'check_violation';
+         END IF;
+         BEGIN
+           drawn := currval(pg_get_serial_sequence('audit_log', 'id'));
+         EXCEPTION WHEN object_not_in_prerequisite_state THEN
+           drawn := NULL;
+         END;
+         IF drawn IS NULL OR NEW.id IS DISTINCT FROM drawn THEN
+           RAISE EXCEPTION 'audit_log: id must be the one this session drew from the sequence'
+             USING ERRCODE = 'check_violation';
+         END IF;
+         IF EXISTS (SELECT 1 FROM audit_log WHERE id >= NEW.id) THEN
+           RAISE EXCEPTION 'audit_log: id % does not follow the newest row', NEW.id
+             USING ERRCODE = 'check_violation';
+         END IF;
+         SELECT row_hash INTO head_hash FROM audit_log
+          WHERE row_hash IS NOT NULL ORDER BY id DESC LIMIT 1;
+         IF NEW.prev_hash IS DISTINCT FROM coalesce(head_hash, ${lit(GENESIS_HASH)}) THEN
+           RAISE EXCEPTION 'audit_log: prev_hash is not the current head'
+             USING ERRCODE = 'check_violation';
+         END IF;
+         RETURN NEW;
+       END
+       $guard$`,
+      `CREATE TRIGGER audit_log_chain_guard BEFORE INSERT ON audit_log
+         FOR EACH ROW EXECUTE FUNCTION audit_log_chain_guard()`,
+
+      // The new table arrived with the default privileges' ordinary grant; narrow it to
+      // SELECT here rather than leave it writable until the next boot's sync.
       RUNTIME_GRANTS_SQL,
     ],
   },
