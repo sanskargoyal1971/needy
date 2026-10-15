@@ -1,0 +1,130 @@
+# PRIVATE DEMO stack — sandbox providers, reachable only from ALLOW_CIDR.
+#
+# Differs from docker-compose.prod.yml on purpose, and must never be used for real users:
+#   - the backend runs NODE_ENV=development: sandbox KYC, console SMS with DEV_FIXED_OTP (so
+#     the code is shared by every account), dev routes, seeded helper fixtures;
+#   - KYC uploads go to a tmpfs and vanish on restart (no S3, no instance role);
+#   - no backup sidecar.
+# Secrets still come from a root-only env file on the host, generated at deploy time.
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN}
+      ALLOW_CIDR: ${ALLOW_CIDR:?set ALLOW_CIDR to the one address range allowed in}
+    volumes:
+      - ./deploy/demo/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", 'redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_USER: needy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: needy
+      NEEDY_APP_DB_USER: needy_app
+      NEEDY_APP_DB_PASSWORD: ${NEEDY_APP_DB_PASSWORD:?set NEEDY_APP_DB_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./deploy/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    environment:
+      NODE_ENV: development
+      PORT: "4000"
+      DATABASE_URL: postgresql://needy_app:${NEEDY_APP_DB_PASSWORD}@postgres:5432/needy
+      DATABASE_MIGRATION_URL: postgresql://needy:${POSTGRES_PASSWORD}@postgres:5432/needy
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      KYC_CALLBACK_SECRET: ${KYC_CALLBACK_SECRET:?set KYC_CALLBACK_SECRET}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?set TOTP_ENCRYPTION_KEY}
+      PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY:?set PII_ENCRYPTION_KEY}
+      PII_INDEX_KEY: ${PII_INDEX_KEY:?set PII_INDEX_KEY}
+      DEV_FIXED_OTP: ${DEV_FIXED_OTP:?set DEV_FIXED_OTP}
+      CORS_ORIGIN: https://${DOMAIN}
+      PUBLIC_BASE_URL: https://api.${DOMAIN}
+      TRUST_PROXY: "1"
+      COOKIE_SECURE: "true"
+      COOKIE_SAMESITE: strict
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_ROOT: /uploads
+    tmpfs:
+      - /uploads:mode=1777
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    <<: *hardening
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: https://api.${DOMAIN}
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      # Also read at runtime by proxy.ts to build the CSP connect-src.
+      NEXT_PUBLIC_API_URL: https://api.${DOMAIN}
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  redis-data:
+  pg-data:
+  caddy-data:
+  caddy-config:

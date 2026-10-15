@@ -1,0 +1,38 @@
+# PRIVATE DEMO ONLY — see deploy/demo/deploy-demo-ec2.sh.
+#
+# The demo backend runs in sandbox mode: a fixed sign-in code, the sandbox KYC adapter and
+# dev routes. That is only acceptable because nobody but ALLOW_CIDR can reach it. This file is
+# the second of two locks; the security group is the first.
+#
+# The allowlist is applied per site, after TLS. Caddy answers ACME HTTP-01 challenges in its
+# HTTP listener before site routing and TLS-ALPN-01 in the handshake, so issuance still works
+# while the security group is briefly open to Let's Encrypt.
+
+(guard) {
+	@outsider not remote_ip {$ALLOW_CIDR}
+	abort @outsider
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+}
+
+{$DOMAIN} {
+	import guard
+	import security_headers
+	encode zstd gzip
+	reverse_proxy web:3000
+}
+
+api.{$DOMAIN} {
+	import guard
+	import security_headers
+	@metrics path /metrics /metrics/*
+	respond @metrics 404
+	reverse_proxy backend:4000
+}
