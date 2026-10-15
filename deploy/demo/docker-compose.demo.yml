@@ -113,6 +113,9 @@ services:
       dockerfile: packages/web/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: https://api.${DOMAIN}
+        # The SAME variable the backend's DEV_FIXED_OTP reads, so the note and the server can
+        # never disagree. Changing the code means rebuilding web (it is inlined at build).
+        NEXT_PUBLIC_DEV_FIXED_OTP: ${DEV_FIXED_OTP}
     environment:
       NODE_ENV: production
       PORT: "3000"

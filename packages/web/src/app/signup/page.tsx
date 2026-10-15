@@ -7,8 +7,8 @@ import { useAuth } from "@/auth/AuthProvider";
 import { authClient, AuthError } from "@/lib/authClient";
 import { paths } from "@/lib/paths";
 import { normalisePhone, phoneError } from "@/lib/phone";
-import { AuthCard, Button, Field, FormError, SandboxNote, TextInput } from "@/components/ui";
-import { DEV_FIXED_OTP } from "@/lib/apiConfig";
+import { AuthCard, Button, Field, FormError, TextInput } from "@/components/ui";
+import { DevCodeNote } from "@/components/DevCodeNote";
 
 /**
  * Step 1 of signup: prove the phone number.
@@ -159,11 +159,7 @@ export default function Signup() {
         >
           Use a different number
         </Button>
-        <SandboxNote>
-          No SMS provider is connected yet, so every account accepts the same code:{" "}
-          <strong>{DEV_FIXED_OTP}</strong>. This is a development stand-in — the server refuses to
-          start with a fixed code in production.
-        </SandboxNote>
+        <DevCodeNote />
       </form>
     </AuthCard>
   );

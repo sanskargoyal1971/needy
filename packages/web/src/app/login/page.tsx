@@ -8,9 +8,9 @@ import { useAuth } from "@/auth/AuthProvider";
 import { authClient, AuthError, type PublicUser } from "@/lib/authClient";
 import { AuthenticatorSecret, RecoveryCodes } from "@/components/Authenticator";
 import { homeFor, paths, safeReturnTo } from "@/lib/paths";
-import { AuthCard, Button, Field, FormError, SandboxNote, TextInput } from "@/components/ui";
+import { AuthCard, Button, Field, FormError, TextInput } from "@/components/ui";
 import { normalisePhone, phoneError } from "@/lib/phone";
-import { DEV_FIXED_OTP } from "@/lib/apiConfig";
+import { DevCodeNote } from "@/components/DevCodeNote";
 
 /** Panes on one route: ask for the number, then for a code or a password. Separate routes
  *  would lose the phone number on refresh and let someone deep-link to a code prompt for a
@@ -601,11 +601,7 @@ function LoginForm() {
             Your password was accepted. Because this account can see people&apos;s emergencies, it
             needs both.
           </p>
-          <SandboxNote>
-            No SMS provider is connected yet, so every account accepts the same code:{" "}
-            <strong>{DEV_FIXED_OTP}</strong>. This is a development stand-in — the server refuses to
-            start with a fixed code in production.
-          </SandboxNote>
+          <DevCodeNote />
         </form>
       </AuthCard>
     );
@@ -647,11 +643,7 @@ function LoginForm() {
         >
           Use a different number
         </Button>
-        <SandboxNote>
-          No SMS provider is connected yet, so every account accepts the same code:{" "}
-          <strong>{DEV_FIXED_OTP}</strong>. This is a development stand-in — the server refuses to
-          start with a fixed code in production.
-        </SandboxNote>
+        <DevCodeNote />
       </form>
     </AuthCard>
   );

@@ -23,5 +23,9 @@ export const SUPPORT_PHONE: string = process.env.NEXT_PUBLIC_SUPPORT_PHONE ?? ""
  * of sending someone to read a log file. It is only ever a convenience: the backend decides
  * whether a code is accepted, and refuses to start with a fixed one in production. Setting
  * this on the web side alone changes nothing except what the note says.
+ *
+ * Empty when the build was not told the code. This used to default to "123456", the backend's
+ * own default — so a backend given any other code (the hosted demo uses a generated one) had a
+ * page confidently printing a code it then rejected. An unknown code is now said to be unknown.
  */
-export const DEV_FIXED_OTP: string = process.env.NEXT_PUBLIC_DEV_FIXED_OTP ?? "123456";
+export const DEV_FIXED_OTP: string = process.env.NEXT_PUBLIC_DEV_FIXED_OTP ?? "";
