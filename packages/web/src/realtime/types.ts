@@ -94,6 +94,11 @@ export interface TaskExperienceState {
    * request the server rejected.
    */
   lastError: SocketErrorPayload | null;
+  /**
+   * The task does not exist or is not this user's. Distinct from `task: null`, which means
+   * "still loading": without it a wrong or foreign link spun a loader forever.
+   */
+  taskUnavailable: boolean;
 }
 
 /** `userId` is required rather than defaulted so a driver can never silently ship an
@@ -113,6 +118,7 @@ export function initialTaskState(userId: string): TaskExperienceState {
     milestones: [],
     sos: null,
     lastError: null,
+    taskUnavailable: false,
   };
 }
 

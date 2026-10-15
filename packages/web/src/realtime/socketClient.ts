@@ -7,6 +7,7 @@ import {
   type ChatServerEvents,
   type MatchingClientEvents,
   type MatchingServerEvents,
+  type PublicTask,
   type PresenceClientEvents,
   type PresenceServerEvents,
   type SessionSnapshot,
@@ -373,6 +374,26 @@ export class RealNeedyClient implements NeedyDriver {
           sos: entry.sos,
         });
         if (entry.helper) this.subscribePresence(entry.helper.id);
+      } else {
+        // The snapshot carries ACTIVE tasks only, so a finished or cancelled one — every link
+        // in the request history — is absent from it, and the page used to spin forever.
+        // Read that one task directly; a terminal task has no rooms worth joining.
+        const res = await fetch(`${this.opts.baseUrl}/tasks/${encodeURIComponent(this.taskId)}`, {
+          headers: this.opts.token ? { authorization: `Bearer ${this.opts.token}` } : {},
+          credentials: "include",
+        });
+        if (res.status === 403 || res.status === 404) {
+          this.patch({ taskUnavailable: true });
+          this.setConnection("online");
+          return;
+        }
+        if (!res.ok) throw new Error(`task ${res.status}`);
+        const { task } = (await res.json()) as { task: PublicTask };
+        this.patch({ task, taskUnavailable: false });
+        if (isTerminal(task.state)) {
+          this.setConnection("online");
+          return;
+        }
       }
     } catch (err) {
       console.warn("snapshot resync failed; will retry on next reconnect", err);

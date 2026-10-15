@@ -78,6 +78,23 @@ export function TaskExperience({ taskId }: { taskId: string }) {
   );
   const onCancelSos = useCallback((id: string) => driver.cancelSos(id), [driver]);
 
+  if (!task && state.taskUnavailable) {
+    return (
+      <div className="mx-auto flex min-h-[50vh] max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
+        <h1 className="font-display text-2xl text-gray-900">We can&apos;t find this request</h1>
+        <p className="text-sm text-gray-600">
+          It may have been made from another account, or the link is incomplete.
+        </p>
+        <Link
+          href={paths.requesterHome}
+          className="rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-white"
+        >
+          Back to your requests
+        </Link>
+      </div>
+    );
+  }
+
   if (!task) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
