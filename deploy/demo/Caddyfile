@@ -34,5 +34,11 @@ api.{$DOMAIN} {
 	import security_headers
 	@metrics path /metrics /metrics/*
 	respond @metrics 404
+	# Sandbox mode mounts POST /dev/token, which signs an access token for ANY user id with no
+	# proof at all — and staff authority is read from the account the token names, so it would
+	# also skip the password and authenticator. Never reachable through this proxy, private or
+	# public. (Path matching is case-insensitive and on the decoded path.)
+	@devroutes path /dev /dev/*
+	respond @devroutes 404
 	reverse_proxy backend:4000
 }

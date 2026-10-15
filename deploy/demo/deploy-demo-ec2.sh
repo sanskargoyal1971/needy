@@ -18,7 +18,8 @@
 # printed. The ones a person needs (sign-in code, super admin password) are written to
 # .env.demo-credentials in the repo root — git-ignored, mode 600.
 #
-# Your address changed:  ./deploy/demo/deploy-demo-ec2.sh allow   (moves both locks, no rebuild)
+# Open to everyone:       ./deploy/demo/deploy-demo-ec2.sh public  (web public, SSH still yours)
+# Private to you again:   ./deploy/demo/deploy-demo-ec2.sh allow   (also after your address changes)
 # Tear down:             ./deploy/demo/deploy-demo-ec2.sh destroy
 
 set -euo pipefail
@@ -75,6 +76,33 @@ if [ "${1:-}" = "allow" ]; then
   SSH=(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i "$KEY_FILE" "ec2-user@$IP")
   sync_caddy
   echo "Now allowing only $ALLOW_CIDR → https://${IP//./-}.sslip.io"
+  exit 0
+fi
+
+if [ "${1:-}" = "public" ]; then
+  # Open the web ports to everyone; SSH stays on the caller's address only. Caddy's allowlist
+  # becomes 0.0.0.0/0. `allow` makes it private again.
+  # What that exposes, stated plainly: sign-in is the sandbox's ONE shared code, so anyone who
+  # learns it can sign in as any non-staff phone number. Staff still need password +
+  # authenticator, and /dev/* is refused by the Caddyfile. Demo data only.
+  ME="$(curl -fsS https://checkip.amazonaws.com)/32"
+  SG=$(sg_id)
+  IP=$(aws ec2 describe-instances --region "$REGION" \
+    --filters "Name=tag:Project,Values=$NAME" "Name=instance-state-name,Values=running" \
+    --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+  ALLOW_CIDR="$ME" KEEP_WORLD=1 sync_firewall "$SG"
+  for p in 80 443; do
+    aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$SG" \
+      --protocol tcp --port $p --cidr 0.0.0.0/0 >/dev/null 2>&1 || true
+  done
+  SSH=(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i "$KEY_FILE" "ec2-user@$IP")
+  # Ship the current Caddyfile (it carries the /dev/* block) before Caddy reloads.
+  scp -q -o StrictHostKeyChecking=accept-new -i "$KEY_FILE" deploy/demo/Caddyfile \
+    "ec2-user@$IP:needy-app/deploy/demo/Caddyfile"
+  ALLOW_CIDR="0.0.0.0/0" sync_caddy
+  "${SSH[@]}" "cd needy-app && sudo docker compose --project-directory . --env-file /etc/needy/demo.env \
+    -f deploy/demo/docker-compose.demo.yml -p needy-demo restart caddy" >/dev/null
+  echo "PUBLIC: https://${IP//./-}.sslip.io  (SSH still only from $ME)"
   exit 0
 fi
 
