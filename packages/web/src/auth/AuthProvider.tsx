@@ -80,17 +80,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // tab was closed, in which case only the refresh cookie survives. Try a rotation before
   // concluding the user is signed out — otherwise every return visit lands on the login page
   // despite a perfectly valid 30-day session.
+  //
+  // Asked through /auth/session, which answers a signed-out visitor with 200 rather than 401,
+  // and says whether a refresh is worth trying: every public page view used to cost a visitor
+  // two failed requests (a 401 from /auth/me, then a 401 from the refresh it triggered).
   useEffect(() => {
     void (async () => {
       try {
-        const { user } = await authClient.me();
-        if (alive.current) setState({ status: "authenticated", user });
-        return;
-      } catch (err) {
-        if (!(err instanceof AuthError) || err.status !== 401) {
+        const { user, canRefresh } = await authClient.session();
+        if (user) {
+          if (alive.current) setState({ status: "authenticated", user });
+          return;
+        }
+        if (!canRefresh) {
           if (alive.current) setState({ status: "anonymous" });
           return;
         }
+      } catch {
+        if (alive.current) setState({ status: "anonymous" });
+        return;
       }
       try {
         const { user } = await authClient.refresh();

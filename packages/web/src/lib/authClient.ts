@@ -284,6 +284,10 @@ export const authClient = {
 
   me: () => call<{ user: PublicUser }>("/auth/me"),
 
+  /** Page-load bootstrap: never a 401. `canRefresh` is true only when a refresh cookie is
+   *  present, so a visitor with no session makes no failing requests at all. */
+  session: () => call<{ user: PublicUser | null; canRefresh: boolean }>("/auth/session"),
+
   /** Rotate the session. The refresh token is a cookie, so there is no argument to pass. */
   refresh: () => call<{ user: PublicUser }>("/auth/refresh", { method: "POST" }),
 

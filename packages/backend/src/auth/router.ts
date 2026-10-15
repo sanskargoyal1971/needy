@@ -21,7 +21,7 @@ import { createTotpRouter, startTotpPending } from "./totpRouter.js";
 import type { User } from "./types.js";
 import { clearAuthCookies, parseCookies, REFRESH_COOKIE, setAuthCookies } from "./cookies.js";
 import { issueCsrfToken } from "./csrf.js";
-import { requireAuth, requireRole, type AuthedRequest } from "./middleware.js";
+import { readAccessClaims, requireAuth, requireRole, type AuthedRequest } from "./middleware.js";
 import {
   otpRequestSchema,
   otpVerifySchema,
@@ -671,6 +671,34 @@ export function createAuthRouter(deps: AuthRouterDeps): Router {
   router.get("/auth/csrf", (_req: Request, res: Response) => {
     res.json({ token: issueCsrfToken(res) });
   });
+
+  // ── session bootstrap ──────────────────────────────────────────────────────
+  // What a page asks on load. Always 200: a visitor with no session is the ordinary case, not
+  // an error, and answering it with 401 (then a refresh that also 401s) put two failed requests
+  // on every page view of every signed-out visitor. `canRefresh` says whether a rotation is
+  // worth trying — only when a refresh cookie is actually present. Whether that cookie is
+  // valid is still decided by /auth/refresh, as before; this reveals nothing the caller does
+  // not already hold.
+  router.get(
+    "/auth/session",
+    asyncRoute(async (req: Request, res: Response) => {
+      const claims = readAccessClaims(req);
+      const user = claims ? await deps.users.getById(claims.sub) : null;
+      if (user && !user.blockedAt) {
+        const docs = await deps.documents.listForUser(user.id);
+        res.json({
+          user: publicUser(
+            user,
+            docs.map((d) => d.kind),
+          ),
+          canRefresh: true,
+        });
+        return;
+      }
+      const canRefresh = Boolean(parseCookies(req.headers.cookie)[REFRESH_COOKIE]);
+      res.json({ user: null, canRefresh });
+    }),
+  );
 
   // ── who am I ───────────────────────────────────────────────────────────────
   router.get(
