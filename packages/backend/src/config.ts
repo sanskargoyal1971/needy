@@ -153,6 +153,16 @@ function previousSecrets(name: string, raw: string | undefined): string[] {
   return list;
 }
 
+/** A secret that may be absent — the feature it unlocks is then off — but that, when present in
+ *  production, must be as strong as the required ones. */
+function optionalSecret(name: string, value: string | undefined): string {
+  const v = value ?? "";
+  if (v !== "" && isProduction && v.length < 32) {
+    throw new Error(`env ${name} must be at least 32 characters in production`);
+  }
+  return v;
+}
+
 const piiEncryptionKey = requireSecret(
   "PII_ENCRYPTION_KEY",
   process.env.PII_ENCRYPTION_KEY,
@@ -335,6 +345,21 @@ export const config = {
     /** Where the page's link points. Origin only; the path is fixed by the sweep. Production
      *  requires https on a non-loopback host — checked in `assertSosEscalationReachable`. */
     consoleOrigin: webOrigin(),
+  },
+  /**
+   * GET /metrics (metrics/router.ts).
+   *
+   * `token` is the bearer the Prometheus scraper presents. Empty means the endpoint is not
+   * mounted at all; that is the default, so a deploy that forgot it exposes nothing rather than
+   * an open endpoint. Held to the production secret rule when set: a short token in front of
+   * live alarm counts is a token someone can guess.
+   *
+   * `backupStatusFile` is where the backup sidecar records its last successful upload
+   * (deploy/backup/backup.sh). Empty means backups are not reported from this process.
+   */
+  metrics: {
+    token: optionalSecret("METRICS_TOKEN", process.env.METRICS_TOKEN),
+    backupStatusFile: process.env.BACKUP_STATUS_FILE ?? "",
   },
   env: nodeEnv,
   isProduction,

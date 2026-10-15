@@ -25,6 +25,14 @@
 
 api.{$DOMAIN} {
 	import security_headers
+	# The backend's Prometheus endpoint is for the scraper on the compose network, never the
+	# internet. Refused here so the bearer token is the SECOND lock, not the only one; a 404
+	# rather than a 403 so a prober learns nothing. Caddy's path matcher is case-insensitive
+	# and matches the decoded path, so /METRICS and /%6Detrics are refused too, and the
+	# wildcard covers the trailing-slash form Express would also route. `respond` is ordered
+	# before `reverse_proxy` by Caddy's directive order, so this wins.
+	@metrics path /metrics /metrics/*
+	respond @metrics 404
 	# Socket.io upgrades to a WebSocket on this same name; reverse_proxy handles the upgrade.
 	reverse_proxy backend:4000
 }

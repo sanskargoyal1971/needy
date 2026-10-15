@@ -37,6 +37,8 @@ export function asyncRoute<Req extends Request = Request>(
         await handler(req as Req, res, next);
       } catch (err) {
         logger.error("unhandled error in route handler", {
+          // Set by requestObserver; lets the operator find this request's access-log line.
+          requestId: (res.locals as { requestId?: string }).requestId,
           method: req.method,
           // The matched route pattern, not the raw URL: `req.originalUrl` can carry a phone
           // number or token in the query string, and this line goes to a log aggregator.

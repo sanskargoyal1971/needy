@@ -1,0 +1,12 @@
+{
+  "Rules": [
+    {
+      "ID": "needy-postgres-backups-retention",
+      "Filter": { "Prefix": "postgres/" },
+      "Status": "Enabled",
+      "Expiration": { "Days": 35 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 7 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}

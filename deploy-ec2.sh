@@ -101,7 +101,8 @@ AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2
 #    - But hop limit 2 opens IMDS to EVERY container on the host, not just the backend — and
 #      the role reads and writes every KYC object. So the user data below installs a
 #      DOCKER-USER firewall rule that drops container traffic to 169.254.169.254 unless it
-#      comes from the backend's fixed address (172.30.0.10, pinned in docker-compose.prod.yml).
+#      comes from 172.30.0.10/31: the backend (.10) and the backup sidecar (.11), both pinned in
+#      docker-compose.prod.yml. The sidecar needs the role to upload database backups.
 #      Without it, code execution in the internet-facing web or Caddy container would be one
 #      metadata request away from every government ID in the bucket.
 #      Residual exposure, stated plainly: processes on the host itself still reach IMDS (they
@@ -117,6 +118,10 @@ AMI_ID=$(aws ssm get-parameters --names /aws/service/ami-amazon-linux-latest/al2
 #      what a reviewer's link is allowed to read; DeleteObject because a retaken selfie
 #      replaces the old object and a rejected upload is removed. No ListBucket, no wildcard.
 #      (plus kms:GenerateDataKey / kms:Decrypt on the bucket's key if it uses SSE-KMS).
+#      And, for the backup sidecar, on the BACKUP bucket only:
+#          s3:PutObject  on  arn:aws:s3:::<BACKUP_S3_BUCKET>/<BACKUP_S3_PREFIX>*
+#        (plus kms:GenerateDataKey on its key). Write-only on purpose: a compromised host can
+#        add backups but cannot read or delete the ones already there. See ops/README.md.
 #      This script does not create or attach one. Create the role + profile once, then either
 #      add `--iam-instance-profile Name=<profile>` to the run-instances call below or attach
 #      it afterwards with `aws ec2 associate-iam-instance-profile`. Leave S3_ACCESS_KEY_ID /
@@ -144,14 +149,14 @@ dnf update -y
 dnf install -y docker iptables-nft
 systemctl enable docker
 
-# Only the backend container may reach the instance metadata service (see the note on the
-# hop limit in deploy-ec2.sh). A unit rather than a one-off command: iptables rules do not
+# Only the backend and backup containers (172.30.0.10/31) may reach the instance metadata
+# service (see the note on the hop limit in deploy-ec2.sh). A unit rather than a one-off command: iptables rules do not
 # survive a reboot, and DOCKER-USER only exists once Docker has started, so it is re-applied
 # after every Docker start. Inserted at the top of DOCKER-USER, which Docker evaluates before
 # any rule of its own for forwarded container traffic.
 cat > /etc/systemd/system/needy-imds-guard.service <<'UNIT'
 [Unit]
-Description=Allow only the Needy backend container to reach instance metadata
+Description=Allow only the Needy backend and backup containers to reach instance metadata
 After=docker.service
 Requires=docker.service
 PartOf=docker.service
@@ -159,7 +164,7 @@ PartOf=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'iptables -C DOCKER-USER -d 169.254.169.254/32 ! -s 172.30.0.10/32 -j DROP 2>/dev/null || iptables -I DOCKER-USER 1 -d 169.254.169.254/32 ! -s 172.30.0.10/32 -j DROP'
+ExecStart=/bin/sh -c 'iptables -C DOCKER-USER -d 169.254.169.254/32 ! -s 172.30.0.10/31 -j DROP 2>/dev/null || iptables -I DOCKER-USER 1 -d 169.254.169.254/32 ! -s 172.30.0.10/31 -j DROP'
 
 [Install]
 WantedBy=docker.service

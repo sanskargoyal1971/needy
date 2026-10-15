@@ -2,6 +2,7 @@ import { NS } from "@needy/shared";
 import { maskPhone, type SmsProvider } from "../auth/providers.js";
 import type { Deps } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
+import { metrics, type AppMetrics } from "../metrics/appMetrics.js";
 import {
   claimDueEscalation,
   escalationMessage,
@@ -65,6 +66,8 @@ export function createSosEscalationSweep(
   deps: Deps,
   opts: {
     sms: SmsProvider;
+    /** Where sweep passes are counted. Defaults to the process-wide registry. */
+    metrics?: AppMetrics;
     sweepIntervalMs?: number;
     reconcileIntervalMs?: number;
     reconcilePageSize?: number;
@@ -199,6 +202,9 @@ export function createSosEscalationSweep(
   }
 
   async function sweepOnce(): Promise<void> {
+    // One failed alert fails the pass for the metrics, even though the others went out: an
+    // escalation that errors is a page that may not have been sent, which is worth an alert.
+    let ok = true;
     try {
       const due = await redis.zrangebyscore(keys.sosEscalationQueue(), "-inf", deps.now());
       // Concurrently: one alert's slow carrier (Twilio's timeout is 8 s) must not hold up the
@@ -206,13 +212,16 @@ export function createSosEscalationSweep(
       await Promise.all(
         due.map((alertId) =>
           escalate(alertId).catch((err: unknown) => {
+            ok = false;
             deps.logger.error("sos escalation failed", { alertId, err: String(err) });
           }),
         ),
       );
     } catch (err) {
+      ok = false;
       deps.logger.error("sos escalation sweep failed", { err: String(err) });
     }
+    (opts.metrics ?? metrics).recordSweep("sos_escalation", ok, deps.now());
   }
 
   async function reconcile(): Promise<void> {

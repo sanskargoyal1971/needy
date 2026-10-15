@@ -1,0 +1,168 @@
+# Prometheus alerting rules for the Needy single-host deployment.
+#
+# Load with `rule_files: [alerts.yml]` (see ops/prometheus.example.yml) and route the alerts
+# through Alertmanager to a receiver (ops/README.md). Every metric named here is exposed by the
+# backend's GET /metrics; packages/backend/src/metrics/__tests__/metrics.test.ts fails if one
+# of them stops being exposed, so a rename cannot silently turn an alert into one that never fires.
+#
+# Severities: `page` wakes somebody; `ticket` is for working hours. Thresholds are starting
+# points sized for one t3.small; tune them against a week of real traffic.
+
+groups:
+  - name: needy-availability
+    rules:
+      - alert: NeedyBackendDown
+        expr: up{job="needy-backend"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Needy backend is not answering the metrics scrape"
+          description: >-
+            Prometheus cannot scrape backend:4000/metrics. Either the process is down, it is
+            wedged, or METRICS_TOKEN no longer matches the scraper's token file (a 401 is also
+            up == 0). Check `docker compose ps backend` and its logs.
+
+      - alert: NeedyBackendMissing
+        expr: absent(up{job="needy-backend"})
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "No scrape target for the Needy backend"
+          description: "The needy-backend job has no targets; the scrape config is wrong or was removed."
+
+      - alert: NeedyHealthFailing
+        # The same probes GET /health runs (Redis PING, Postgres SELECT 1). While this fires,
+        # /health is answering 503 and the container healthcheck is failing.
+        expr: needy_dependency_up == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Backend cannot reach {{ $labels.dependency }}"
+          description: >-
+            {{ $labels.dependency }} has not answered the backend's probe for 2 minutes. With
+            Redis down nobody can be matched and SOS escalation stops; with Postgres down
+            nothing can be saved.
+
+      - alert: NeedyHttpErrorsHigh
+        expr: |
+          sum(rate(needy_http_requests_total{job="needy-backend",status=~"5.."}[5m]))
+            / clamp_min(sum(rate(needy_http_requests_total{job="needy-backend"}[5m])), 1e-9)
+            > 0.05
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "More than 5% of API requests are failing"
+          description: 'Look up failing routes with: sum by (route) (rate(needy_http_requests_total{status=~"5.."}[5m]))'
+
+  - name: needy-safety
+    rules:
+      - alert: NeedySosUnacknowledged
+        # N = 180 seconds. The backend's own escalation sweep pages the on-call SMS ladder after
+        # SOS_ESCALATE_AFTER_SECONDS (default 60); this is the backstop for when that path is
+        # itself broken (no SMS provider, Twilio down, sweep failing). Keep it ABOVE the
+        # escalation threshold, or on-call is paged twice for every ordinary alarm.
+        expr: needy_sos_oldest_unacknowledged_age_seconds > 180
+        labels:
+          severity: page
+        annotations:
+          summary: "An SOS alert has gone unacknowledged for {{ $value | humanizeDuration }}"
+          description: >-
+            A person raised an SOS and nobody at the console has acknowledged it. Open the SOS
+            console now. If on-call was not paged by SMS, also check NeedySweepFailing.
+
+      - alert: NeedySosStatusUnknown
+        # The SOS collector clears its gauges when its query fails, so absence means "cannot
+        # tell", which for this number must page rather than read as zero.
+        expr: absent(needy_sos_oldest_unacknowledged_age_seconds{job="needy-backend"}) and on() up{job="needy-backend"} == 1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "The backend cannot report open SOS alerts"
+          description: "The scrape succeeds but the open-alarm count is missing; the backend log has 'metrics collector failed' with collector=sos."
+
+      - alert: NeedySweepFailing
+        expr: |
+          rate(needy_sweep_failures_total{job="needy-backend"}[5m])
+            / clamp_min(rate(needy_sweep_runs_total{job="needy-backend"}[5m]), 1e-9)
+            > 0.5
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "The {{ $labels.sweep }} sweep is failing"
+          description: >-
+            More than half of the {{ $labels.sweep }} passes failed over 5 minutes.
+            matching_offer_expiry: lapsed offers are not being closed and searches do not widen.
+            sos_escalation: unanswered alarms may not be paging on-call.
+
+      - alert: NeedySweepStalled
+        # Both sweeps run every second; a minute with no clean pass means the loop is stuck or
+        # failing on every item.
+        expr: time() - needy_sweep_last_success_timestamp_seconds{job="needy-backend"} > 120
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "No clean {{ $labels.sweep }} pass for over two minutes"
+
+  - name: needy-capacity
+    rules:
+      - alert: NeedyMemoryHigh
+        # The backend shares a 2 GiB host with Postgres, Redis, web and Caddy.
+        expr: process_resident_memory_bytes{job="needy-backend"} > 768 * 1024 * 1024
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Backend resident memory above 768 MiB for 10 minutes"
+          description: "Currently {{ $value | humanize1024 }}B. Check upload slots in use and heap growth (nodejs_heap_used_bytes)."
+
+      - alert: NeedyEventLoopLagHigh
+        expr: nodejs_eventloop_lag_p99_seconds{job="needy-backend"} > 0.5
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Backend event loop p99 delay above 500 ms"
+          description: "Every socket event, chat message and SOS raise waits behind this."
+
+      - alert: NeedyUploadSlotsSaturated
+        expr: needy_upload_slots_in_use{job="needy-backend"} >= needy_upload_slots_max{job="needy-backend"}
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Every upload slot has been busy for 5 minutes; new uploads get 503"
+
+      - alert: NeedyMetricsCollectorFailing
+        expr: increase(needy_metrics_collector_failures_total{job="needy-backend"}[10m]) > 0
+        labels:
+          severity: ticket
+        annotations:
+          summary: "The {{ $labels.collector }} metrics collector is failing"
+
+  - name: needy-backups
+    rules:
+      - alert: NeedyBackupTooOld
+        # Daily schedule plus two hours of slack. Raise it with BACKUP_INTERVAL_SECONDS.
+        expr: time() - needy_backup_last_success_timestamp_seconds{job="needy-backend"} > 26 * 3600
+        labels:
+          severity: page
+        annotations:
+          summary: "Last successful Postgres backup is {{ $value | humanizeDuration }} old"
+          description: "Check `docker compose logs backup`. Until this clears, a host loss loses more than a day of data."
+
+      - alert: NeedyBackupStatusMissing
+        # The backend could not read the sidecar's status file: no backup has ever succeeded on
+        # this volume, or the file is unreadable. Either way nobody can say a backup exists.
+        expr: absent(needy_backup_last_success_timestamp_seconds{job="needy-backend"}) and on() up{job="needy-backend"} == 1
+        for: 2h
+        labels:
+          severity: page
+        annotations:
+          summary: "No record of any successful Postgres backup"

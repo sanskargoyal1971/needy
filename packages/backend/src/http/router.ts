@@ -93,8 +93,9 @@ const devTokenSchema = z.object({
 });
 
 /** Race a probe against a timeout. Resolves false rather than throwing so one unhealthy
- *  dependency reports as unhealthy instead of failing the whole handler. */
-async function probe(run: () => Promise<unknown>, timeoutMs: number): Promise<boolean> {
+ *  dependency reports as unhealthy instead of failing the whole handler. Exported so the
+ *  metrics scrape probes dependencies exactly the way /health does. */
+export async function probe(run: () => Promise<unknown>, timeoutMs: number): Promise<boolean> {
   let timer: NodeJS.Timeout | undefined;
   try {
     const timeout = new Promise<never>((_resolve, reject) => {

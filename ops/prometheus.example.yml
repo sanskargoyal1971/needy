@@ -1,0 +1,28 @@
+# Example Prometheus configuration for scraping the Needy backend. Not deployed by anything in
+# this repository — see ops/README.md, "Wiring the metrics".
+#
+# Prometheus must run ON THE COMPOSE NETWORK (backend:4000 is not published, and Caddy refuses
+# /metrics on the public host). The token file holds the same value as METRICS_TOKEN, mode 0400,
+# owned by the Prometheus user; it is a secret, so write it from Secrets Manager like needy.env.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: needy-backend
+    metrics_path: /metrics
+    scheme: http # inside the compose network only; TLS terminates at Caddy for public traffic
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/metrics-token
+    static_configs:
+      - targets: ["backend:4000"]

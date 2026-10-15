@@ -12,10 +12,11 @@
 # Only Caddy publishes ports. Postgres, Redis and the two app containers are reachable only on
 # the compose network.
 #
-# The compose network has a fixed subnet so the backend can have a fixed address: the host
-# firewall (deploy-ec2.sh) lets only 172.30.0.10 reach the instance metadata service, where
-# the instance role's S3 credentials come from. Every other container gets an address from
-# `ip_range`, which excludes .10, so nothing else can be handed it. Change the two together.
+# The compose network has a fixed subnet so the backend and the backup sidecar can have fixed
+# addresses: the host firewall (deploy-ec2.sh) lets only 172.30.0.10/31 — the backend (.10)
+# and the backup sidecar (.11) — reach the instance metadata service, where the instance
+# role's S3 credentials come from. Every other container gets an address from `ip_range`,
+# which excludes both, so nothing else can be handed one. Change the two together.
 
 x-hardening: &hardening
   restart: unless-stopped
@@ -152,14 +153,75 @@ services:
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       DIRECTIONS_PROVIDER: ${DIRECTIONS_PROVIDER:-}
       DIRECTIONS_API_KEY: ${DIRECTIONS_API_KEY:-}
+      # The bearer the Prometheus scraper presents to GET /metrics. Unset = endpoint not mounted.
+      # Caddy refuses /metrics publicly regardless; the scraper reaches backend:4000 on this
+      # network (ops/README.md). At least 32 random characters.
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      # Written by the backup sidecar after each successful upload; served as
+      # needy_backup_last_success_timestamp_seconds so a stalled backup raises an alert.
+      BACKUP_STATUS_FILE: /run/needy-backup/last-success
+    volumes:
+      - backup-status:/run/needy-backup:ro
     networks:
       default:
-        # The only address allowed to reach IMDS — see the note at the top of this file.
+        # One of the two addresses allowed to reach IMDS — see the note at the top of this file.
         ipv4_address: 172.30.0.10
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+
+  # Encrypted Postgres dumps to S3 on a schedule (default daily). See deploy/backup/backup.sh
+  # for how, ops/README.md for retention, restore and what is NOT backed up (Redis).
+  #
+  # Runs as the image's root user, with every capability dropped and a read-only root
+  # filesystem. Root only so it can write the `backup-status` volume whichever container
+  # happens to create that volume first (a volume created by the backend's mount is root-owned);
+  # without CAP_DAC_OVERRIDE or CAP_CHOWN it can touch nothing it does not already own.
+  backup:
+    build:
+      context: .
+      dockerfile: deploy/backup/Dockerfile
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      # The schema owner: the runtime role cannot read every table, and a dump that silently
+      # skipped one would restore into a database missing it.
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-needy}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-needy}
+      # A bucket of its own, not the KYC bucket: different lifecycle, different readers. The
+      # instance role needs s3:PutObject on <bucket>/<prefix>* and nothing else here — no
+      # GetObject, no DeleteObject — so the host can write backups but not read or erase them.
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:?set BACKUP_S3_BUCKET (private, versioned, SSE-KMS, lifecycle rule — ops/README.md)}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-postgres/}
+      BACKUP_KMS_KEY_ID: ${BACKUP_KMS_KEY_ID:-}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      AWS_REGION: ${BACKUP_S3_REGION:-ap-south-1}
+      # aws-cli would otherwise try to create ~/.aws on the read-only root filesystem.
+      HOME: /tmp
+    volumes:
+      # The PUBLIC half of the backup key pair, as a host file. The private half never comes to
+      # this host except for a restore. backup.sh refuses a file that holds a private key.
+      - ${BACKUP_GPG_PUBLIC_KEY_FILE:?set BACKUP_GPG_PUBLIC_KEY_FILE to the host path of the backup public key}:/run/backup-key/public.asc:ro
+      - backup-status:/status
+      # Ciphertext only; the dump is encrypted before it is written.
+      - backup-work:/work
+    networks:
+      default:
+        # Needs the instance role for S3, so it is the other address allowed to reach IMDS.
+        ipv4_address: 172.30.0.11
+    depends_on:
+      postgres:
         condition: service_healthy
 
   # The single Next.js app: marketing, signup/KYC, requester, helper and admin.
@@ -193,3 +255,5 @@ volumes:
   pg-data:
   caddy-data:
   caddy-config:
+  backup-status:
+  backup-work:

@@ -82,6 +82,17 @@ export interface SosRepository {
     after: { createdAt: number; id: string } | null;
     limit: number;
   }): Promise<SosAlert[]>;
+
+  /**
+   * Counts for the metrics scrape: how many alerts sit in each open status, and when the oldest
+   * one nobody has acknowledged was raised (null when there is none).
+   *
+   * Its own aggregate rather than `listOpen(n).length`: that is capped at a page, so the number
+   * would plateau exactly when it matters most, and its acknowledged rows sort ahead of raised
+   * ones of the same age, so the oldest raised alarm could sit beyond the page altogether.
+   * Counts and one timestamp only — nothing that names a person reaches the scrape.
+   */
+  openSummary(): Promise<{ raised: number; acknowledged: number; oldestRaisedAt: number | null }>;
 }
 
 // ── in-memory ────────────────────────────────────────────────────────────────
@@ -174,6 +185,15 @@ export function createInMemorySosRepo(): SosRepository {
         )
         .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
         .slice(0, limit);
+    },
+    async openSummary() {
+      const all = [...byId.values()];
+      const raised = all.filter((a) => a.status === "raised");
+      return {
+        raised: raised.length,
+        acknowledged: all.filter((a) => a.status === "acknowledged").length,
+        oldestRaisedAt: raised.length > 0 ? Math.min(...raised.map((a) => a.createdAt)) : null,
+      };
     },
   };
 }
@@ -354,6 +374,26 @@ export function createPgSosRepo(pool: DbPool): SosRepository {
         [belowStep, after?.createdAt ?? null, after?.id ?? null, limit],
       );
       return rows.map(rowToAlert);
+    },
+    async openSummary() {
+      // One pass over the partial open-queue index; the FILTERs split it by status.
+      const { rows } = await pool.query<{
+        raised: string | number;
+        acknowledged: string | number;
+        oldest_raised_at: string | number | null;
+      }>(
+        `SELECT count(*) FILTER (WHERE status = 'raised')        AS raised,
+                count(*) FILTER (WHERE status = 'acknowledged')  AS acknowledged,
+                min(created_at) FILTER (WHERE status = 'raised') AS oldest_raised_at
+           FROM sos_alerts
+          WHERE status IN ('raised','acknowledged')`,
+      );
+      const r = rows[0]!;
+      return {
+        raised: Number(r.raised),
+        acknowledged: Number(r.acknowledged),
+        oldestRaisedAt: r.oldest_raised_at == null ? null : Number(r.oldest_raised_at),
+      };
     },
   };
 }

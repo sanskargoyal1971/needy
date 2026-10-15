@@ -22,6 +22,11 @@ import { assertSosEscalationReachable } from "./domain/sosEscalation.js";
 import { createHttpRouter } from "./http/router.js";
 import { createHandoffRouter } from "./http/handoff.js";
 import { createServicesRouter } from "./http/services.js";
+import { requestObserver } from "./http/requestObserver.js";
+import { metrics } from "./metrics/appMetrics.js";
+import { registerScrapeCollectors } from "./metrics/collectors.js";
+import { createMetricsRouter } from "./metrics/router.js";
+import { MAX_CONCURRENT_UPLOADS, uploadSlotsInUse } from "./services/uploadSlots.js";
 import type { Deps } from "./domain/deps.js";
 import {
   createInMemoryHelperProfileRepo,
@@ -317,6 +322,9 @@ async function main(): Promise<void> {
 
   // ── HTTP ───────────────────────────────────────────────────────────────────
   const app = express();
+  // First, so every request — including one helmet, CORS or CSRF refuses — gets a request id,
+  // an access-log line and a place in the request metrics.
+  app.use(requestObserver({ metrics, logger }));
   // ── security headers ──────────────────────────────────────────────────────
   //
   // This used to be `contentSecurityPolicy: false`, with a comment arguing that a CSP on a
@@ -352,6 +360,26 @@ async function main(): Promise<void> {
   );
   // credentials:true so the browser sends/stores the httpOnly auth cookies cross-origin.
   app.use(cors({ origin: config.corsOrigins, credentials: true }));
+
+  // Prometheus scrape, bearer-token gated and refused at Caddy (see metrics/router.ts). The
+  // gauges read at scrape time are wired here because this is where their sources exist.
+  registerScrapeCollectors(metrics, {
+    // `deps.io` is assigned once the socket server exists; until then there is nothing to count.
+    sockets: () => {
+      const io = deps.io as IOServer | undefined;
+      if (!io) return null;
+      return Object.fromEntries(Object.values(NS).map((ns) => [ns, io.of(ns).sockets.size]));
+    },
+    sos: sosRepo,
+    uploads: { inUse: uploadSlotsInUse, max: MAX_CONCURRENT_UPLOADS },
+    probes: {
+      redis: () => redis.client.ping(),
+      ...(pool ? { postgres: () => pool!.query("SELECT 1") } : {}),
+    },
+    backupStatusFile: config.metrics.backupStatusFile,
+    now,
+  });
+  app.use(createMetricsRouter({ token: config.metrics.token, metrics, logger }));
 
   // Behind a proxy or load balancer, `req.ip` is the proxy's address unless Express is told to
   // trust the forwarding headers — which would collapse the per-IP OTP limiter into a single

@@ -25,6 +25,7 @@ import type { RedisClient } from "../redis.js";
 import { emitSignal } from "../domain/abuseStore.js";
 import type { Deps, NamespaceRegistrar } from "../domain/deps.js";
 import { keys } from "../domain/keys.js";
+import { metrics } from "../metrics/appMetrics.js";
 import { freshHelperIds, getTaskLocation, removeHelperGeo } from "../domain/location-store.js";
 import { clearTaskLocation } from "../domain/location-store.js";
 import { readPresence } from "../domain/presence-store.js";
@@ -891,7 +892,11 @@ async function sweepExpiredOffers(deps: Deps, nsp: MatchingNamespace): Promise<v
     for (const taskId of due) {
       await closeExpiredOffer(deps, nsp, taskId);
     }
+    metrics.recordSweep("matching_offer_expiry", true, deps.now());
   } catch (err) {
+    // Counted as well as logged: a sweep that fails every second is a stream of identical log
+    // lines nobody pages on, and the SweepFailing alert reads this counter.
+    metrics.recordSweep("matching_offer_expiry", false, deps.now());
     deps.logger.error("matching offer expiry sweep failed", { err: String(err) });
   }
 }
