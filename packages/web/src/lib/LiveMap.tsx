@@ -3,7 +3,7 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { animate, useMotionValue } from "framer-motion";
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import type { LatLng } from "@needy/shared";
 import { duration as D, ease as E } from "../motion/index.js";
 import { useReducedMotionPref } from "../motion/preferences.js";
@@ -55,14 +55,15 @@ export function LiveMap({
   // Interpolated position lives in motion values; Leaflet reads them to place the marker.
   const mvLat = useMotionValue(helper?.lat ?? origin.lat);
   const mvLng = useMotionValue(helper?.lng ?? origin.lng);
-  const originRef = useRef(origin);
-  originRef.current = origin;
+  // Read when the map is created, without making that effect re-run (it mounts once).
+  const mountOrigin = useEffectEvent(() => origin);
 
   // ── mount: create the map, tiles, and the destination marker ────────────────
   useEffect(() => {
     if (!containerRef.current) return;
+    const start = mountOrigin();
     const map = L.map(containerRef.current, {
-      center: [originRef.current.lat, originRef.current.lng],
+      center: [start.lat, start.lng],
       zoom: 15,
       zoomControl: false,
       attributionControl: true,
@@ -77,7 +78,7 @@ export function LiveMap({
       // outbound request still sends nothing; `origin` never includes a path.
       referrerPolicy: "origin",
     }).addTo(map);
-    L.marker([originRef.current.lat, originRef.current.lng], {
+    L.marker([start.lat, start.lng], {
       icon: destinationIcon(),
       interactive: false,
       keyboard: false,
@@ -98,9 +99,16 @@ export function LiveMap({
   }, []);
 
   // ── helper position: glide the marker in geographic space ───────────────────
+  const hLat = helper?.lat;
+  const hLng = helper?.lng;
+  // The heading (for the first icon) and the origin (for the first fit) are read when a point
+  // arrives; a change to either alone is not a new point and must not restart the glide.
+  const frameInputs = useEffectEvent(() => ({ heading, origin }));
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !helper) return;
+    if (!map || hLat == null || hLng == null) return;
+    const helper = { lat: hLat, lng: hLng };
+    const { heading, origin } = frameInputs();
 
     // Lazily create the helper marker on the first real point.
     if (!helperMarkerRef.current) {
@@ -143,8 +151,7 @@ export function LiveMap({
       cleanupRef.current?.();
       cleanupRef.current = null;
     };
-    // origin is stable per task; intentionally keyed on the incoming point.
-  }, [helper?.lat, helper?.lng, durationMs, reduced]);
+  }, [hLat, hLng, durationMs, reduced, mvLat, mvLng]);
 
   // ── heading: rotate the silhouette to face travel ──────────────────────────
   useEffect(() => {

@@ -26,7 +26,7 @@ export default function AdminUsers() {
   }, []);
 
   useEffect(() => {
-    void load("");
+    void Promise.resolve().then(() => load(""));
   }, [load]);
 
   return (

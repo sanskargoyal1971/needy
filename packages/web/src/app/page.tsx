@@ -109,8 +109,10 @@ export default function Home() {
                       <ShieldCheck size={20} />
                     </div>
                     <div>
-                      <div className="text-xs text-gray-500 font-bold">Verified Helper</div>
-                      <div className="text-sm font-black text-gray-900">Arriving in 5m</div>
+                      {/* Describes the feature, not a live status: an "Arriving in 5m" with no
+                          real helper behind it read as fabricated activity on the landing page. */}
+                      <div className="text-xs text-gray-500 font-bold">Verified helper</div>
+                      <div className="text-sm font-black text-gray-900">See them on the way</div>
                     </div>
                   </div>
                 </Float>
@@ -125,8 +127,8 @@ export default function Home() {
                       <Heart size={20} />
                     </div>
                     <div>
-                      <div className="text-xs text-gray-500 font-bold">New Request</div>
-                      <div className="text-sm font-black text-gray-900">Hospital Visit</div>
+                      <div className="text-xs text-gray-500 font-bold">For example</div>
+                      <div className="text-sm font-black text-gray-900">A hospital visit</div>
                     </div>
                   </div>
                 </Float>

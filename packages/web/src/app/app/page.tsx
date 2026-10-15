@@ -57,7 +57,7 @@ export default function RequesterHome() {
   }, []);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   const firstName = auth.status === "authenticated" ? auth.user.displayName.split(" ")[0] : "there";

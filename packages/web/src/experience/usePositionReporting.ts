@@ -29,19 +29,19 @@ export type PositionStatus = "idle" | "locating" | "tracking" | "denied" | "unav
  *  audit's A1 rule, and it belongs in one place rather than being re-derived by every caller.
  */
 export function usePositionReporting(driver: HelperDriver, active: boolean): PositionStatus {
-  const [status, setStatus] = useState<PositionStatus>("idle");
+  // Only what the device REPORTED lives in state. "idle", "unavailable" and "locating" follow
+  // from the inputs and are derived below, rather than written by the effect on every toggle.
+  const [reported, setStatus] = useState<PositionStatus | null>(null);
+  const [wasActive, setWasActive] = useState(active);
+  if (active !== wasActive) {
+    // Each session of reporting starts from "locating", not from the previous one's result.
+    setWasActive(active);
+    setStatus(null);
+  }
+  const supported = typeof navigator !== "undefined" && !!navigator.geolocation;
 
   useEffect(() => {
-    if (!active) {
-      setStatus("idle");
-      return;
-    }
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setStatus("unavailable");
-      return;
-    }
-
-    setStatus("locating");
+    if (!active || !supported) return;
     const id = navigator.geolocation.watchPosition(
       (pos) => {
         setStatus("tracking");
@@ -67,7 +67,9 @@ export function usePositionReporting(driver: HelperDriver, active: boolean): Pos
     );
 
     return () => navigator.geolocation.clearWatch(id);
-  }, [driver, active]);
+  }, [driver, active, supported]);
 
-  return status;
+  if (!active) return "idle";
+  if (!supported) return "unavailable";
+  return reported ?? "locating";
 }

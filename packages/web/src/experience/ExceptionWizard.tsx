@@ -43,7 +43,7 @@ export function ExceptionWizard({ helperId }: { helperId?: string }) {
   }, []);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   // Opening is only ever reachable from the requester's side, because only they know who they

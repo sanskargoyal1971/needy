@@ -44,7 +44,7 @@ export default function StaffPage() {
   }, []);
 
   useEffect(() => {
-    if (isSuperAdmin) void load();
+    if (isSuperAdmin) void Promise.resolve().then(load);
   }, [isSuperAdmin, load]);
 
   if (state.status === "authenticated" && !isSuperAdmin) {

@@ -37,7 +37,7 @@ export default function ReviewQueue() {
   }, []);
 
   useEffect(() => {
-    void load(status);
+    void Promise.resolve().then(() => load(status));
   }, [status, load]);
 
   return (

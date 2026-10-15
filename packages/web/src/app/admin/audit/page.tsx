@@ -55,7 +55,7 @@ export default function AuditLog() {
   }, []);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   return (

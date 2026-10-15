@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Crosshair, Loader2, MapPin } from "lucide-react";
 import type { LatLng } from "@needy/shared";
 // The stylesheet is imported STATICALLY while the library itself is loaded lazily below.
@@ -42,29 +42,36 @@ export function OriginPicker({
   const { state: auth } = useAuth();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<unknown>(null);
-  const [locating, setLocating] = useState(true);
+  // Nothing to find when the form already has a point.
+  const [locating, setLocating] = useState(value == null);
   const [note, setNote] = useState<string | null>(null);
+
+  // Read by the seed effect at the moment it runs, without making it re-run: it seeds ONCE.
+  // Re-running would re-request geolocation and snap the pin back every time the user drags it.
+  const seedInputs = useEffectEvent(() => ({
+    hasValue: value != null,
+    savedArea:
+      auth.status === "authenticated" && auth.user.areaLat != null && auth.user.areaLng != null
+        ? { lat: auth.user.areaLat, lng: auth.user.areaLng }
+        : null,
+  }));
+  const placePin = useEffectEvent((point: LatLng, message: string | null) => {
+    onChange(point);
+    setNote(message);
+    setLocating(false);
+  });
 
   // Seed the pin once, from the best source available.
   useEffect(() => {
-    if (value) {
-      setLocating(false);
-      return;
-    }
+    const { hasValue, savedArea } = seedInputs();
+    if (hasValue) return;
     let cancelled = false;
-
-    const savedArea =
-      auth.status === "authenticated" && auth.user.areaLat != null && auth.user.areaLng != null
-        ? { lat: auth.user.areaLat, lng: auth.user.areaLng }
-        : null;
 
     let settled = false;
     const settle = (point: LatLng, message: string | null) => {
       if (cancelled || settled) return;
       settled = true;
-      onChange(point);
-      setNote(message);
-      setLocating(false);
+      placePin(point, message);
     };
 
     const fallBack = () =>
@@ -100,19 +107,25 @@ export function OriginPicker({
       cancelled = true;
       clearTimeout(giveUp);
     };
-    // Seeds ONCE, deliberately. `value` and `onChange` are omitted from the deps because
-    // re-running this would re-request geolocation and snap the pin back every time the user
-    // drags it — the effect's whole job is to produce a first value, not to track it.
   }, []);
+
+  const hasPoint = value != null;
+  const startPoint = useEffectEvent(() => value);
+  const movePin = useEffectEvent((point: LatLng) => {
+    onChange(point);
+    setNote(null);
+  });
 
   // Mount the map once a point exists.
   useEffect(() => {
-    if (!value || !containerRef.current || mapRef.current) return;
+    const start = startPoint();
+    if (!start || !containerRef.current || mapRef.current) return;
     let disposed = false;
 
     void (async () => {
       const L = (await import("leaflet")).default;
       if (disposed || !containerRef.current) return;
+      const value = start;
 
       const map = L.map(containerRef.current, {
         center: [value.lat, value.lng],
@@ -151,15 +164,13 @@ export function OriginPicker({
       );
       marker.on("dragend", () => {
         const { lat, lng } = marker.getLatLng();
-        onChange({ lat, lng });
-        setNote(null);
+        movePin({ lat, lng });
       });
       // Tapping the map moves the pin too — dragging a small marker is hard with an unsteady
       // hand, and this is the audience where that matters most.
       map.on("click", (e: { latlng: { lat: number; lng: number } }) => {
         marker.setLatLng(e.latlng);
-        onChange({ lat: e.latlng.lat, lng: e.latlng.lng });
-        setNote(null);
+        movePin({ lat: e.latlng.lat, lng: e.latlng.lng });
       });
     })();
 
@@ -173,7 +184,7 @@ export function OriginPicker({
     // the moment there is somewhere to centre it, and every later change comes from the user
     // moving the marker inside it. Depending on `value` would tear the map down and rebuild
     // it on each drag.
-  }, [value != null]);
+  }, [hasPoint]);
 
   return (
     <div>

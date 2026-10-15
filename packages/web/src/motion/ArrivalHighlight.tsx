@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { duration as D, ease as E, resolveColor, type MotionColor } from "./motion.config.js";
 import { useReducedMotionPref } from "./preferences.js";
 
@@ -43,10 +43,12 @@ export function ArrivalHighlight({
   // Re-key each rising edge so the bloom replays even if `active` stays true.
   const [burst, setBurst] = useState(0);
   const [wasActive, setWasActive] = useState(active);
-  useEffect(() => {
-    if (active && !wasActive) setBurst((n) => n + 1);
+  // Adjusted during render, not in an effect: the effect rendered once with the old burst and
+  // then again with the new one. React applies a render-time update before committing.
+  if (active !== wasActive) {
     setWasActive(active);
-  }, [active, wasActive]);
+    if (active) setBurst((n) => n + 1);
+  }
 
   const overlayBase: CSSProperties = {
     position: "absolute",

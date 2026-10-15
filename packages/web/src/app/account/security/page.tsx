@@ -57,7 +57,7 @@ function Security() {
   }, []);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   const home =
@@ -265,7 +265,7 @@ function AuthenticatorSection() {
   }, []);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   if (!status?.available) return null;

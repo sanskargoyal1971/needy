@@ -43,7 +43,7 @@ export default function PacketDetail() {
   }, [userId]);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(load);
   }, [load]);
 
   async function decide(decision: "approve" | "reject") {

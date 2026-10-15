@@ -190,7 +190,7 @@ export default function AbuseQueue() {
   }, []);
 
   useEffect(() => {
-    void load(windowMs);
+    void Promise.resolve().then(() => load(windowMs));
   }, [windowMs, load]);
 
   const max = entries.reduce((m, e) => Math.max(m, e.score), 0);
