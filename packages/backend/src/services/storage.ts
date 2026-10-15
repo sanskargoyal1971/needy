@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, join, normalize, resolve, sep } from "node:path";
+import { dirname, normalize, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { config } from "../config.js";
@@ -523,5 +523,7 @@ export function createStorageProvider(now: () => number): StorageProvider {
       "refusing to start: STORAGE_DRIVER=local in production would write KYC documents to the container filesystem, where they are lost on restart and unencrypted at rest. Set STORAGE_DRIVER=s3.",
     );
   }
-  return new LocalDiskStorage(join(process.cwd(), s.localRoot), s.publicBase, now);
+  // `resolve`, not `join`: join glues an absolute STORAGE_LOCAL_ROOT onto the CWD ("/uploads"
+  // became "/repo/uploads", unwritable in the image), where resolve honours it.
+  return new LocalDiskStorage(resolve(process.cwd(), s.localRoot), s.publicBase, now);
 }

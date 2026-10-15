@@ -80,6 +80,10 @@ export function streamToStorage(
     resolveDone = res;
     rejectDone = rej;
   });
+  // Storage can fail mid-stream, before the caller awaits `done` (it waits for the whole form
+  // first). Marked handled here so that is not an unhandled rejection; awaiting `done` still
+  // throws the error.
+  done.catch(() => undefined);
 
   const drain = (): void => {
     source.removeListener("data", onData);
