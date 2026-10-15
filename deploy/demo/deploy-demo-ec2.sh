@@ -18,7 +18,8 @@
 # printed. The ones a person needs (sign-in code, super admin password) are written to
 # .env.demo-credentials in the repo root — git-ignored, mode 600.
 #
-# Tear down:  ./deploy/demo/deploy-demo-ec2.sh destroy
+# Your address changed:  ./deploy/demo/deploy-demo-ec2.sh allow   (moves both locks, no rebuild)
+# Tear down:             ./deploy/demo/deploy-demo-ec2.sh destroy
 
 set -euo pipefail
 
@@ -37,6 +38,45 @@ sg_id() {
   aws ec2 describe-security-groups --region "$REGION" --filters "Name=group-name,Values=$SG_NAME" \
     --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null
 }
+
+# Point every rule on 22/80/443 at ALLOW_CIDR and nothing else. Run before any SSH, since an
+# address change otherwise locks this script out of the host it is trying to update.
+# KEEP_WORLD=1 leaves 0.0.0.0/0 on 80/443 (certificate issuance only).
+sync_firewall() {
+  local sg="$1" p cidr
+  for p in 22 80 443; do
+    for cidr in $(aws ec2 describe-security-groups --region "$REGION" --group-ids "$sg" \
+      --query "SecurityGroups[0].IpPermissions[?FromPort==\`$p\`].IpRanges[].CidrIp" --output text); do
+      [ "$cidr" = "$ALLOW_CIDR" ] && continue
+      [ "$cidr" = "0.0.0.0/0" ] && [ "$p" != 22 ] && [ "${KEEP_WORLD:-0}" = 1 ] && continue
+      aws ec2 revoke-security-group-ingress --region "$REGION" --group-id "$sg" \
+        --protocol tcp --port $p --cidr "$cidr" >/dev/null
+    done
+    aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$sg" \
+      --protocol tcp --port $p --cidr "$ALLOW_CIDR" >/dev/null 2>&1 || true
+  done
+}
+
+# Caddy's allowlist lives in the host's env file; rewrite the line and recreate Caddy only.
+sync_caddy() {
+  "${SSH[@]}" "sudo sed -i 's#^ALLOW_CIDR=.*#ALLOW_CIDR=$ALLOW_CIDR#' /etc/needy/demo.env && \
+    cd needy-app && sudo docker compose --project-directory . --env-file /etc/needy/demo.env \
+    -f deploy/demo/docker-compose.demo.yml -p needy-demo up -d --no-deps caddy" >/dev/null 2>&1 || true
+}
+
+if [ "${1:-}" = "allow" ]; then
+  # Your address changed: move both locks to the new one. No rebuild, data untouched.
+  ALLOW_CIDR="${ALLOW_CIDR:-$(curl -fsS https://checkip.amazonaws.com)/32}"
+  SG=$(sg_id)
+  IP=$(aws ec2 describe-instances --region "$REGION" \
+    --filters "Name=tag:Project,Values=$NAME" "Name=instance-state-name,Values=running" \
+    --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+  sync_firewall "$SG"
+  SSH=(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i "$KEY_FILE" "ec2-user@$IP")
+  sync_caddy
+  echo "Now allowing only $ALLOW_CIDR → https://${IP//./-}.sslip.io"
+  exit 0
+fi
 
 if [ "${1:-}" = "destroy" ]; then
   IDS=$(aws ec2 describe-instances --region "$REGION" \
@@ -80,6 +120,7 @@ for p in 80 443; do
   aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$SG" \
     --protocol tcp --port $p --cidr 0.0.0.0/0 >/dev/null 2>&1 || true
 done
+KEEP_WORLD=1 sync_firewall "$SG"
 
 # ── instance ────────────────────────────────────────────────────────────────
 AMI=$(aws ssm get-parameters --region "$REGION" \
@@ -171,6 +212,8 @@ echo "Building images on the host (several minutes on $INSTANCE_TYPE)..."
 # --project-directory: build contexts and bind mounts resolve from the repo root, not deploy/demo.
 COMPOSE="cd needy-app && sudo docker compose --project-directory . --env-file /etc/needy/demo.env -f deploy/demo/docker-compose.demo.yml -p needy-demo"
 "${SSH[@]}" "$COMPOSE up --build -d"
+# A re-run from a new address: the env file still holds the old one.
+sync_caddy
 
 # ── seed the super admin (first deploy only) ────────────────────────────────
 if [ -n "${NEW_ADMIN_PW:-}" ]; then
@@ -191,12 +234,7 @@ for _ in $(seq 1 40); do
   curl -fsS -o /dev/null "https://$DOMAIN/" 2>/dev/null && break
   sleep 6
 done
-for p in 80 443; do
-  aws ec2 revoke-security-group-ingress --region "$REGION" --group-id "$SG" \
-    --protocol tcp --port $p --cidr 0.0.0.0/0 >/dev/null 2>&1 || true
-  aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$SG" \
-    --protocol tcp --port $p --cidr "$ALLOW_CIDR" >/dev/null 2>&1 || true
-done
+sync_firewall "$SG"
 
 echo "==============================================="
 echo "App: https://$DOMAIN      (IP $IP)"
