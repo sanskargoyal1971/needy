@@ -43,7 +43,14 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--requirepass",
+        "${REDIS_PASSWORD:?set REDIS_PASSWORD}",
+      ]
     volumes:
       - redis-data:/data
     healthcheck:
@@ -101,8 +108,10 @@ services:
       # Sandbox, but no POST /dev/token: the demo is public, so the sign-in-as-anyone route is
       # not registered at all rather than only refused by Caddy.
       DISABLE_DEV_TOKEN: "1"
-    tmpfs:
-      - /uploads:mode=1777
+    # A named volume, not a tmpfs: uploads used to vanish on every restart or redeploy. The
+    # image creates /uploads owned by `node`, so the volume starts writable.
+    volumes:
+      - uploads:/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,3 +143,4 @@ volumes:
   pg-data:
   caddy-data:
   caddy-config:
+  uploads:

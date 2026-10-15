@@ -43,6 +43,11 @@ COPY --from=build --chown=node:node /repo/packages/backend/package.json packages
 COPY --from=build --chown=node:node /repo/packages/backend/dist packages/backend/dist
 COPY --from=build --chown=node:node /repo/packages/backend/node_modules packages/backend/node_modules
 
+# Mount point for the local-disk document store (sandbox stacks only; production uses S3).
+# Owned by `node` in the image so a named volume mounted here starts writable: Docker seeds an
+# empty volume from the image directory, ownership included.
+RUN mkdir -p /uploads && chown node:node /uploads && chmod 700 /uploads
+
 USER node
 EXPOSE 4000
 

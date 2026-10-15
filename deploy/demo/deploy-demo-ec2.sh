@@ -20,6 +20,7 @@
 #
 # Open to everyone:       ./deploy/demo/deploy-demo-ec2.sh public  (web public, SSH still yours)
 # Private to you again:   ./deploy/demo/deploy-demo-ec2.sh allow   (also after your address changes)
+# Redeploy current code:  ./deploy/demo/deploy-demo-ec2.sh update  (follows your address, keeps data)
 # Tear down:             ./deploy/demo/deploy-demo-ec2.sh destroy
 
 set -euo pipefail
@@ -103,6 +104,46 @@ if [ "${1:-}" = "public" ]; then
   "${SSH[@]}" "cd needy-app && sudo docker compose --project-directory . --env-file /etc/needy/demo.env \
     -f deploy/demo/docker-compose.demo.yml -p needy-demo restart caddy" >/dev/null
   echo "PUBLIC: https://${IP//./-}.sslip.io  (SSH still only from $ME)"
+  exit 0
+fi
+
+if [ "${1:-}" = "update" ]; then
+  # Redeploy the current code. Re-points SSH at the caller's address FIRST — an address change
+  # otherwise times the deploy out — and keeps whichever exposure the demo already has (public,
+  # or private to one address). Rebuilds what changed, keeps data, and (re)installs the nightly
+  # backup.
+  ME="$(curl -fsS https://checkip.amazonaws.com)/32"
+  SG=$(sg_id)
+  IP=$(aws ec2 describe-instances --region "$REGION" \
+    --filters "Name=tag:Project,Values=$NAME" "Name=instance-state-name,Values=running" \
+    --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+  PUBLIC=$(aws ec2 describe-security-groups --region "$REGION" --group-ids "$SG" \
+    --query "SecurityGroups[0].IpPermissions[?FromPort==\`443\`].IpRanges[].CidrIp" --output text \
+    | tr '\t' '\n' | grep -cx '0.0.0.0/0' || true)
+  SSH=(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i "$KEY_FILE" "ec2-user@$IP")
+  if [ "$PUBLIC" -gt 0 ]; then
+    ALLOW_CIDR="$ME" KEEP_WORLD=1 sync_firewall "$SG"
+  else
+    ALLOW_CIDR="$ME" sync_firewall "$SG"
+    ALLOW_CIDR="$ME" sync_caddy
+  fi
+
+  rsync -az --delete \
+    --exclude node_modules --exclude .git --exclude .next --exclude dist --exclude coverage \
+    --exclude '.env' --exclude '.env.*' --exclude '*.pem' --exclude '*.key' \
+    --exclude private-uploads --exclude '*.log' --exclude .claude --exclude 1st.md \
+    -e "ssh -o StrictHostKeyChecking=accept-new -i $KEY_FILE" ./ "ec2-user@$IP:needy-app/"
+
+  echo "Rebuilding on the host..."
+  "${SSH[@]}" "cd needy-app && sudo docker compose --project-directory . --env-file /etc/needy/demo.env \
+    -f deploy/demo/docker-compose.demo.yml -p needy-demo up -d --build"
+
+  # Nightly backup at 21:30 UTC (03:00 IST). Same-disk only — see deploy/demo/backup.sh.
+  "${SSH[@]}" "sudo install -m 700 -o root -g root needy-app/deploy/demo/backup.sh /usr/local/bin/needy-demo-backup && \
+    printf '[Unit]\nDescription=Needy demo backup\nAfter=docker.service\nRequires=docker.service\n\n[Service]\nType=oneshot\nExecStart=/usr/local/bin/needy-demo-backup\n' | sudo tee /etc/systemd/system/needy-demo-backup.service >/dev/null && \
+    printf '[Unit]\nDescription=Nightly Needy demo backup\n\n[Timer]\nOnCalendar=*-*-* 21:30:00 UTC\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n' | sudo tee /etc/systemd/system/needy-demo-backup.timer >/dev/null && \
+    sudo systemctl daemon-reload && sudo systemctl enable --now needy-demo-backup.timer >/dev/null"
+  echo "UPDATED: https://${IP//./-}.sslip.io  ($([ "$PUBLIC" -gt 0 ] && echo public || echo "private to $ME"); SSH from $ME)"
   exit 0
 fi
 
