@@ -164,6 +164,8 @@ export function HelperExperience() {
               thinking the other never bothered. */}
           <PendingReviews />
 
+          <Earnings />
+
           <Link
             href={paths.helperServices}
             className="flex items-center justify-center gap-2 text-sm font-medium text-primary hover:underline"
@@ -174,6 +176,37 @@ export function HelperExperience() {
         </>
       )}
     </div>
+  );
+}
+
+/** What the helper has earned from completed tasks. The endpoint existed and nothing showed
+ *  it, so a helper had no way to see what their work came to. Payouts are not live, and the
+ *  card says so rather than reading like a balance that can be withdrawn. */
+function Earnings() {
+  const [data, setData] = useState<{ totalEarnings: number; completedTasks: number } | null>(null);
+
+  useEffect(() => {
+    void taskClient
+      .earnings()
+      .then(setData)
+      .catch(() => setData(null));
+  }, []);
+
+  if (!data) return null;
+  const rupees = new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(data.totalEarnings);
+  return (
+    <section className="rounded-3xl border border-gray-200 bg-white p-5" aria-label="Earnings">
+      <p className="text-sm text-gray-600">Earned so far</p>
+      <p className="mt-1 font-display text-3xl font-bold text-gray-900">{rupees}</p>
+      <p className="mt-1 text-sm text-gray-600">
+        From {data.completedTasks} completed {data.completedTasks === 1 ? "task" : "tasks"}. Payouts
+        aren&apos;t live yet, so nothing has been paid out.
+      </p>
+    </section>
   );
 }
 

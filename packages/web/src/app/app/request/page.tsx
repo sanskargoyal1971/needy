@@ -131,6 +131,11 @@ function NewRequest() {
           );
         } else if (err.code === "too-many-requests") {
           setError("You've opened several requests very quickly. Please wait a moment.");
+        } else if (err.code === "too-many-open-requests") {
+          const max = err.details?.maxOpen;
+          setError(
+            `You already have ${typeof max === "number" ? max : "several"} requests open. Finish or cancel one from your requests before asking for another.`,
+          );
         } else if (err.code === "not-approved") {
           setError("Your account is still being reviewed, so you can't book yet.");
         } else {

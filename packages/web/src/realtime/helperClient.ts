@@ -195,6 +195,11 @@ export class RealHelperClient implements HelperDriver {
     if (this.isOnLiveTask()) return;
     if (!this.presence.connected) return;
     this.presence.emit("publish-availability", { point, available: true }, (res) => {
+      // The server refuses a helper who is on a live task — usually a reload that published
+      // before the task snapshot arrived. Not an error and not a reason to switch them off:
+      // the snapshot makes this client stop on its own, and after the task they are simply
+      // available again.
+      if (!res.ok && res.error === "on-a-task") return;
       if (!res.ok) {
         // The common refusal here is an unverified helper: the server hard-filters on
         // `kyc: "verified"` (B11), so an unverified account can never be offered work. That

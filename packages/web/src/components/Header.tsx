@@ -2,14 +2,27 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ShieldAlert } from "lucide-react";
+import { useState } from "react";
+import { Menu, ShieldAlert, X } from "lucide-react";
 import { SOSGlow, TASK_ALARM_ID } from "./SOSGlow";
 import { useAuth } from "@/auth/AuthProvider";
 import { homeFor, paths } from "@/lib/paths";
 
+const NAV = [
+  { href: paths.becomeHelper, label: "Become a Helper" },
+  { href: paths.safety, label: "Trust & Safety" },
+  { href: paths.pricing, label: "Pricing" },
+] as const;
+
 export function Header() {
   const { state, logout } = useAuth();
   const router = useRouter();
+  /** Below `md` the nav links (and, signed in, the account links) live behind this menu. They
+   *  used to be `hidden` with nothing in their place: on a phone there was no way to reach
+   *  Pricing or Trust & Safety from the header, and no "Log in" at all for a signed-out visitor. */
+  const [menuOpen, setMenuOpen] = useState(false);
+  /** Choosing a link closes it, so the next page does not open under a stale menu. */
+  const close = () => setMenuOpen(false);
 
   /**
    * The red button in the header used to have no handler at all — the most alarming control
@@ -41,28 +54,19 @@ export function Header() {
             </div>
           </Link>
           <nav className="hidden gap-6 text-sm font-bold text-gray-600 md:flex">
-            <Link
-              href={paths.becomeHelper}
-              className="transition-all hover:text-primary hover:-translate-y-0.5 inline-block"
-            >
-              Become a Helper
-            </Link>
-            <Link
-              href={paths.safety}
-              className="transition-all hover:text-primary hover:-translate-y-0.5 inline-block"
-            >
-              Trust &amp; Safety
-            </Link>
-            <Link
-              href={paths.pricing}
-              className="transition-all hover:text-primary hover:-translate-y-0.5 inline-block"
-            >
-              Pricing
-            </Link>
+            {NAV.map(({ href, label }) => (
+              <Link
+                key={href}
+                href={href}
+                className="transition-all hover:text-primary hover:-translate-y-0.5 inline-block"
+              >
+                {label}
+              </Link>
+            ))}
           </nav>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4">
           {/* Three states, not two. While `loading` the session is genuinely unknown — the
               tokens are httpOnly, so only /auth/me can answer — and rendering "Log in" during
               that window makes a signed-in user's own header flicker at them on every load. */}
@@ -86,7 +90,7 @@ export function Header() {
                 href={paths.security}
                 className="hidden text-sm font-bold text-gray-600 transition-all hover:text-primary sm:block hover:-translate-y-0.5"
               >
-                Sign-in
+                Account security
               </Link>
               <button
                 type="button"
@@ -100,7 +104,7 @@ export function Header() {
             <>
               <Link
                 href={paths.login}
-                className="hidden text-sm font-bold text-gray-600 transition-all hover:text-primary sm:block hover:-translate-y-0.5"
+                className="text-sm font-bold text-gray-600 transition-all hover:text-primary hover:-translate-y-0.5"
               >
                 Log in
               </Link>
@@ -113,7 +117,18 @@ export function Header() {
             </>
           )}
 
-          <div className="ml-2 transform hover:scale-110 transition-transform">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-expanded={menuOpen}
+            aria-controls="mobile-menu"
+            className="rounded-xl p-2 text-gray-700 hover:bg-gray-100 md:hidden"
+          >
+            {menuOpen ? <X size={22} aria-hidden /> : <Menu size={22} aria-hidden />}
+            <span className="sr-only">{menuOpen ? "Close menu" : "Open menu"}</span>
+          </button>
+
+          <div className="ml-1 transform hover:scale-110 transition-transform sm:ml-2">
             <SOSGlow onClick={onSos}>
               <ShieldAlert size={24} aria-hidden />
               <span className="sr-only">Emergency help</span>
@@ -121,6 +136,50 @@ export function Header() {
           </div>
         </div>
       </div>
+
+      {menuOpen && (
+        <nav
+          id="mobile-menu"
+          aria-label="Menu"
+          className="border-t border-gray-200 bg-background px-4 pb-4 pt-2 md:hidden"
+        >
+          <ul className="flex flex-col text-base font-bold text-gray-700">
+            {NAV.map(({ href, label }) => (
+              <li key={href}>
+                <Link
+                  href={href}
+                  onClick={close}
+                  className="block rounded-xl px-2 py-3 hover:bg-gray-100"
+                >
+                  {label}
+                </Link>
+              </li>
+            ))}
+            {state.status === "authenticated" && (
+              <>
+                <li>
+                  <Link
+                    href={homeFor(state.user.role, state.user.onboardingStatus)}
+                    onClick={close}
+                    className="block rounded-xl px-2 py-3 hover:bg-gray-100"
+                  >
+                    {state.user.displayName} — your home
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href={paths.security}
+                    onClick={close}
+                    className="block rounded-xl px-2 py-3 hover:bg-gray-100"
+                  >
+                    Account security
+                  </Link>
+                </li>
+              </>
+            )}
+          </ul>
+        </nav>
+      )}
     </header>
   );
 }

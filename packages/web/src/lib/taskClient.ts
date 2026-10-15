@@ -113,6 +113,13 @@ export const taskClient = {
 
   get: (taskId: string) => call<{ task: Task }>(`/tasks/${encodeURIComponent(taskId)}`),
 
+  /** The helper's share of completed tasks. A tally only: no payment provider is connected,
+   *  so nothing has been paid out and the screen must say so. */
+  earnings: () =>
+    call<{ totalEarnings: number; completedTasks: number; sharePercent: number }>(
+      "/helpers/me/earnings",
+    ),
+
   /**
    * Every task this user is currently party to, with its live context.
    *
