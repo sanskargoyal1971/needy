@@ -10,7 +10,6 @@ import { AuthenticatorSecret, RecoveryCodes } from "@/components/Authenticator";
 import { homeFor, paths, safeReturnTo } from "@/lib/paths";
 import { AuthCard, Button, Field, FormError, TextInput } from "@/components/ui";
 import { normalisePhone, phoneError } from "@/lib/phone";
-import { DevCodeNote } from "@/components/DevCodeNote";
 
 /** Panes on one route: ask for the number, then for a code or a password. Separate routes
  *  would lose the phone number on refresh and let someone deep-link to a code prompt for a
@@ -601,7 +600,6 @@ function LoginForm() {
             Your password was accepted. Because this account can see people&apos;s emergencies, it
             needs both.
           </p>
-          <DevCodeNote />
         </form>
       </AuthCard>
     );
@@ -643,7 +641,6 @@ function LoginForm() {
         >
           Use a different number
         </Button>
-        <DevCodeNote />
       </form>
     </AuthCard>
   );
