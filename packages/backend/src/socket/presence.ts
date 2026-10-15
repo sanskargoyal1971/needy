@@ -160,6 +160,17 @@ export const registerPresence: NamespaceRegistrar = (deps) => {
           }
 
           if (p.available) {
+            // A helper on a live task is not available, whatever their client says. Matching
+            // de-lists the winner, but only the helper's own app stopped re-advertising: a
+            // second device, or a reload that published before the task snapshot arrived, put
+            // a busy helper straight back on the map and in line for a second offer.
+            const busy = (await deps.tasks.activeForUser(userId)).some(
+              (t) => t.helperId === userId,
+            );
+            if (busy) {
+              await removeHelperGeo(client, userId);
+              return ack({ ok: false, error: "on-a-task" });
+            }
             // The freshness stamp is what gives the entry a TTL (B9): Redis GEO members have
             // no per-member expiry, so a helper who closes their laptop would otherwise stay
             // a candidate forever. Matching intersects the geo hits with this index, and the

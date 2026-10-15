@@ -98,6 +98,9 @@ services:
       COOKIE_SAMESITE: strict
       STORAGE_DRIVER: local
       STORAGE_LOCAL_ROOT: /uploads
+      # Sandbox, but no POST /dev/token: the demo is public, so the sign-in-as-anyone route is
+      # not registered at all rather than only refused by Caddy.
+      DISABLE_DEV_TOKEN: "1"
     tmpfs:
       - /uploads:mode=1777
     depends_on:

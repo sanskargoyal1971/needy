@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { normalisePhone } from "@needy/shared";
 import type { DbPool } from "../db.js";
 import type { MigrationLog } from "../migrations.js";
 import { legacyPhoneHmac } from "./phoneBlocks.js";
@@ -30,12 +31,14 @@ export interface SealedPhone {
   phone_last4: string;
 }
 
+/** Seals the CANONICAL form, so what is stored, what is indexed and what is shown back are one
+ *  number whatever shape the caller passed. */
 export function sealPhone(userId: string, phone: string, cipher: PiiCipher = pii): SealedPhone {
-  const trimmed = phone.trim();
+  const canonical = normalisePhone(phone);
   return {
-    phone_enc: cipher.encrypt(trimmed, phoneContext(userId)),
-    phone_hash: phoneIndex(trimmed, cipher),
-    phone_last4: trimmed.replace(/\D/g, "").slice(-4),
+    phone_enc: cipher.encrypt(canonical, phoneContext(userId)),
+    phone_hash: phoneIndex(canonical, cipher),
+    phone_last4: canonical.replace(/\D/g, "").slice(-4),
   };
 }
 
@@ -260,6 +263,94 @@ async function sealUsers(
       }
     });
   }
+}
+
+export interface CanonicaliseResult {
+  /** Rows re-sealed and re-indexed under the canonical form of their number. */
+  rekeyed: number;
+  /** Rows left as they were because another account already holds the canonical number — the
+   *  same person registered twice in two shapes. Logged by id for an operator to merge. */
+  conflicts: number;
+}
+
+/**
+ * Re-key every sealed phone number that is not in canonical E.164 form.
+ *
+ * Numbers used to be stored and indexed as typed, so "9876543210" and "+919876543210" were
+ * different keys. `phoneIndex` now normalises, which leaves any row written under the old rule
+ * unreachable by every lookup until it is re-keyed here. Same guarantees as the PII backfill:
+ * its advisory lock, batched, compare-and-set on the old index, and a savepoint per row so one
+ * duplicate person does not roll back the batch. A block recorded under the old index moves with
+ * the row. Idempotent: a canonical row is passed over.
+ */
+export async function canonicalisePhones(
+  pool: DbPool,
+  log: MigrationLog,
+  opts: { cipher?: PiiCipher; batchSize?: number } = {},
+): Promise<CanonicaliseResult> {
+  const cipher = opts.cipher ?? pii;
+  const batchSize = opts.batchSize ?? 200;
+  const result: CanonicaliseResult = { rekeyed: 0, conflicts: 0 };
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock($1)", [BACKFILL_LOCK_KEY]);
+    try {
+      let after = "";
+      for (;;) {
+        const { rows } = await client.query<{ id: string; phone_enc: string; phone_hash: string }>(
+          `SELECT id, phone_enc, phone_hash FROM users
+            WHERE phone_enc IS NOT NULL AND id > $1
+            ORDER BY id
+            LIMIT $2`,
+          [after, batchSize],
+        );
+        if (rows.length === 0) break;
+        after = rows[rows.length - 1].id;
+
+        await inTransaction(client, async () => {
+          for (const r of rows) {
+            const stored = cipher.decrypt(r.phone_enc, phoneContext(r.id));
+            const canonical = normalisePhone(stored);
+            if (canonical === stored) continue;
+            await client.query("SAVEPOINT canon_row");
+            try {
+              const sealed = sealPhone(r.id, canonical, cipher);
+              const done = await client.query(
+                `UPDATE users SET phone_enc = $2, phone_hash = $3, phone_last4 = $4
+                  WHERE id = $1 AND phone_hash = $5`,
+                [r.id, sealed.phone_enc, sealed.phone_hash, sealed.phone_last4, r.phone_hash],
+              );
+              if (done.rowCount === 1) {
+                await client.query(
+                  `UPDATE phone_blocks SET phone_hmac = $2
+                    WHERE phone_hmac = $1
+                      AND NOT EXISTS (SELECT 1 FROM phone_blocks WHERE phone_hmac = $2)`,
+                  [r.phone_hash, sealed.phone_hash],
+                );
+                result.rekeyed += 1;
+              }
+              await client.query("RELEASE SAVEPOINT canon_row");
+            } catch (err) {
+              await client.query("ROLLBACK TO SAVEPOINT canon_row");
+              if ((err as { code?: string }).code !== "23505") throw err;
+              result.conflicts += 1;
+              log.warn("phone not canonicalised: another account has the same number", {
+                userId: r.id,
+              });
+            }
+          }
+        });
+      }
+    } finally {
+      await client.query("SELECT pg_advisory_unlock($1)", [BACKFILL_LOCK_KEY]);
+    }
+  } finally {
+    client.release();
+  }
+  if (result.rekeyed > 0 || result.conflicts > 0) {
+    log.info("canonicalised stored phone numbers", { ...result });
+  }
+  return result;
 }
 
 /** The applicant's number on each helper application. No index and no uniqueness — nothing

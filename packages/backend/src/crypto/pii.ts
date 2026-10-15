@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from "node:crypto";
+import { normalisePhone } from "@needy/shared";
 import { config } from "../config.js";
 
 /** ── Field-level encryption for personal data ──────────────────────────────
@@ -186,9 +187,12 @@ export const pii: PiiCipher = createPiiCipher({
  * OTP and second-factor flows. One function so they cannot drift into normalising differently,
  * which would show up as a blocked number that is somehow not blocked.
  *
- * Normalised by trimming only, which is exactly what `phoneSchema` does before any of these
- * see the value. In particular `+91…` and `91…` stay different numbers, as they always were.
+ * Normalised to canonical E.164 (`normalisePhone`), the same form `phoneSchema` produces, so a
+ * caller that skipped the schema still lands on the same key. `+91…`, `91…` and a bare
+ * 10-digit number used to be three different keys — three accounts for one person, and a
+ * block that missed the other two shapes. Rows indexed under the old rule are re-keyed at
+ * boot by `canonicalisePhones`.
  */
 export function phoneIndex(phone: string, cipher: PiiCipher = pii): string {
-  return cipher.blindIndex("phone", phone.trim());
+  return cipher.blindIndex("phone", normalisePhone(phone));
 }

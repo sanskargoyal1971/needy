@@ -326,6 +326,37 @@ describe("/presence idle availability (audit A1 / B9 / B10)", () => {
     expect(await inIndex(HELPER_OK)).toBe(true);
   });
 
+  it("refuses to re-list a helper who is on a live task, and lists them again after", async () => {
+    // Only the helper's own app used to stop advertising during a task. A second device, or a
+    // reload that published before the snapshot arrived, put a busy helper back in the index.
+    await tasks.create({
+      id: "busy-task",
+      requesterId: REQUESTER,
+      helperId: HELPER_OK,
+      category: "errand",
+      state: "en-route",
+      origin: HERE,
+      title: "groceries",
+      description: "test",
+      price: 100,
+      serviceCode: null,
+      scheduledFor: null,
+      serviceBrief: null,
+      handoffOtpHash: null,
+      handoffOtpExpiresAt: null,
+      handoffVerifiedAt: null,
+      createdAt: clock,
+      updatedAt: clock,
+    });
+
+    expect(await publish(helperOk, HERE, true)).toEqual({ ok: false, error: "on-a-task" });
+    expect(await inIndex(HELPER_OK)).toBe(false);
+
+    await tasks.update("busy-task", { state: "completed", updatedAt: clock });
+    expect(await publish(helperOk, HERE, true)).toEqual({ ok: true });
+    expect(await inIndex(HELPER_OK)).toBe(true);
+  });
+
   // ── Authorization on the publish itself ───────────────────────────────────
 
   it("refuses an unverified helper explicitly, and writes nothing", async () => {

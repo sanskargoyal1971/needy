@@ -8,7 +8,7 @@ import { openPhone } from "../auth/userPii.js";
 import type { HelperApplicationRepository } from "./repos.js";
 import type { HelperProfileRepository, TaskRepository } from "../domain/stores.js";
 import { asyncRoute } from "../http/asyncRoute.js";
-import { validateBody } from "../auth/validation.js";
+import { phoneSchema, validateBody } from "../auth/validation.js";
 import { logger } from "../logger.js";
 import type { DbPool } from "../db.js";
 
@@ -25,10 +25,7 @@ export interface AdminRouterDeps {
 
 const applySchema = z.object({
   displayName: z.string().trim().min(1).max(80),
-  phone: z
-    .string()
-    .trim()
-    .regex(/^\+?[1-9]\d{7,14}$/),
+  phone: phoneSchema,
   aadhaarLast4: z.string().regex(/^\d{4}$/, "exactly 4 digits"),
   experience: z.string().trim().min(10).max(1000),
 });

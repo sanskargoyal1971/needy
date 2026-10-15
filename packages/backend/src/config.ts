@@ -365,6 +365,14 @@ export const config = {
   isProduction,
   /** Dev-only affordances (POST /dev/token, fixture seeding) mount ONLY when true. */
   allowDevRoutes: nodeEnv === "development" || nodeEnv === "test",
+  /**
+   * POST /dev/token specifically: signs an access token for ANY user id with no proof. Off
+   * with `DISABLE_DEV_TOKEN=1` while the rest of the sandbox stays on — a hosted demo needs
+   * the sandbox providers and fixtures, but must not depend on a proxy rule alone to keep a
+   * sign-in-as-anyone route off the internet.
+   */
+  devTokenRoute:
+    (nodeEnv === "development" || nodeEnv === "test") && process.env.DISABLE_DEV_TOKEN !== "1",
   auth: {
     /** HMAC secret the KYC provider signs its callbacks with (audit A5: the callback had no
      *  signature verification at all, so anyone could self-verify). Required in production. */

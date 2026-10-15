@@ -51,7 +51,7 @@ import {
 import { createPool, seedHelperProfiles, type DbPool } from "./db.js";
 import { migrate } from "./migrations.js";
 import { inspectRuntimeRole, resolveRuntimeRole, syncRuntimeGrants } from "./dbRoles.js";
-import { backfillUserPii } from "./auth/userPii.js";
+import { backfillUserPii, canonicalisePhones } from "./auth/userPii.js";
 import { createAuthRouter, KYC_CALLBACK_PATH, kycRawBodyParser } from "./auth/router.js";
 import { createInMemoryTotpRepo, createPgTotpRepo, type TotpRepository } from "./auth/totpRepo.js";
 import { csrfProtection } from "./auth/csrf.js";
@@ -185,6 +185,9 @@ async function main(): Promise<void> {
       // key is not in the database, so SQL could not do it). Before serving, under its own
       // advisory lock: a second instance waits, then finds nothing left to do.
       await backfillUserPii(ownerPool, logger);
+      // Then re-key any number stored in a non-canonical shape (phoneIndex now normalises, so
+      // such a row is unreachable until this runs).
+      await canonicalisePhones(ownerPool, logger);
       // Every boot, not once: this is the number that says when JWT_SECRET may rotate again
       // (see config.jwtSecret), so it has to be current wherever an operator looks.
       const unmatchedBlocks = await countUnmatchedPhoneBlocks(ownerPool);

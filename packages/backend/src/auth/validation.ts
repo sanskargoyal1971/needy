@@ -1,14 +1,25 @@
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
+import { normalisePhone, PHONE_E164 } from "@needy/shared";
 import { PASSWORD_MAX_LENGTH } from "./password.js";
 
 /** Shared request schemas. Every auth endpoint validates its body through one of these —
  *  the same rigor the brief mandates for all new endpoints. */
 
+/**
+ * A phone number, returned in canonical E.164 form whatever shape it arrived in.
+ *
+ * It used to validate and pass the string through as typed, so "+919876543210" and
+ * "919876543210" were two different numbers to every lookup, rate limit and block behind
+ * it: one person could hold two accounts, and a blocked number signed up again by dropping
+ * the `+`. Normalising here means nothing downstream ever sees a non-canonical number.
+ */
 export const phoneSchema = z
   .string()
   .trim()
-  .regex(/^\+?[1-9]\d{7,14}$/, "enter a valid phone number");
+  .max(32)
+  .transform(normalisePhone)
+  .refine((v) => PHONE_E164.test(v), "enter a valid phone number");
 
 export const otpRequestSchema = z.object({ phone: phoneSchema });
 

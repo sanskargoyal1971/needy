@@ -31,6 +31,9 @@ import { asyncRoute } from "./asyncRoute.js";
 /** Burst of ten, refilling at one every ten seconds. See the note at the call site. */
 const CREATE_TASK_LIMIT: RateLimit = { capacity: 10, ratePerSec: 0.1 };
 
+/** Requests one person may have open (not completed, cancelled or unmatched) at once. */
+export const MAX_OPEN_REQUESTS = 3;
+
 /** Request carrying the userId resolved by the bearer-auth middleware. Kept local since
  *  it's only meaningful behind `requireAuth`. */
 export interface AuthedRequest extends Request {
@@ -180,7 +183,7 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
   // In any other environment the route is never registered at all, so it 404s exactly like a
   // nonexistent path — deliberately not a 403, which would confirm to a prober that a token
   // minting endpoint exists here and invite them to look for a way through it.
-  if (deps.config.allowDevRoutes) {
+  if (deps.config.devTokenRoute) {
     router.post("/dev/token", (req: Request, res: Response) => {
       const parsed = devTokenSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
@@ -274,6 +277,17 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
       );
       if (!allowed) {
         res.status(429).json({ error: "too-many-requests" });
+        return;
+      }
+
+      // The rate limit bounds how FAST requests open, not how many are open at once: ten in a
+      // burst could all be searching together, each fanning offers out to every nearby helper.
+      // A person needs a few at most (a booking for later plus something now).
+      const open = (await deps.tasks.activeForUser(requesterId)).filter(
+        (t) => t.requesterId === requesterId,
+      );
+      if (open.length >= MAX_OPEN_REQUESTS) {
+        res.status(409).json({ error: "too-many-open-requests", maxOpen: MAX_OPEN_REQUESTS });
         return;
       }
 
