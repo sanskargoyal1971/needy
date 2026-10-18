@@ -63,6 +63,10 @@ export interface HelperExperienceState {
   } | null;
   /** The task we have accepted, if any. Null is the normal, most common state for a helper. */
   task: PublicTask | null;
+  /** Bookings made for this helper by name that they have not confirmed yet. Shown as "coming
+   *  up", never as the current task: each one reaches them as a direct offer when it falls due,
+   *  and until they accept it is not a commitment. */
+  upcoming: PublicTask[];
   messages: ChatMessage[];
   /** Whether the REQUESTER is typing (the mirror of the requester view's `otherTyping`). */
   otherTyping: boolean;
@@ -101,6 +105,7 @@ export function initialHelperState(userId: string): HelperExperienceState {
     offers: [],
     lastClosed: null,
     task: null,
+    upcoming: [],
     messages: [],
     otherTyping: false,
     eta: null,

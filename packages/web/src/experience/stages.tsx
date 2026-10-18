@@ -8,17 +8,19 @@ import {
   Copy,
   DoorOpen,
   Loader2,
+  MessageCircle,
   ShieldAlert,
+  ShieldCheck,
   Star,
+  UserRound,
   Video,
 } from "lucide-react";
 import type { MatchedHelper, PublicTask } from "@needy/shared";
-import { RadarSweep, SoftScaleReveal, type RadarBlip } from "@/motion";
-import { LiveMap } from "@/lib/LiveMap";
+import { SoftScaleReveal } from "@/motion";
 import { SandboxNote } from "@/components/ui";
 import { paths } from "@/lib/paths";
 import { taskClient } from "@/lib/taskClient";
-import type { EtaView, LatLng, LocationUpdate } from "@/realtime";
+import type { EtaView, LatLng } from "@/realtime";
 
 /** ── The seven stages ──────────────────────────────────────────────────────
  *  One component per `task.state`, because the state IS the stage — that mapping is declared
@@ -35,66 +37,56 @@ import type { EtaView, LatLng, LocationUpdate } from "@/realtime";
 // ── Stage 1: searching ───────────────────────────────────────────────────────
 
 /**
- * Place the server's coarsened pins on the radar.
- *
- * `helpers-nearby` carries `approxPoints` — real helper positions, deliberately rounded down
- * to a coarse grid before they leave the server so a requester cannot use the search to locate
- * anyone. The first version of this stage threw them away and rendered a bare count, which
- * makes the radar decoration: rings expanding over nothing, next to a number. The whole claim
- * this screen makes is that there are real people around you, and these points are the only
- * evidence of it the protocol provides.
- *
- * Placement is by true BEARING, with the spread normalised to the furthest helper in the set.
- * The radar therefore shows direction and relative spread honestly and makes no claim about
- * distance — which is why it carries no scale, no rings labelled in metres and no "1.2 km"
- * against a blip. Normalising to a fixed radius instead would put every helper in a dense
- * neighbourhood on top of the centre dot, which reads as "nobody is there".
+ * The search, as the sheet under the map. The map above carries the evidence — the ripple runs
+ * while offers are genuinely going out, and each dot is a real helper the server reached,
+ * coarsened before it left the server so nobody can be located through a search. This card
+ * says the same thing in words, with the real count.
  */
-function blipsFrom(origin: LatLng, points: LatLng[]): RadarBlip[] {
-  // Longitude degrees shrink with latitude; without this the bearing is wrong by a factor of
-  // cos(lat) — about 0.97 in Bengaluru, but the correction is one term and the error grows.
-  const scaleLng = Math.cos((origin.lat * Math.PI) / 180);
-  const raw = points.map((p) => ({
-    x: (p.lng - origin.lng) * scaleLng,
-    y: -(p.lat - origin.lat), // screen y grows downward; north must point up
-  }));
-  const furthest = Math.max(...raw.map((r) => Math.hypot(r.x, r.y)), Number.EPSILON);
-  return raw.map((r, i) => ({
-    id: `${i}`,
-    x: r.x / furthest,
-    y: r.y / furthest,
-    // Staggered so they arrive as a handful of people rather than a single flash.
-    delay: i * 0.12,
-  }));
-}
-
 export function SearchingStage({
-  origin,
   helpersNearby,
 }: {
   origin: LatLng;
   helpersNearby: { count: number; approxPoints: LatLng[]; restrictedNearby: number };
 }) {
-  const blips =
-    helpersNearby.approxPoints.length > 0 ? blipsFrom(origin, helpersNearby.approxPoints) : [];
-
+  const reached = helpersNearby.count;
   return (
-    <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center">
-      <div className="mx-auto mb-6 flex justify-center">
-        <RadarSweep size={180} blips={blips} />
+    <div className="rounded-3xl bg-white p-6 shadow-[0_10px_30px_rgba(15,92,92,0.08)]">
+      <div className="flex items-center gap-4">
+        <span className="relative flex h-12 w-12 shrink-0 items-center justify-center">
+          <span className="absolute inset-0 rounded-full bg-primary/15 animate-ripple" />
+          <span className="relative flex h-10 w-10 items-center justify-center rounded-full bg-primary text-white">
+            <UserRound size={20} aria-hidden />
+          </span>
+        </span>
+        <div className="min-w-0">
+          <h2 className="font-display text-xl font-bold text-gray-900">
+            Looking for someone nearby
+          </h2>
+          {/* The count is the honest thing to show, and it is a real count — the server sends
+              `helpers-nearby` as each ring of the escalation ladder is offered. */}
+          <p className="mt-0.5 text-sm text-gray-600">
+            {reached > 0
+              ? `${reached} verified ${reached === 1 ? "helper has" : "helpers have"} your request. Waiting for one to accept.`
+              : "Asking the helpers closest to you first. If nobody answers we'll widen the search."}
+          </p>
+        </div>
       </div>
-      <h2 className="font-display text-2xl font-bold text-gray-900">Looking for someone nearby</h2>
-      {/* The count is the honest thing to show, and it is a real count — the server sends
-          `helpers-nearby` with coarsened pins as each ring of the escalation ladder is
-          offered. "Searching…" with a spinner would be the same screen carrying no
-          information. */}
-      <p className="mt-2 text-gray-600">
-        {helpersNearby.count > 0
-          ? `We've reached ${helpersNearby.count} ${
-              helpersNearby.count === 1 ? "helper" : "helpers"
-            } close to you. Waiting for someone to accept.`
-          : "Asking helpers closest to you first. If nobody answers we'll widen the search."}
-      </p>
+
+      {reached > 0 && (
+        <div className="mt-4 flex items-center gap-2">
+          <div className="flex -space-x-2">
+            {Array.from({ length: Math.min(reached, 5) }).map((_, i) => (
+              <span
+                key={i}
+                className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-accent text-white"
+              >
+                <UserRound size={14} aria-hidden />
+              </span>
+            ))}
+          </div>
+          {reached > 5 && <span className="text-sm text-gray-500">+{reached - 5} more</span>}
+        </div>
+      )}
 
       {/* The difference between "nobody is around" and "someone is around and we will not
           introduce you". Those looked identical here: the search sat on "asking helpers
@@ -126,7 +118,7 @@ export function SearchingStage({
           </Link>
         </div>
       )}
-      <p className="mt-4 text-sm text-gray-500">
+      <p className="mt-4 text-xs text-gray-500">
         You can close this page — we&apos;ll keep looking and it will be here when you come back.
       </p>
     </div>
@@ -136,44 +128,50 @@ export function SearchingStage({
 // ── Stage 1b: booked — a scheduled task with a named helper ──────────────────
 
 /**
- * A booking that is already assigned, waiting for its time.
+ * A request for one named person, waiting for them to say yes.
  *
- * Not the radar. This task will never be offered to anyone: it exists because a human approved
- * this exact pairing after watching two video testimonies, and broadcasting it would hand the
- * booking to whoever tapped first — someone the approval does not cover. Showing "looking for
- * someone nearby" here would be describing the opposite of what is happening.
- *
- * The dispatch itself is NOT built, and this says so rather than implying a countdown is
- * running somewhere. There is no scheduler: nothing wakes up at the appointed time and offers
- * the task to the named helper. Per AGENTS.md a stub is called out rather than dressed up —
- * and this one especially, because a screen that quietly implied someone was coming would send
- * a person to wait by a door for nobody.
+ * Not the radar: this task is never offered to anyone else. It exists because the requester
+ * asked for this person — sometimes after a human approved the pairing — and broadcasting it
+ * would hand it to whoever tapped first. So this screen says plainly who is being asked, and
+ * when, and what happens if the answer is no.
  */
 export function BookedStage({ task }: { task: PublicTask }) {
+  const scheduled = task.scheduledFor != null;
   return (
-    <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center">
+    <div className="rounded-3xl bg-white p-8 text-center shadow-[0_10px_30px_rgba(15,92,92,0.08)]">
       <CalendarClock size={28} className="mx-auto mb-3 text-primary" aria-hidden />
-      <h2 className="font-display text-2xl font-bold text-gray-900">This booking is arranged</h2>
+      <h2 className="font-display text-2xl font-bold text-gray-900">
+        {scheduled ? "This booking is arranged" : "We've asked them for you"}
+      </h2>
       <p className="mt-2 text-gray-600">
-        {task.scheduledFor != null ? (
+        {scheduled ? (
           <>
             It&apos;s set for{" "}
             <span className="font-semibold text-gray-900">
-              {new Date(task.scheduledFor).toLocaleString()}
+              {new Date(task.scheduledFor!).toLocaleString("en-IN", {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+                hour: "numeric",
+                minute: "2-digit",
+              })}
             </span>
             , with the person you asked for. Nobody else will be offered it.
           </>
         ) : (
-          <>It&apos;s held for the person you asked for. Nobody else will be offered it.</>
+          <>
+            Only the person you asked for can take this. They have a few minutes to answer, and
+            you&apos;ll see them here the moment they do.
+          </>
         )}
       </p>
-      <div className="mt-6">
-        <SandboxNote>
-          Automatic dispatch at the booked time is not built yet. This booking is recorded and held
-          for your helper, but nothing will notify them when the time comes — for now, a member of
-          our team has to set it going.
-        </SandboxNote>
-      </div>
+      {scheduled && (
+        <p className="mx-auto mt-4 max-w-md rounded-2xl bg-primary/5 p-4 text-left text-sm text-gray-700">
+          A couple of hours before, we&apos;ll ask them to confirm. If they can&apos;t, we&apos;ll
+          tell you straight away — at least half an hour before the start — so there&apos;s time to
+          ask someone else.
+        </p>
+      )}
     </div>
   );
 }
@@ -182,7 +180,10 @@ export function BookedStage({ task }: { task: PublicTask }) {
 
 export function MatchedStage({ helper }: { helper: MatchedHelper | null }) {
   return (
-    <SoftScaleReveal className="rounded-3xl border border-gray-100 bg-white p-8 text-center">
+    <SoftScaleReveal className="rounded-3xl bg-white p-8 text-center shadow-[0_10px_30px_rgba(15,92,92,0.08)]">
+      <div className="mb-4 flex justify-center">
+        <HelperAvatar helper={helper} size={72} />
+      </div>
       <p className="text-sm font-medium uppercase tracking-wide text-primary">
         Someone has accepted
       </p>
@@ -237,46 +238,75 @@ export function VerifyingStage({ helper }: { helper: MatchedHelper | null }) {
 // ── Stage 4: en route ────────────────────────────────────────────────────────
 
 export function EnRouteStage({
-  task,
   helper,
-  location,
   eta,
   milestones,
 }: {
-  task: PublicTask;
   helper: MatchedHelper | null;
-  location: LocationUpdate | null;
   eta: EtaView | null;
   milestones: string[];
 }) {
+  const name = helper?.displayName ?? "Your helper";
   return (
-    <div className="space-y-6">
-      <div className="relative z-10 drop-shadow-2xl">
-        <LiveMap
-          origin={task.origin}
-          helper={location ? { lat: location.lat, lng: location.lng } : null}
-          heading={location?.heading ?? 0}
-          height={300}
-        />
-      </div>
-      <div className="rounded-3xl border border-white/40 bg-white/40 p-5 backdrop-blur-xl shadow-3d-card transform perspective-1000 rotate-x-1">
-        <h2 className="font-display text-xl font-bold text-gray-900">
-          {helper?.displayName ?? "Your helper"} is on the way
-        </h2>
-        <p className="mt-1 text-gray-600">
-          {eta
-            ? aboutMinutes(eta.etaSeconds)
-            : // Said plainly rather than shown as a stale number. An ETA that silently
-              // keeps displaying its last value while the phone is in a dead zone is worse
-              // than none, because it is indistinguishable from a live one.
-              "Working out how long they'll be"}
-        </p>
+    <div className="space-y-4">
+      <div className="rounded-3xl bg-white p-5 shadow-[0_10px_30px_rgba(15,92,92,0.08)]">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-primary">{name} is on the way</p>
+            {eta ? (
+              <>
+                <p className="mt-1 font-display text-4xl font-black leading-none text-gray-900">
+                  {Math.max(1, Math.round(eta.etaSeconds / 60))}
+                  <span className="ml-1 text-lg font-bold text-gray-500">min</span>
+                </p>
+                <p className="mt-1.5 text-sm text-gray-500">
+                  {formatDistance(eta.distanceMeters)} away
+                  {/* Said, not hidden: a straight-line guess is not a route. */}
+                  {eta.approximate && " · rough estimate"}
+                </p>
+              </>
+            ) : (
+              // Said plainly rather than shown as a stale number. An ETA that silently keeps
+              // displaying its last value while the phone is in a dead zone is worse than none.
+              <p className="mt-1 text-lg text-gray-600">Working out how long they&apos;ll be</p>
+            )}
+          </div>
+          <HelperAvatar helper={helper} size={56} />
+        </div>
+
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-gray-100 pt-4">
+          <div className="min-w-0">
+            <p className="truncate font-semibold text-gray-900">{name}</p>
+            {helper && (
+              <p className="flex flex-wrap items-center gap-x-3 gap-y-1 whitespace-nowrap text-sm text-gray-500">
+                {helper.rating > 0 && (
+                  <span className="inline-flex items-center gap-1">
+                    <Star size={13} className="fill-amber-400 text-amber-400" aria-hidden />
+                    {helper.rating.toFixed(1)}
+                  </span>
+                )}
+                {helper.helpedCount > 0 && <span>{helper.helpedCount} helped</span>}
+                <span className="inline-flex items-center gap-1 text-primary">
+                  <ShieldCheck size={13} aria-hidden />
+                  ID verified
+                </span>
+              </p>
+            )}
+          </div>
+          <a
+            href="#task-chat"
+            className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary/10 px-4 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/15"
+          >
+            <MessageCircle size={16} aria-hidden />
+            Message
+          </a>
+        </div>
       </div>
 
       {/* The warmth of this screen comes from milestones crossed on a real journey, not from
           decoration. Each line was emitted when the ETA actually passed a threshold. */}
       {milestones.length > 0 && (
-        <ul className="space-y-1.5">
+        <ul className="space-y-1.5 px-1">
           {milestones.map((m, i) => (
             <li key={`${m}-${i}`} className="flex items-center gap-2 text-sm text-gray-600">
               <CheckCircle2 size={14} className="text-primary" aria-hidden />
@@ -287,6 +317,30 @@ export function EnRouteStage({
       )}
     </div>
   );
+}
+
+/** The helper's face, or their initial when there is no photo to show. */
+export function HelperAvatar({
+  helper,
+  size = 48,
+}: {
+  helper: MatchedHelper | null;
+  size?: number;
+}) {
+  const initial = (helper?.displayName ?? "?").trim().charAt(0).toUpperCase() || "?";
+  return (
+    <span
+      className="flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[#1B7A7A] font-display font-bold text-white ring-4 ring-primary/10"
+      style={{ width: size, height: size, fontSize: size * 0.42 }}
+      aria-hidden
+    >
+      {initial}
+    </span>
+  );
+}
+
+function formatDistance(meters: number): string {
+  return meters < 1000 ? `${Math.round(meters / 10) * 10} m` : `${(meters / 1000).toFixed(1)} km`;
 }
 
 // ── Stage 5: arrived — and the requester's half of the handoff ───────────────
@@ -473,23 +527,18 @@ export function CompletedStage({ helper }: { helper: MatchedHelper | null }) {
   );
 }
 
-/** "About a minute away" / "About 7 minutes away" — never "1 minutes". */
-function aboutMinutes(etaSeconds: number): string {
-  const minutes = Math.max(1, Math.round(etaSeconds / 60));
-  return minutes === 1 ? "About a minute away" : `About ${minutes} minutes away`;
-}
-
 /** The search ran every ring and nobody accepted. Said plainly, with the next step in reach:
  *  a person who needed help still needs it, and "try again" is the honest offer. */
-export function UnmatchedStage() {
+export function UnmatchedStage({ named = false }: { named?: boolean }) {
   return (
     <div className="rounded-3xl border border-gray-100 bg-white p-8 text-center">
       <h2 className="font-display text-2xl font-bold text-gray-900">
-        Nobody was available this time
+        {named ? "They can't make it this time" : "Nobody was available this time"}
       </h2>
       <p className="mt-2 text-gray-600">
-        We asked the verified helpers near you, widening the search each time, and no one could take
-        it. Nothing was charged. Helpers come and go through the day, so it is worth asking again.
+        {named
+          ? "The person you asked for couldn't take this one. Nothing was charged. You can ask the verified helpers near you instead."
+          : "We asked the verified helpers near you, widening the search each time, and no one could take it. Nothing was charged. Helpers come and go through the day, so it is worth asking again."}
       </p>
       <Link
         href={paths.newRequest}

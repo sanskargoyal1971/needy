@@ -4,6 +4,8 @@ import {
   CLIENT_HEARTBEAT_INTERVAL_MS,
   NS,
   TASK_STATES_WITH_LIVE_TRACKING,
+  isAwaitingNamedHelper,
+  isCommittedHelper,
   isTerminal,
   type ChatClientEvents,
   type ChatServerEvents,
@@ -566,9 +568,16 @@ export class RealHelperClient implements HelperDriver {
     const epoch = this.taskEpoch;
     try {
       const snap = await this.fetchSnapshot();
-      const mine = snap.activeTasks.find(
-        (t) => t.task.helperId === this.opts.userId && !isTerminal(t.task.state),
-      );
+      // Only a task this helper has COMMITTED to is "the task". An unconfirmed booking used to
+      // match here too, which put a booking days away on screen as if they were doing it now
+      // — hiding the availability toggle until the day came.
+      const mine = snap.activeTasks.find((t) => isCommittedHelper(t.task, this.opts.userId));
+      this.patch({
+        upcoming: snap.activeTasks
+          .map((t) => t.task)
+          .filter((t) => t.helperId === this.opts.userId && isAwaitingNamedHelper(t))
+          .sort((a, b) => (a.scheduledFor ?? a.createdAt) - (b.scheduledFor ?? b.createdAt)),
+      });
       if (mine) {
         // Safe to apply even if a live event raced us: this IS the task, and the snapshot
         // carries the message history the socket does not replay.
@@ -647,7 +656,13 @@ export class RealHelperClient implements HelperDriver {
       // messages already received on the current one.
       const isNew = this.state.task?.id !== task.id;
       this.taskEpoch += 1;
-      this.patch({ task, lastClosed: null, ...(isNew ? { sos: null, messages: [] } : {}) });
+      this.patch({
+        task,
+        lastClosed: null,
+        // A booking just confirmed is no longer "coming up" — it is now.
+        upcoming: this.state.upcoming.filter((t) => t.id !== task.id),
+        ...(isNew ? { sos: null, messages: [] } : {}),
+      });
       this.joinTaskRooms(task.id);
     });
 
@@ -667,9 +682,9 @@ export class RealHelperClient implements HelperDriver {
   private wireTracking(): void {
     // Our own ETA to the pickup, echoed back from the server's computation. The helper sees
     // the same number the requester does, which matters when they talk about it in chat.
-    this.tracking.on("eta", ({ taskId, etaSeconds, distanceMeters }) => {
+    this.tracking.on("eta", ({ taskId, etaSeconds, distanceMeters, approximate, polyline }) => {
       if (taskId !== this.state.task?.id) return;
-      this.patch({ eta: { etaSeconds, distanceMeters } });
+      this.patch({ eta: { etaSeconds, distanceMeters, approximate, polyline } });
     });
   }
 

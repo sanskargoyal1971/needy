@@ -262,7 +262,8 @@ describe("matching: radius escalation, eligibility and service filters", () => {
     expect(offered.origin).not.toEqual(ORIGIN);
     expect(offered.origin.lat).toBeCloseTo(ORIGIN.lat, 2);
     expect(offered.origin.lat).toBe(Math.round(ORIGIN.lat * 1000) / 1000);
-    expect(offered.distanceMeters % 100).toBe(0);
+    expect(offered.distanceMeters).not.toBeNull();
+    expect(offered.distanceMeters! % 100).toBe(0);
     expect(midOffers, "mid is outside 1km on wave 0").toHaveLength(0);
     expect(farOffers).toHaveLength(0);
 

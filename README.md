@@ -44,10 +44,12 @@ Vite + React + Framer Motion, two routes:
 
 ### Live tracking map (Stage 4)
 
-`LiveMap` renders a real map (Leaflet + OpenStreetMap tiles — no API key; override with
-`VITE_MAP_TILE_URL`/`VITE_MAP_ATTRIBUTION` for a keyed provider). The §2.3 glide is preserved
+`LiveMap` (and the request form's `OriginPicker`) render Google Maps. Set
+`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` in `packages/web/.env.local` (optionally
+`NEXT_PUBLIC_GOOGLE_MAP_ID`; it defaults to Google's `DEMO_MAP_ID`); without a key each map says
+it can't be shown. The §2.3 glide is preserved
 by interpolating the helper in **geographic** space (Framer motion values tween lat/lng between
-GPS points) and letting Leaflet project that each frame, so the human silhouette glides
+GPS points) and re-positioning the advanced marker each frame, so the human silhouette glides
 continuously and stays glued to the map through pan/zoom — never teleporting per coordinate.
 
 ### Task lifecycle transitions

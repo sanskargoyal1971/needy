@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef } from "react";
 import { Loader2, WifiOff } from "lucide-react";
 import { isTerminal } from "@needy/shared";
 import { useDriver, useTaskExperience } from "@/realtime";
+import { LiveMap } from "@/lib/LiveMap";
+import { usePushState } from "@/lib/push";
 import { paths } from "@/lib/paths";
 import { Chat } from "./Chat";
 import { TASK_ALARM_ID } from "@/components/SOSGlow";
@@ -38,6 +40,8 @@ export function TaskExperience({ taskId }: { taskId: string }) {
   const state = useTaskExperience();
   const { task, helper, connection } = state;
   const startedRef = useRef<string | null>(null);
+  // Re-confirms this device's push subscription with the server on every visit; never prompts.
+  usePushState();
   const searchOpenedRef = useRef<string | null>(null);
 
   // Join the task's rooms and seed from the snapshot. Guarded by id so a re-render cannot
@@ -107,101 +111,141 @@ export function TaskExperience({ taskId }: { taskId: string }) {
   /** Chat and the alarm are available from the moment a real person is attached, and stay
    *  available through completion — an alarm raised moments after a task was marked complete
    *  is exactly the case that must not be refused. */
-  const hasCompanion = task.helperId != null;
+  // A named helper who has not accepted (a booking, or one who said no) is not a companion:
+  // there is nobody to message and nobody on the way to raise an alarm about.
+  const hasCompanion =
+    task.helperId != null && task.state !== "searching" && task.state !== "unmatched";
+
+  /** The map leads every stage where somebody is being looked for or is on their way — the
+   *  way a ride app does. Booked (nobody is coming yet) and the finished states have nothing
+   *  for a map to show. */
+  const booked = task.state === "searching" && task.helperId != null;
+  const showMap =
+    !booked && ["searching", "matched", "verifying", "en-route", "arrived"].includes(task.state);
+  const searching = task.state === "searching" && !booked;
+  const tracking = task.state === "en-route" || task.state === "arrived";
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 px-4 py-8 sm:px-6">
-      {/* Connection state is never hidden. §2.1: the app must not silently pretend it is live
-          during a drop — on this screen in particular, a frozen map that looks live is how
-          someone concludes their helper has stopped moving. */}
-      {connection !== "online" && (
-        <div
-          role="status"
-          className="flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2.5 text-sm text-amber-900 ring-1 ring-inset ring-amber-200"
-        >
-          <WifiOff size={14} aria-hidden />
-          {connection === "resyncing"
-            ? "Reconnected — catching up on what you missed."
-            : connection === "reconnecting"
-              ? "Connection lost. Trying to reconnect…"
-              : connection === "connecting"
-                ? "Connecting…"
-                : "You are offline. What you see may be out of date."}
-        </div>
-      )}
-
-      {task.state === "searching" &&
-        (task.helperId != null ? (
-          // Assigned already: held for one person, never broadcast. See BookedStage.
-          <BookedStage task={task} />
-        ) : (
-          <SearchingStage origin={task.origin} helpersNearby={state.helpersNearby} />
-        ))}
-      {task.state === "matched" && <MatchedStage helper={helper} />}
-      {task.state === "verifying" && <VerifyingStage helper={helper} />}
-      {task.state === "en-route" && (
-        <EnRouteStage
-          task={task}
-          helper={helper}
-          location={state.location}
-          eta={state.eta}
-          milestones={state.milestones}
-        />
-      )}
-      {task.state === "arrived" && <ArrivedStage task={task} helper={helper} />}
-      {task.state === "in-progress" && (
-        <InProgressStage helperName={otherName} onComplete={() => driver.advanceTo("completed")} />
-      )}
-      {task.state === "completed" && <CompletedStage helper={helper} />}
-      {task.state === "cancelled" && <CancelledStage />}
-      {task.state === "unmatched" && <UnmatchedStage />}
-
-      {hasCompanion && !isTerminal(task.state) && (
-        <Chat
-          messages={state.messages}
-          userId={state.userId}
-          otherTyping={state.otherTyping}
-          otherName={otherName}
-          onSend={onSend}
-          onTyping={onTyping}
-          onRead={onRead}
-        />
-      )}
-
-      {/* The alarm sits below the stage rather than floating over it: a control that overlaps
-          the map is a control someone hits while pinching to zoom. */}
-      {hasCompanion && (
-        <div id={TASK_ALARM_ID}>
-          <SosButton
-            alert={state.sos}
-            userId={state.userId}
-            onRaise={onRaise}
-            onCancel={onCancelSos}
+    <div className="mx-auto max-w-2xl">
+      {showMap && (
+        <div className="overflow-hidden sm:mt-6 sm:rounded-[28px] sm:px-0">
+          <LiveMap
+            bleed
+            origin={task.origin}
+            height="min(52vh, 460px)"
+            searching={searching}
+            nearby={searching ? state.helpersNearby.approxPoints : []}
+            helper={
+              tracking && state.location
+                ? { lat: state.location.lat, lng: state.location.lng }
+                : null
+            }
+            heading={state.location?.heading ?? 0}
+            route={task.state === "en-route" ? (state.eta?.polyline ?? null) : null}
           />
         </div>
       )}
+      <div
+        className={`relative z-10 space-y-5 bg-background px-4 pb-10 sm:px-6 ${
+          showMap
+            ? "-mt-7 rounded-t-[28px] pt-5 shadow-[0_-12px_30px_rgba(15,92,92,0.10)] sm:mt-4 sm:rounded-[28px] sm:shadow-none"
+            : "pt-8"
+        }`}
+      >
+        {showMap && (
+          <div className="mx-auto h-1.5 w-12 rounded-full bg-gray-300 sm:hidden" aria-hidden />
+        )}
+        {/* Connection state is never hidden. §2.1: the app must not silently pretend it is live
+          during a drop — on this screen in particular, a frozen map that looks live is how
+          someone concludes their helper has stopped moving. */}
+        {connection !== "online" && (
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2.5 text-sm text-amber-900 ring-1 ring-inset ring-amber-200"
+          >
+            <WifiOff size={14} aria-hidden />
+            {connection === "resyncing"
+              ? "Reconnected — catching up on what you missed."
+              : connection === "reconnecting"
+                ? "Connection lost. Trying to reconnect…"
+                : connection === "connecting"
+                  ? "Connecting…"
+                  : "You are offline. What you see may be out of date."}
+          </div>
+        )}
 
-      {/* Cancelling is offered while a search is still open — before anyone has committed to
+        {task.state === "searching" &&
+          (task.helperId != null ? (
+            // Assigned already: held for one person, never broadcast. See BookedStage.
+            <BookedStage task={task} />
+          ) : (
+            <SearchingStage origin={task.origin} helpersNearby={state.helpersNearby} />
+          ))}
+        {task.state === "matched" && <MatchedStage helper={helper} />}
+        {task.state === "verifying" && <VerifyingStage helper={helper} />}
+        {task.state === "en-route" && (
+          <EnRouteStage helper={helper} eta={state.eta} milestones={state.milestones} />
+        )}
+        {task.state === "arrived" && <ArrivedStage task={task} helper={helper} />}
+        {task.state === "in-progress" && (
+          <InProgressStage
+            helperName={otherName}
+            onComplete={() => driver.advanceTo("completed")}
+          />
+        )}
+        {task.state === "completed" && <CompletedStage helper={helper} />}
+        {task.state === "cancelled" && <CancelledStage />}
+        {task.state === "unmatched" && <UnmatchedStage named={task.helperId != null} />}
+
+        {hasCompanion && !isTerminal(task.state) && (
+          <div id="task-chat" className="scroll-mt-24">
+            <Chat
+              messages={state.messages}
+              userId={state.userId}
+              otherTyping={state.otherTyping}
+              otherName={otherName}
+              onSend={onSend}
+              onTyping={onTyping}
+              onRead={onRead}
+            />
+          </div>
+        )}
+
+        {/* The alarm sits below the stage rather than floating over it: a control that overlaps
+          the map is a control someone hits while pinching to zoom. */}
+        {hasCompanion && (
+          <div id={TASK_ALARM_ID}>
+            <SosButton
+              alert={state.sos}
+              userId={state.userId}
+              onRaise={onRaise}
+              onCancel={onCancelSos}
+            />
+          </div>
+        )}
+
+        {/* Cancelling is offered while a search is still open — before anyone has committed to
           travelling, changing your mind costs nobody anything. It disappears once a helper is
           on the way, where it becomes a decision with a person on the other end of it. */}
-      {task.state === "searching" && (
-        <button
-          type="button"
-          onClick={() => driver.advanceTo("cancelled")}
-          className="w-full text-sm text-gray-500 underline hover:text-gray-800"
-        >
-          Cancel this request
-        </button>
-      )}
+        {task.state === "searching" && (
+          <button
+            type="button"
+            onClick={() => driver.advanceTo("cancelled")}
+            className="w-full text-sm text-gray-500 underline hover:text-gray-800"
+          >
+            Cancel this request
+          </button>
+        )}
 
-      {isTerminal(task.state) && (
-        <Link
-          href={paths.requesterHome}
-          className="block w-full rounded-xl bg-primary px-4 py-3 text-center text-sm font-semibold text-white"
-        >
-          Back to home
-        </Link>
-      )}
+        {isTerminal(task.state) && (
+          <Link
+            href={paths.requesterHome}
+            className="block w-full rounded-xl bg-primary px-4 py-3 text-center text-sm font-semibold text-white"
+          >
+            Back to home
+          </Link>
+        )}
+      </div>
     </div>
   );
 }

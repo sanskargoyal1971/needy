@@ -221,7 +221,7 @@ function AlertCard({ alert, onChanged }: { alert: AlertView; onChanged: (a: Aler
         {alert.at ? (
           <a
             className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-            href={`https://www.openstreetmap.org/?mlat=${alert.at.lat}&mlon=${alert.at.lng}#map=17/${alert.at.lat}/${alert.at.lng}`}
+            href={`https://www.google.com/maps/search/?api=1&query=${alert.at.lat},${alert.at.lng}`}
             target="_blank"
             rel="noreferrer noopener"
           >

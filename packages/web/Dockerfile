@@ -27,6 +27,13 @@ RUN test -n "$NEXT_PUBLIC_API_URL" || (echo "NEXT_PUBLIC_API_URL build arg is re
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_SUPPORT_PHONE=
 ENV NEXT_PUBLIC_SUPPORT_PHONE=$NEXT_PUBLIC_SUPPORT_PHONE
+# Browser key for the Maps JavaScript API. Optional: without it every map says it can't be
+# shown rather than failing the build. It is public by design — restrict it by API in Cloud
+# Console. The map id is optional too (the code falls back to Google's DEMO_MAP_ID).
+ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=
+ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+ARG NEXT_PUBLIC_GOOGLE_MAP_ID=
+ENV NEXT_PUBLIC_GOOGLE_MAP_ID=$NEXT_PUBLIC_GOOGLE_MAP_ID
 # Sandbox stacks only: lets the sign-in note print the backend's fixed code. Empty (the
 # default, and always in production) and the note says the code is unknown instead.
 ARG NEXT_PUBLIC_DEV_FIXED_OTP=

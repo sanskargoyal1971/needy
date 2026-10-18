@@ -196,11 +196,13 @@ export const registerTracking: NamespaceRegistrar = (deps: Deps): void => {
         const room = `task:${task.id}`;
         nsp.to(room).emit("helper-moved", { taskId: task.id, update });
 
-        const eta = await computeEta(p.point, task.origin);
+        const eta = await computeEta(p.point, task.origin, { cacheKey: task.id, now: deps.now() });
         nsp.to(room).emit("eta", {
           taskId: task.id,
           etaSeconds: eta.etaSeconds,
           distanceMeters: eta.distanceMeters,
+          approximate: eta.approximate,
+          ...(eta.polyline ? { polyline: eta.polyline } : {}),
         });
       } catch (err) {
         deps.logger.error("tracking location failed", {

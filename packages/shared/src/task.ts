@@ -152,6 +152,38 @@ export function isTerminal(state: TaskState): boolean {
 }
 
 /**
+ * A task assigned to one named helper that has not been confirmed yet — a booking waiting for
+ * its time, or an "ask the same person again" waiting for them to answer. It sits in
+ * `searching` with a `helperId`, is never broadcast, and reaches its helper only as a DIRECT
+ * offer from the booking dispatcher.
+ */
+export function isAwaitingNamedHelper(task: Pick<Task, "state" | "helperId">): boolean {
+  return task.state === "searching" && task.helperId != null;
+}
+
+/**
+ * Has this helper actually committed to this task? True from their accept onward. A booking
+ * they have not confirmed yet is NOT a commitment: it must not make them "busy", hide their
+ * availability, or take over their screen for the days before it is due.
+ */
+export function isCommittedHelper(
+  task: Pick<Task, "state" | "helperId">,
+  helperId: string,
+): boolean {
+  return task.helperId === helperId && task.state !== "searching" && !isTerminal(task.state);
+}
+
+/** ── Direct offers to a named helper ─────────────────────────────────────────
+ *  A booking is offered to its helper this long before it starts… */
+export const BOOKING_DISPATCH_LEAD_MS = 2 * 60 * 60 * 1000;
+/** …and must be confirmed this long before it starts, so the requester still has time to
+ *  arrange someone else if the answer is no. */
+export const BOOKING_CONFIRM_BY_MS = 30 * 60 * 1000;
+/** An immediate "ask the same person again" is open this long — longer than an open search's
+ *  window, because exactly one person can answer it. */
+export const DIRECT_OFFER_WINDOW_MS = 3 * 60 * 1000;
+
+/**
  * The task lifecycle state machine — the single source of truth both the backend (which
  * enforces it before broadcasting `task-updated`) and the frontend (which offers only legal
  * next steps) import. `searching → matched` is intentionally NOT advanceable here: that edge

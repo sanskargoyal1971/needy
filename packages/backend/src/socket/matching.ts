@@ -5,6 +5,10 @@ import {
   canActorTransition,
   canTransition,
   HELPER_SHARE_PERCENT,
+  BOOKING_CONFIRM_BY_MS,
+  BOOKING_DISPATCH_LEAD_MS,
+  DIRECT_OFFER_WINDOW_MS,
+  isAwaitingNamedHelper,
   isLiveDispatchable,
   isTerminal,
   NS,
@@ -30,6 +34,7 @@ import { freshHelperIds, getTaskLocation, removeHelperGeo } from "../domain/loca
 import { clearTaskLocation } from "../domain/location-store.js";
 import { readPresence } from "../domain/presence-store.js";
 import { computeEta } from "../services/eta.js";
+import { pushService } from "../services/push.js";
 import { withLock } from "../services/lock.js";
 import { consumeToken, type RateLimit } from "../services/ratelimit.js";
 import type { SocketData } from "./auth.js";
@@ -305,7 +310,11 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
           // match that another helper already won.
           const task = await deps.tasks.get(taskId);
           if (!task) return { won: false as const, reason: "expired" as const };
-          if (task.helperId != null || task.state !== "searching")
+          // A DIRECT offer (a booking, or "ask the same person again") already carries its
+          // helper: it is acceptable by that one person and nobody else. An open search must
+          // still be unassigned.
+          const direct = task.helperId != null;
+          if (task.state !== "searching" || (direct && task.helperId !== helperId))
             return { won: false as const, reason: "already-taken" as const };
 
           // ── OFFER VALIDITY (audit: neither of these was checked) ──────────
@@ -329,7 +338,9 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
           //    range" — and a helper who has driven away since being offered must not be
           //    able to take a job they can no longer reach. 10 km is a hard ceiling: no
           //    wave, and no amount of waiting, makes a further helper acceptable.
-          const distanceMeters = await helperDistanceTo(deps, helperId, task);
+          //    Not for a direct offer: the requester chose this person by name, and a booking
+          //    is confirmed hours ahead, from wherever the helper happens to be.
+          const distanceMeters = direct ? null : await helperDistanceTo(deps, helperId, task);
           if (distanceMeters != null && distanceMeters > deps.config.match.radiusMeters) {
             deps.logger.warn("matching accept refused — helper beyond the radius cap", {
               taskId,
@@ -380,6 +391,13 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
           .to(personalRoom(settled.task.requesterId))
           .to(personalRoom(helperId))
           .emit("matched", { task: publicTask(settled.task), helper: settled.helper });
+        // The requester may well have closed the page after asking — "you can close this page"
+        // is what the search screen tells them.
+        void pushService().send(settled.task.requesterId, {
+          kind: "matched",
+          taskId: settled.task.id,
+          helperName: settled.helper.displayName,
+        });
 
         // The search is over: drop the durable expiry entry so the sweep has nothing left to
         // do for this task. `expireOffer` re-checks task state anyway, so a sweep that raced
@@ -534,6 +552,16 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
           .to(personalRoom(updated.helperId ?? updated.requesterId))
           .emit("task-updated", { task: forClients });
 
+        // Someone at the door is the one moment a requester most needs to know about.
+        if (updated.state === "arrived" && updated.helperId) {
+          const profile = await deps.helpers.get(updated.helperId);
+          void pushService().send(updated.requesterId, {
+            kind: "arrived",
+            taskId: updated.id,
+            helperName: profile?.displayName ?? "Your helper",
+          });
+        }
+
         // Cancelling a search nobody has answered yet is free and completely legitimate —
         // people change their minds. Cancelling AFTER a helper accepted means someone stopped
         // what they were doing, possibly set off, and got nothing. That asymmetry is why the
@@ -555,7 +583,9 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
         // and the only thing that eventually cleared it was the expiry sweep firing
         // `reason: "expired"` up to a whole window later. `cancelled` is in the `offer-closed`
         // contract precisely for this case and nothing was emitting it.
-        if (updated.state === "cancelled" && updated.helperId == null) {
+        // Keyed on where it came FROM: a direct offer has a helperId while still searching,
+        // and its one recipient needs the closure just as much as an open search's audience.
+        if (updated.state === "cancelled" && outcome.from === "searching") {
           await closeCancelledOffer(deps, nsp, taskId);
         }
 
@@ -590,7 +620,15 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
       const p = parseOrRefuse(socket, "decline", taskIdSchema, payload);
       if (!p) return;
       try {
-        await client.srem(keys.offerAudience(p.taskId), socket.data.user.sub);
+        const helperId = socket.data.user.sub;
+        await client.srem(keys.offerAudience(p.taskId), helperId);
+        // A direct offer has exactly one possible answerer. Their "no" is the answer, and the
+        // requester should hear it now rather than when the window runs out.
+        const task = await deps.tasks.get(p.taskId);
+        if (task && isAwaitingNamedHelper(task) && task.helperId === helperId) {
+          const claimed = await client.zrem(keys.offerExpiryQueue(), p.taskId);
+          if (claimed === 1) await closeDirectOffer(deps, nsp, p.taskId, "declined");
+        }
       } catch (err) {
         deps.logger.error("matching decline failed", {
           taskId: p.taskId,
@@ -612,6 +650,15 @@ export const registerMatching: NamespaceRegistrar = (deps: Deps) => {
   }, OFFER_SWEEP_INTERVAL_MS);
   // Don't keep the process alive purely for the sweep.
   sweep.unref?.();
+
+  // ── booking dispatch ─────────────────────────────────────────────────────────
+  // Tasks waiting on a named helper are offered to that helper when they fall due. Durable by
+  // construction: the source of truth is the task table, and the claim is the same ZADD NX the
+  // open search uses, so several instances sweeping at once dispatch each booking once.
+  const dispatch = setInterval(() => {
+    void dispatchDueDirectOffers(deps, nsp);
+  }, BOOKING_SWEEP_INTERVAL_MS);
+  dispatch.unref?.();
 };
 
 /** The result of an attempted advance, computed under the match lock and reported outside it
@@ -1082,6 +1129,21 @@ async function broadcastWave(
       expiresAt,
     };
     nsp.to(personalRoom(c.helperId)).emit("offer", offer);
+    // The second copy, for a helper whose page is closed or whose phone is locked. Not awaited:
+    // a slow push service must never delay the socket fan-out above, which is the race every
+    // helper with the app open is in. Lives exactly as long as the offer window — a push that
+    // arrives after the window has closed would be offering something that no longer exists.
+    void pushService().send(
+      c.helperId,
+      {
+        kind: "offer",
+        taskId: task.id,
+        title: task.title,
+        distanceMeters: offer.distanceMeters,
+        expiresAt,
+      },
+      { ttlSeconds: Math.max(1, (expiresAt - deps.now()) / 1000) },
+    );
   }
 
   // Tell the requester how many helpers we reached, with coarsened pins.
@@ -1115,6 +1177,11 @@ async function expireOffer(deps: Deps, nsp: MatchingNamespace, taskId: string): 
   const { client } = deps.redis;
   try {
     const task = await deps.tasks.get(taskId);
+    // A direct offer never widens — it was only ever for one person. Its lapse is a "no".
+    if (task && isAwaitingNamedHelper(task)) {
+      await closeDirectOffer(deps, nsp, taskId, "expired");
+      return;
+    }
     const stillSearching = Boolean(task && task.helperId == null && task.state === "searching");
 
     if (task && stillSearching) {
@@ -1182,5 +1249,169 @@ async function expireOffer(deps: Deps, nsp: MatchingNamespace, taskId: string): 
       taskId,
       err: String(err),
     });
+  }
+}
+
+// ── direct offers: bookings and "ask the same person again" ────────────────────
+
+/** How often due bookings are looked for. An unscheduled "ask again" therefore reaches its
+ *  helper within this long of being created. */
+const BOOKING_SWEEP_INTERVAL_MS = 5_000;
+
+/** Find every task waiting on a named helper that is due, and offer each one. */
+export async function dispatchDueDirectOffers(deps: Deps, nsp: MatchingNamespace): Promise<void> {
+  try {
+    const due = await deps.tasks.awaitingNamedHelper(deps.now() + BOOKING_DISPATCH_LEAD_MS);
+    for (const task of due) await dispatchDirectOffer(deps, nsp, task);
+    metrics.recordSweep("booking_dispatch", true, deps.now());
+  } catch (err) {
+    metrics.recordSweep("booking_dispatch", false, deps.now());
+    deps.logger.error("booking dispatch sweep failed", { err: String(err) });
+  }
+}
+
+/**
+ * Offer one task to its named helper, at most once per open window.
+ *
+ * The pairing is RE-CHECKED here rather than trusted from creation time. A booking can be made
+ * up to weeks ahead, and in that time the helper can lose their verification, be blocked, or
+ * the exception that permitted the pairing can expire. Offering it anyway would put two people
+ * together on the strength of a decision that no longer holds.
+ */
+async function dispatchDirectOffer(deps: Deps, nsp: MatchingNamespace, task: Task): Promise<void> {
+  const { client } = deps.redis;
+  const helperId = task.helperId;
+  if (!helperId || !isAwaitingNamedHelper(task)) return;
+  const now = deps.now();
+
+  // Bookings must be answered with time to spare; an unscheduled ask gets a fixed window.
+  const window =
+    task.scheduledFor == null
+      ? DIRECT_OFFER_WINDOW_MS
+      : Math.max(DIRECT_OFFER_WINDOW_MS, task.scheduledFor - BOOKING_CONFIRM_BY_MS - now);
+  const expiresAt = now + window;
+
+  // The claim. Returns 0 while an offer for this task is live (or lapsed and about to be
+  // closed by the expiry sweep), which is what keeps a 5-second sweep from re-offering.
+  const claimed = await client.zadd(keys.offerExpiryQueue(), "NX", expiresAt, task.id);
+  if (claimed === 0) return;
+
+  // A booking whose start has already passed — the server was down, or it was made before
+  // dispatch existed — is not offered at all. Asking someone to confirm a slot that is over
+  // would be a nonsense card on their screen; the requester is told it did not happen.
+  const missed = task.scheduledFor != null && task.scheduledFor <= now;
+  if (missed || !(await namedPairingStillHolds(deps, task, helperId, now))) {
+    await client.zrem(keys.offerExpiryQueue(), task.id);
+    await closeDirectOffer(deps, nsp, task.id, missed ? "missed" : "no-longer-eligible");
+    return;
+  }
+
+  await client.sadd(keys.offerAudience(task.id), helperId);
+  await client.pexpire(keys.offerAudience(task.id), window + OFFER_AUDIENCE_GRACE_MS);
+
+  const distanceMeters = await helperDistanceTo(deps, helperId, task);
+  const offer: MatchOffer = {
+    taskId: task.id,
+    category: task.category,
+    // Coarse, exactly as for an open search: the exact door goes only to an accepted helper.
+    origin: { lat: coarsen(task.origin.lat), lng: coarsen(task.origin.lng) },
+    title: task.title,
+    distanceMeters:
+      distanceMeters == null ? null : Math.max(100, Math.round(distanceMeters / 100) * 100),
+    expiresAt,
+    direct: true,
+    scheduledFor: task.scheduledFor,
+  };
+  nsp.to(personalRoom(helperId)).emit("offer", offer);
+  void pushService().send(
+    helperId,
+    {
+      kind: "offer",
+      taskId: task.id,
+      title: task.title,
+      distanceMeters: offer.distanceMeters,
+      expiresAt,
+      direct: true,
+      scheduledFor: task.scheduledFor,
+    },
+    { ttlSeconds: Math.max(1, window / 1000) },
+  );
+  deps.logger.info("direct offer sent", {
+    taskId: task.id,
+    scheduled: task.scheduledFor != null,
+    windowMs: window,
+  });
+}
+
+/** Same rules as creation (router `POST /tasks`) and as an open search's candidate filter. */
+async function namedPairingStillHolds(
+  deps: Deps,
+  task: Task,
+  helperId: string,
+  now: number,
+): Promise<boolean> {
+  const [requester, helper] = await Promise.all([
+    deps.users.getById(task.requesterId),
+    deps.users.getById(helperId),
+  ]);
+  if (!isOfferableHelper(helper) || helper?.blockedAt != null) return false;
+  if (task.serviceCode && !(await deps.services.helperOffers(helperId, task.serviceCode))) {
+    return false;
+  }
+  const decision = pairingDecision(requester ?? EMPTY_PARTY, helper ?? EMPTY_PARTY, now);
+  if (decision.kind === "denied") return false;
+  if (decision.kind === "requires-exception") {
+    return deps.exceptions.isApproved(task.requesterId, helperId, now);
+  }
+  return true;
+}
+
+/**
+ * End a direct offer without a match: the helper said no, did not answer in time, or the
+ * pairing no longer holds. The caller has already claimed the schedule entry, so this runs
+ * once per offer.
+ *
+ * The task becomes `unmatched` — the same honest end state as a search nobody answered — and
+ * the requester is told on screen and by push, because a booking that silently did not happen
+ * is someone waiting by a door for nobody.
+ */
+async function closeDirectOffer(
+  deps: Deps,
+  nsp: MatchingNamespace,
+  taskId: string,
+  why: "declined" | "expired" | "no-longer-eligible" | "missed",
+): Promise<void> {
+  const { client } = deps.redis;
+  try {
+    const outcome = await withLock(client, keys.matchLock(taskId), nanoid(), async () => {
+      const fresh = await deps.tasks.get(taskId);
+      if (!fresh || !isAwaitingNamedHelper(fresh)) return { closed: null };
+      return {
+        closed: await deps.tasks.update(taskId, { state: "unmatched", updatedAt: deps.now() }),
+      };
+    });
+    if (outcome === null) {
+      // An accept holds the lock right now. Re-check shortly instead of closing over it.
+      await client.zadd(keys.offerExpiryQueue(), deps.now() + 2_000, taskId);
+      return;
+    }
+    const closed = outcome.closed;
+    if (closed?.helperId) {
+      // Only a helper who actually holds an offer card needs telling it is gone.
+      if (why === "expired") {
+        nsp.to(personalRoom(closed.helperId)).emit("offer-closed", { taskId, reason: "expired" });
+      }
+      nsp.to(personalRoom(closed.requesterId)).emit("task-updated", { task: publicTask(closed) });
+      const profile = await deps.helpers.get(closed.helperId);
+      void pushService().send(closed.requesterId, {
+        kind: "unconfirmed",
+        taskId,
+        helperName: profile?.displayName ?? "The person you asked for",
+      });
+      deps.logger.info("direct offer ended without a match", { taskId, why });
+    }
+    await client.del(keys.offerAudience(taskId));
+  } catch (err) {
+    deps.logger.error("closing direct offer failed", { taskId, why, err: String(err) });
   }
 }

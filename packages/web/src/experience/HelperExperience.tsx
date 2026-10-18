@@ -2,8 +2,19 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { CircleSlash, Loader2, MapPinOff, Settings2, ShieldAlert, WifiOff } from "lucide-react";
-import { isTerminal, type TaskState } from "@needy/shared";
+import {
+  BellOff,
+  BellRing,
+  CalendarClock,
+  CircleSlash,
+  Loader2,
+  MapPin,
+  MapPinOff,
+  Settings2,
+  ShieldAlert,
+  WifiOff,
+} from "lucide-react";
+import { isTerminal, type PublicTask, type TaskState } from "@needy/shared";
 import { useHelperDriver, useHelperExperience } from "@/realtime";
 import { paths } from "@/lib/paths";
 import { taskClient, type ParticipantException } from "@/lib/taskClient";
@@ -13,6 +24,9 @@ import { OfferCard } from "./OfferCard";
 import { TASK_ALARM_ID } from "@/components/SOSGlow";
 import { SosButton } from "./SosButton";
 import { usePositionReporting } from "./usePositionReporting";
+import { primeHelperAttention, useOfferAlerts, useWakeLock } from "./useHelperAttention";
+import { LiveMap } from "@/lib/LiveMap";
+import { enablePush, usePushState, type PushState } from "@/lib/push";
 
 /** ── The helper's screen ───────────────────────────────────────────────────
  *  One route for the two states a helper is ever in: waiting for work, or doing some.
@@ -36,10 +50,15 @@ export function HelperExperience() {
    * every search — the exact silent failure the availability TTL was written to avoid. Without
    * the second, the requester's map freezes the moment the helper is matched.
    */
-  const positionStatus = usePositionReporting(
-    driver,
-    available || (task != null && !isTerminal(task.state)),
-  );
+  const working = task != null && !isTerminal(task.state);
+  const positionStatus = usePositionReporting(driver, available || working);
+
+  // An open page is the only channel a web helper has, so keep it awake and make each offer
+  // impossible to miss while it is open. See useHelperAttention for what this cannot do.
+  useWakeLock(available || working);
+  useOfferAlerts(task ? [] : offers);
+  const [push, setPush] = usePushState();
+  const turnOnPush = () => void enablePush().then(setPush);
 
   const onSend = useCallback((body: string) => driver.sendMessage(body), [driver]);
   const onTyping = useCallback((t: boolean) => driver.setTyping(t), [driver]);
@@ -51,130 +70,255 @@ export function HelperExperience() {
   const onCancelSos = useCallback((id: string) => driver.cancelSos(id), [driver]);
   const onAdvance = useCallback((to: TaskState) => driver.advanceTo(to), [driver]);
 
-  return (
-    <div className="mx-auto max-w-2xl space-y-5 px-4 py-8 sm:px-6">
-      {connection !== "online" && (
-        <div
-          role="status"
-          className="flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2.5 text-sm text-amber-900 ring-1 ring-inset ring-amber-200"
-        >
-          <WifiOff size={14} aria-hidden />
-          {connection === "resyncing"
-            ? "Reconnected — catching up."
-            : connection === "reconnecting"
-              ? "Connection lost. Trying to reconnect…"
-              : connection === "connecting"
-                ? "Connecting…"
-                : "You're offline. You won't receive work until this clears."}
-        </div>
-      )}
+  const position = state.position;
+  const tripRoute = task?.state === "en-route" ? (state.eta?.polyline ?? null) : null;
 
-      {/* A refusal from the server is shown, never swallowed. The one that matters most here is
+  return (
+    <div className="mx-auto max-w-2xl">
+      {/* The map leads, the way a driver app does: where you are, the rough area each offer is
+          in, and once you have accepted, the road to the door. */}
+      <div className="overflow-hidden sm:mt-6 sm:rounded-[28px]">
+        {working && task ? (
+          <LiveMap
+            key={`task-${task.id}`}
+            bleed
+            viewer="helper"
+            origin={task.origin}
+            helper={position}
+            height="min(48vh, 420px)"
+            route={tripRoute}
+          />
+        ) : position ? (
+          <LiveMap
+            key="idle"
+            bleed
+            viewer="helper"
+            origin={position}
+            helper={null}
+            height="min(44vh, 380px)"
+            searching={available}
+            nearby={offers.map((o) => o.origin)}
+          />
+        ) : (
+          <div className="flex h-[min(34vh,280px)] flex-col items-center justify-center gap-2 bg-gradient-to-b from-primary/10 to-background text-center">
+            <MapPin size={28} className="text-primary" aria-hidden />
+            <p className="max-w-xs px-6 text-sm text-gray-600">
+              {available
+                ? "Finding where you are…"
+                : "Your map appears here when you're available."}
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="relative z-10 -mt-7 space-y-5 rounded-t-[28px] bg-background px-4 pb-10 pt-5 shadow-[0_-12px_30px_rgba(15,92,92,0.10)] sm:mt-4 sm:rounded-[28px] sm:px-6 sm:shadow-none">
+        <div className="mx-auto h-1.5 w-12 rounded-full bg-gray-300 sm:hidden" aria-hidden />
+        {connection !== "online" && (
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-2.5 text-sm text-amber-900 ring-1 ring-inset ring-amber-200"
+          >
+            <WifiOff size={14} aria-hidden />
+            {connection === "resyncing"
+              ? "Reconnected — catching up."
+              : connection === "reconnecting"
+                ? "Connection lost. Trying to reconnect…"
+                : connection === "connecting"
+                  ? "Connecting…"
+                  : "You're offline. You won't receive work until this clears."}
+          </div>
+        )}
+
+        {/* A refusal from the server is shown, never swallowed. The one that matters most here is
           an unverified account: the server hard-filters candidates on KYC, so the toggle would
           otherwise sit on "available" forever with no offer ever arriving and nothing on screen
           to explain why. */}
-      {lastError && (
-        <div
-          role="alert"
-          className="flex items-start gap-2 rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-900 ring-1 ring-inset ring-red-200"
-        >
-          <CircleSlash size={14} className="mt-0.5 shrink-0" aria-hidden />
-          <span>
-            {lastError.code === "NOT_AUTHORIZED"
-              ? "Your account isn't cleared for work yet, so you can't be offered any. If you think that's wrong, contact us."
-              : lastError.message}
-          </span>
-        </div>
-      )}
-
-      {task ? (
-        <>
-          <HelperTask
-            task={task}
-            eta={state.eta}
-            onAdvance={onAdvance}
-            onDismiss={() => driver.dismissFinishedTask()}
-          />
-
-          {!isTerminal(task.state) && (
-            <Chat
-              messages={state.messages}
-              userId={state.userId}
-              otherTyping={state.otherTyping}
-              otherName="them"
-              onSend={onSend}
-              onTyping={onTyping}
-              onRead={onRead}
-            />
-          )}
-
-          {/* The helper gets the same alarm as the requester, and for the same reason: a
-              helper alone in a stranger's home can be the one who is not safe. */}
-          <div id={TASK_ALARM_ID}>
-            <SosButton
-              alert={state.sos}
-              userId={state.userId}
-              onRaise={onRaise}
-              onCancel={onCancelSos}
-            />
+        {lastError && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-900 ring-1 ring-inset ring-red-200"
+          >
+            <CircleSlash size={14} className="mt-0.5 shrink-0" aria-hidden />
+            <span>
+              {lastError.code === "NOT_AUTHORIZED"
+                ? "Your account isn't cleared for work yet, so you can't be offered any. If you think that's wrong, contact us."
+                : lastError.message}
+            </span>
           </div>
-        </>
-      ) : (
-        <>
-          <AvailabilityCard
-            available={available}
-            positionStatus={positionStatus}
-            onToggle={() => driver.setAvailable(!available)}
-          />
+        )}
 
-          {offers.length > 0 && (
-            <ul className="space-y-3">
-              {offers.map((offer) => (
-                <OfferCard
-                  key={offer.taskId}
-                  offer={offer}
-                  onAccept={() => driver.accept(offer.taskId)}
-                  onDecline={() => driver.decline(offer.taskId)}
-                />
-              ))}
-            </ul>
-          )}
+        {task ? (
+          <>
+            <HelperTask
+              task={task}
+              eta={state.eta}
+              onAdvance={onAdvance}
+              onDismiss={() => driver.dismissFinishedTask()}
+            />
 
-          {/* Why a card went away, rather than letting it vanish under a thumb. Losing a race
+            {!isTerminal(task.state) && (
+              <Chat
+                messages={state.messages}
+                userId={state.userId}
+                otherTyping={state.otherTyping}
+                otherName="them"
+                onSend={onSend}
+                onTyping={onTyping}
+                onRead={onRead}
+              />
+            )}
+
+            {/* The helper gets the same alarm as the requester, and for the same reason: a
+              helper alone in a stranger's home can be the one who is not safe. */}
+            <div id={TASK_ALARM_ID}>
+              <SosButton
+                alert={state.sos}
+                userId={state.userId}
+                onRaise={onRaise}
+                onCancel={onCancelSos}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            {/* An offer is the most important thing that can be on this screen, so it goes first. */}
+            {offers.length > 0 && (
+              <ul className="space-y-3">
+                {offers.map((offer) => (
+                  <OfferCard
+                    key={offer.taskId}
+                    offer={offer}
+                    onAccept={() => driver.accept(offer.taskId)}
+                    onDecline={() => driver.decline(offer.taskId)}
+                  />
+                ))}
+              </ul>
+            )}
+
+            <AvailabilityCard
+              available={available}
+              positionStatus={positionStatus}
+              onToggle={() => {
+                if (!available) {
+                  primeHelperAttention();
+                  // Same click: the permission prompt needs the gesture.
+                  if (push === "off") turnOnPush();
+                }
+                driver.setAvailable(!available);
+              }}
+            />
+
+            <PushStatus state={push} onEnable={turnOnPush} />
+
+            {state.upcoming.length > 0 && <UpcomingBookings tasks={state.upcoming} />}
+
+            {/* Why a card went away, rather than letting it vanish under a thumb. Losing a race
               is the ordinary outcome of a simultaneous broadcast and should read as ordinary. */}
-          {offers.length === 0 && lastClosed && (
-            <p className="text-center text-sm text-gray-500">
-              {lastClosed.reason === "already-taken"
-                ? "Someone else got there first. Another will come along."
-                : lastClosed.reason === "cancelled"
-                  ? "That request was cancelled."
-                  : "That one timed out."}
-            </p>
-          )}
+            {offers.length === 0 && lastClosed && (
+              <p className="text-center text-sm text-gray-500">
+                {lastClosed.reason === "already-taken"
+                  ? "Someone else got there first. Another will come along."
+                  : lastClosed.reason === "cancelled"
+                    ? "That request was cancelled."
+                    : "That one timed out."}
+              </p>
+            )}
 
-          {available && offers.length === 0 && !lastClosed && (
-            <p className="text-center text-sm text-gray-500">
-              Nothing nearby right now. We&apos;ll let you know the moment someone needs help.
-            </p>
-          )}
+            {available && offers.length === 0 && !lastClosed && (
+              <p className="text-center text-sm text-gray-500">
+                Nothing nearby right now. We&apos;ll let you know the moment someone needs help.
+              </p>
+            )}
 
-          {/* A review waiting on this helper's testimony, surfaced where they will actually
+            {/* A review waiting on this helper's testimony, surfaced where they will actually
               see it. Nothing else tells them: they did not open the request, so without this
               the pairing sits in `awaiting_videos` until it expires and both people are left
               thinking the other never bothered. */}
-          <PendingReviews />
+            <PendingReviews />
 
-          <Earnings />
+            <Earnings />
 
-          <Link
-            href={paths.helperServices}
-            className="flex items-center justify-center gap-2 text-sm font-medium text-primary hover:underline"
-          >
-            <Settings2 size={14} aria-hidden />
-            What I can help with
-          </Link>
-        </>
-      )}
+            <Link
+              href={paths.helperServices}
+              className="flex items-center justify-center gap-2 text-sm font-medium text-primary hover:underline"
+            >
+              <Settings2 size={14} aria-hidden />
+              What I can help with
+            </Link>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Bookings made for this helper by name. Informational: each one arrives as an offer to
+ *  confirm ahead of its time, and nothing here commits them to anything yet. */
+function UpcomingBookings({ tasks }: { tasks: PublicTask[] }) {
+  return (
+    <section className="rounded-3xl bg-white p-5 shadow-[0_6px_20px_rgba(15,92,92,0.07)]">
+      <h2 className="flex items-center gap-2 font-display text-lg font-bold text-gray-900">
+        <CalendarClock size={18} className="text-primary" aria-hidden />
+        Asked for you by name
+      </h2>
+      <ul className="mt-3 divide-y divide-gray-100">
+        {tasks.map((t) => (
+          <li key={t.id} className="py-3 first:pt-0 last:pb-0">
+            <p className="font-medium text-gray-900">{t.title}</p>
+            <p className="mt-0.5 text-sm text-gray-500">
+              {t.scheduledFor != null
+                ? `${formatWhen(t.scheduledFor)} · we'll ask you to confirm a couple of hours before`
+                : "Waiting for your answer — it'll appear above as an offer"}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function formatWhen(ms: number): string {
+  return new Date(ms).toLocaleString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/** Whether offers can reach this device with the page closed — and how to fix it if not. */
+function PushStatus({ state, onEnable }: { state: PushState | null; onEnable: () => void }) {
+  if (state == null || state === "unavailable") return null;
+  if (state === "on") {
+    return (
+      <p className="flex items-center justify-center gap-2 text-sm text-gray-500">
+        <BellRing size={14} className="text-primary" aria-hidden />
+        Offers reach this device even when Needy is closed.
+      </p>
+    );
+  }
+  return (
+    <div className="flex items-start gap-3 rounded-2xl bg-white p-4 ring-1 ring-gray-100">
+      <BellOff size={18} className="mt-0.5 shrink-0 text-amber-600" aria-hidden />
+      <div className="min-w-0 text-sm text-gray-700">
+        {state === "off" && (
+          <>
+            <p>Get offers even when this page is closed.</p>
+            <button
+              type="button"
+              onClick={onEnable}
+              className="mt-2 rounded-full bg-primary px-4 py-2 font-semibold text-white"
+            >
+              Turn on notifications
+            </button>
+          </>
+        )}
+        {state === "blocked" &&
+          "Notifications are blocked for Needy in your browser settings, so offers only arrive while this page is open."}
+        {state === "unsupported" &&
+          "This browser can't receive offers while Needy is closed. On an iPhone, add Needy to your Home Screen (Share → Add to Home Screen) and open it from there."}
+      </div>
     </div>
   );
 }
@@ -293,7 +437,7 @@ function AvailabilityCard({
             ? "We need your location before anyone can be matched with you."
             : waiting
               ? "You'll be available as soon as we know where you are. Keep this page open."
-              : "People nearby can be matched with you. Keep this page open."}
+              : "People nearby can be matched with you. Keep this page open — we'll keep the screen on and chime when someone needs you."}
       </p>
 
       <button

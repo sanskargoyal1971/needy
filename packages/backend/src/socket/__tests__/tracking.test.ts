@@ -294,8 +294,14 @@ describe("/tracking location guards (§2.3)", () => {
       emitLocation(helper, { taskId: TASK_ID, point: NEARBY });
 
       const err = await errored;
-      expect(err.code, state).toBe("NOT_AUTHORIZED");
-      expect(err.message, state).toContain(state);
+      if (state === "searching") {
+        // An assigned task still in `searching` is a booking the helper has not accepted:
+        // they are not a participant of it yet, which refuses the location one step earlier.
+        expect(err.code, state).toBe("NOT_A_PARTICIPANT");
+      } else {
+        expect(err.code, state).toBe("NOT_AUTHORIZED");
+        expect(err.message, state).toContain(state);
+      }
 
       await tick();
       expect(await getTaskLocation(client, TASK_ID), state).toBeNull();

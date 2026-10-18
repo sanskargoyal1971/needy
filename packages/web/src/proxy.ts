@@ -23,7 +23,7 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 
 /** Origins the browser is allowed to talk to. Derived from the same env vars the app itself
- *  reads, so pointing the app at a different API or tile provider cannot leave the policy
+ *  reads, so pointing the app at a different API cannot leave the policy
  *  behind — a CSP that has to be edited in a second place is a CSP that will be wrong. */
 function connectOrigins(): string[] {
   const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -42,19 +42,18 @@ function connectOrigins(): string[] {
   return [...origins];
 }
 
-/** Map tiles come from whatever provider is configured. `{s}` and `{z}/{x}/{y}` are Leaflet's
- *  templating, not URL syntax, so the origin is extracted from a de-templated copy. */
-function tileOrigin(): string | null {
-  const raw =
-    process.env.NEXT_PUBLIC_MAP_TILE_URL ?? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-  try {
-    // `{s}` is a subdomain shard (a, b, c). Replaced with a wildcard host so all shards match.
-    const host = new URL(raw.replace(/\{s\}\./, "")).host;
-    return `https://*.${host}`;
-  } catch {
-    return null;
-  }
-}
+/** Google Maps, per Google's own CSP guidance for the Maps JavaScript API. Only granted when a
+ *  key is configured — a build with no maps has no reason to let the page talk to Google.
+ *  Scripts need no entry: `strict-dynamic` already trusts the SDK, which the app's own nonce'd
+ *  bundle injects (see lib/googleMaps.ts), and ignores host allowlists anyway. */
+const GOOGLE_MAPS = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+  ? {
+      img: "https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com",
+      connect: "https://*.googleapis.com https://*.google.com https://*.gstatic.com",
+      font: "https://fonts.gstatic.com",
+      style: "https://fonts.googleapis.com",
+    }
+  : null;
 
 /**
  * `proxy`, formerly `middleware`. Next 16 renamed the file convention and the export; the
@@ -74,14 +73,18 @@ export function proxy(request: NextRequest) {
     // `'unsafe-inline'` for styles only, and it is not the same risk as inline script: React
     // renders `style={{…}}` props as style attributes, which this covers, and CSS cannot
     // execute. Removing it would mean hashing every inline style Framer Motion emits.
-    `style-src 'self' 'unsafe-inline'`,
+    `style-src 'self' 'unsafe-inline'${GOOGLE_MAPS ? ` ${GOOGLE_MAPS.style}` : ""}`,
     // `blob:` is required, not incidental — the admin document viewer deliberately fetches
     // KYC images and video through an authenticated request and renders them from an object
     // URL rather than pointing an <img> at a signed link.
-    `img-src 'self' blob: data:${tileOrigin() ? ` ${tileOrigin()}` : ""}`,
+    `img-src 'self' blob: data:${GOOGLE_MAPS ? ` ${GOOGLE_MAPS.img}` : ""}`,
     `media-src 'self' blob:`,
-    `font-src 'self' data:`,
-    `connect-src 'self' ${connectOrigins().join(" ")}`,
+    `font-src 'self' data:${GOOGLE_MAPS ? ` ${GOOGLE_MAPS.font}` : ""}`,
+    `connect-src 'self' ${connectOrigins().join(" ")}${GOOGLE_MAPS ? ` ${GOOGLE_MAPS.connect}` : ""}`,
+    // Always set. `worker-src` otherwise falls back to `script-src`, where `strict-dynamic`
+    // ignores 'self' — which silently blocks registering /sw.js, and with it web push. `blob:`
+    // is for the vector map, which renders in workers created from blob URLs.
+    `worker-src 'self'${GOOGLE_MAPS ? " blob:" : ""}`,
     // Clickjacking. `frame-ancestors` is the directive that actually works — `X-Frame-Options`
     // is the legacy spelling and cannot express 'none' plus exceptions.
     `frame-ancestors 'none'`,
@@ -115,9 +118,9 @@ export function proxy(request: NextRequest) {
   }
   // `strict-origin-when-cross-origin` would still leak the origin; there is nothing on an
   // outbound link that benefits from knowing which page of this app someone came from, and
-  // some of those paths contain a user id. Map tiles are the one exception and opt in to
-  // `origin` on their own <img> elements (see LiveMap / OriginPicker), because the tile
-  // provider refuses requests that carry no Referer.
+  // some of those paths contain a user id. Consequence for Google Maps: its requests carry no
+  // Referer either, so an HTTP-referrer restriction on the key would reject them — restrict
+  // the key by API instead (see lib/googleMaps.ts).
   response.headers.set("Referrer-Policy", "no-referrer");
   // Nothing here needs a camera or microphone except the onboarding capture, which is
   // same-origin and therefore unaffected by denying them to embedded content.

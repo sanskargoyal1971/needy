@@ -149,6 +149,20 @@ export function createPgTaskRepo(pool: DbPool): TaskRepository {
       );
       return rows.map(rowToTask);
     },
+    async awaitingNamedHelper(dueBy) {
+      // Small by construction: only bookings inside the dispatch lead time and unanswered
+      // "ask again" requests. Bounded anyway, so a backlog can never stall the sweep.
+      const { rows } = await pool.query<TaskRow>(
+        `SELECT * FROM tasks
+         WHERE state = 'searching'
+           AND helper_id IS NOT NULL
+           AND (scheduled_for IS NULL OR scheduled_for <= $1)
+         ORDER BY COALESCE(scheduled_for, created_at)
+         LIMIT 200`,
+        [dueBy],
+      );
+      return rows.map(rowToTask);
+    },
   };
 }
 

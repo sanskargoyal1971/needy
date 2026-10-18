@@ -75,7 +75,15 @@ export interface TrackingClientEvents {
 }
 export interface TrackingServerEvents {
   "helper-moved": (payload: { taskId: string; update: LocationUpdate }) => void;
-  eta: (payload: { taskId: string; etaSeconds: number; distanceMeters: number }) => void;
+  eta: (payload: {
+    taskId: string;
+    etaSeconds: number;
+    distanceMeters: number;
+    /** True for the straight-line fallback (no routing provider answered). */
+    approximate?: boolean;
+    /** Google encoded polyline of the road route from the helper to the task origin. */
+    polyline?: string;
+  }) => void;
   error: (payload: SocketErrorPayload) => void;
 }
 
@@ -119,9 +127,15 @@ export interface MatchOffer {
   category: PublicTask["category"];
   origin: LatLng;
   title: string;
-  distanceMeters: number;
+  /** Rounded. Null when the helper's position is unknown — possible only for a direct offer,
+   *  which reaches a named helper whether or not they are currently advertising. */
+  distanceMeters: number | null;
   /** epoch ms after which the offer expires and stops being acceptable. */
   expiresAt: number;
+  /** Sent to this helper alone, because the requester asked for them by name. */
+  direct?: boolean;
+  /** For a booking: when it starts (epoch ms). */
+  scheduledFor?: number | null;
 }
 export interface MatchingClientEvents {
   /** requester opens a search; server begins broadcasting offers to eligible helpers. */
@@ -316,7 +330,12 @@ export interface TaskSnapshot {
   task: PublicTask;
   helper: MatchedHelper | null;
   lastKnownLocation: LocationUpdate | null;
-  eta: { etaSeconds: number; distanceMeters: number } | null;
+  eta: {
+    etaSeconds: number;
+    distanceMeters: number;
+    approximate?: boolean;
+    polyline?: string;
+  } | null;
   messages: ChatMessage[];
   presence: Presence | null;
   /**

@@ -57,4 +57,7 @@ export const keys = {
   /** Server-issued KYC challenge nonce, bound to the user who started verification, so a
    *  callback cannot self-verify an arbitrary account (audit A5). */
   kycNonce: (reference: string) => `kyc:nonce:${reference}`,
+  /** Hash of a user's web-push subscriptions: field = blind index of the endpoint, value =
+   *  the encrypted subscription. One field per device/browser. */
+  pushSubs: (userId: string) => `push:subs:${userId}`,
 } as const;

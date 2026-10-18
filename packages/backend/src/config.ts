@@ -252,8 +252,22 @@ export const config = {
     offerWindowMs: num("MATCH_OFFER_WINDOW_MS", 50_000),
   },
   directions: {
+    /** `google` (Routes API) or empty for the straight-line fallback. */
     provider: process.env.DIRECTIONS_PROVIDER ?? "",
     apiKey: process.env.DIRECTIONS_API_KEY ?? "",
+    /** Routes API travel mode. Two-wheeler is how most helpers cross a neighbourhood here;
+     *  `WALK` and `DRIVE` are the other sensible values. */
+    travelMode: process.env.DIRECTIONS_TRAVEL_MODE ?? "TWO_WHEELER",
+  },
+  /**
+   * Web push (VAPID). All three or none: with any missing, push is simply off and every alert
+   * still goes out over the open socket as before. The private key is a secret — Secrets
+   * Manager / SSM in a deployed stack, the git-ignored `.env` locally.
+   */
+  push: {
+    publicKey: process.env.VAPID_PUBLIC_KEY ?? "",
+    privateKey: process.env.VAPID_PRIVATE_KEY ?? "",
+    subject: process.env.VAPID_SUBJECT ?? "",
   },
   /**
    * Private object storage for KYC documents (gov ID, selfie, video testimony).

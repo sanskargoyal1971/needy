@@ -103,6 +103,19 @@ describe("postgres repositories", () => {
     expect(afterDone.map((t) => t.id)).not.toContain("t1");
   });
 
+  it("finds tasks waiting on a named helper once they are due, and nothing else", async () => {
+    const DUE_BY = 1_700_100_000_000;
+    const named = { ...baseTask, helperId: "helper-priya", state: "searching" as const };
+    await tasks.create({ ...named, id: "ask-now", scheduledFor: null });
+    await tasks.create({ ...named, id: "booked-due", scheduledFor: DUE_BY - 1 });
+    await tasks.create({ ...named, id: "booked-later", scheduledFor: DUE_BY + 1 });
+    await tasks.create({ ...baseTask, id: "open-search" });
+    await tasks.create({ ...named, id: "already-matched", state: "matched" });
+
+    const due = (await tasks.awaitingNamedHelper(DUE_BY)).map((t) => t.id).sort();
+    expect(due).toEqual(["ask-now", "booked-due"]);
+  });
+
   it("appends, lists, and updates receipt status on messages", async () => {
     await messages.append({
       id: "m1",

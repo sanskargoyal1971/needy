@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import type {
   MatchedHelper,
+  PublicTask,
   SessionSnapshot,
   Task,
   TaskCategory,
@@ -11,6 +12,7 @@ import type {
 import {
   CATEGORY_PRICING,
   EXCEPTION_REVIEW_SLA_MS,
+  isAwaitingNamedHelper,
   pairingDecision,
   scheduleProblem,
   publicTask,
@@ -449,11 +451,27 @@ export function createHttpRouter(deps: Deps, options: HttpRouterOptions = {}): R
         res.status(403).json({ error: "not-a-participant" });
         return;
       }
-      res.json({ task: publicTask(task) });
+      res.json({ task: taskForViewer(task, userId) });
     }),
   );
 
   return router;
+}
+
+/**
+ * A task as one particular person may see it.
+ *
+ * A named helper who has not accepted yet gets the area, not the door — the same promise every
+ * offer card makes ("exact address once you accept"). Their unconfirmed bookings reach them
+ * through the snapshot and this route, and until now both carried the exact origin.
+ */
+function taskForViewer(task: Task, viewerId: string): PublicTask {
+  const view = publicTask(task);
+  if (isAwaitingNamedHelper(task) && viewerId === task.helperId) {
+    const coarse = (n: number) => Math.round(n * 1000) / 1000;
+    return { ...view, origin: { lat: coarse(task.origin.lat), lng: coarse(task.origin.lng) } };
+  }
+  return view;
 }
 
 /** Assemble one TaskSnapshot: current location, the reveal card (with live ETA), the
@@ -462,7 +480,9 @@ async function buildTaskSnapshot(deps: Deps, task: Task, callerId: string): Prom
   const redis = deps.redis.client;
   const lastKnownLocation = await getTaskLocation(redis, task.id);
 
-  const eta = lastKnownLocation ? await computeEta(lastKnownLocation, task.origin) : null;
+  const eta = lastKnownLocation
+    ? await computeEta(lastKnownLocation, task.origin, { cacheKey: task.id, now: deps.now() })
+    : null;
 
   let helper: MatchedHelper | null = null;
   if (task.helperId) {
@@ -492,10 +512,17 @@ async function buildTaskSnapshot(deps: Deps, task: Task, callerId: string): Prom
     // exploitable rather than merely untidy: it is the reconnect path, so the HELPER's own
     // client calls it routinely — and it returns every task they are party to, including one
     // sitting in `arrived` with a live code. See `publicTask`.
-    task: publicTask(task),
+    task: taskForViewer(task, callerId),
     helper,
     lastKnownLocation,
-    eta: eta ? { etaSeconds: eta.etaSeconds, distanceMeters: eta.distanceMeters } : null,
+    eta: eta
+      ? {
+          etaSeconds: eta.etaSeconds,
+          distanceMeters: eta.distanceMeters,
+          approximate: eta.approximate,
+          ...(eta.polyline ? { polyline: eta.polyline } : {}),
+        }
+      : null,
     messages,
     presence,
     sos,

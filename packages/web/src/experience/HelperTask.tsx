@@ -8,6 +8,7 @@ import {
   KeyRound,
   Loader2,
   Navigation,
+  Route,
   Video,
 } from "lucide-react";
 import { isTerminal, type PublicTask } from "@needy/shared";
@@ -44,12 +45,25 @@ export function HelperTask({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-3xl border border-gray-100 bg-white p-6">
+      <div className="rounded-3xl bg-white p-6 shadow-[0_10px_30px_rgba(15,92,92,0.08)]">
         <p className="text-sm font-medium uppercase tracking-wide text-primary">
           You are helping with
         </p>
         <h2 className="mt-1 font-display text-xl font-bold text-gray-900">{task.title}</h2>
         {task.description && <p className="mt-2 text-gray-600">{task.description}</p>}
+        {(task.state === "matched" || task.state === "verifying" || task.state === "en-route") && (
+          // Turn-by-turn belongs to an app built for it. The accepted helper holds the exact
+          // origin (only the winner is ever sent it), so this hands that point to Google Maps.
+          <a
+            href={`https://www.google.com/maps/dir/?api=1&destination=${task.origin.lat},${task.origin.lng}&travelmode=two-wheeler`}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="mt-4 flex items-center justify-center gap-2 rounded-xl border-2 border-primary/20 bg-primary/5 px-4 py-3 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
+          >
+            <Route size={16} aria-hidden />
+            Directions in Google Maps
+          </a>
+        )}
       </div>
 
       {task.state === "matched" && (

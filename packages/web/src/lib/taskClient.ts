@@ -170,6 +170,22 @@ export const taskClient = {
 
   services: () => call<{ services: ServiceDefinition[] }>("/services"),
 
+  // ── web push ──────────────────────────────────────────────────────────────
+
+  pushConfig: () => call<{ enabled: boolean; publicKey: string }>("/push/config"),
+
+  savePushSubscription: (sub: PushSubscriptionJSON) =>
+    call<Record<string, never>>("/me/push-subscription", {
+      method: "POST",
+      body: JSON.stringify({ endpoint: sub.endpoint, keys: sub.keys }),
+    }),
+
+  deletePushSubscription: (endpoint: string) =>
+    call<Record<string, never>>("/me/push-subscription", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint }),
+    }),
+
   myServices: () => call<{ codes: string[]; mandatory: string[] }>("/me/services"),
 
   setMyServices: (codes: string[]) =>

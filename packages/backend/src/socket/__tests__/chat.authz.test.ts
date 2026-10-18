@@ -6,6 +6,7 @@ import { Server as IOServer } from "socket.io";
 import { io as ioClient, type Socket as ClientSocket } from "socket.io-client";
 import {
   NS,
+  makeTask,
   type ChatClientEvents,
   type ChatMessage,
   type ChatServerEvents,
@@ -293,6 +294,29 @@ describe("/chat participant authorization (audit A3)", () => {
     const after = await messages.list(TASK_ID);
     expect(after).toHaveLength(before);
     expect(after.some((m) => m.senderId === STRANGER_ID)).toBe(false);
+  });
+
+  it("opens no conversation on a booking until the named helper accepts it", async () => {
+    await tasks.create(
+      makeTask({
+        id: "booked-chat",
+        requesterId: REQUESTER_ID,
+        helperId: HELPER_ID,
+        category: "companionship",
+        state: "searching",
+        origin: { lat: 12.97, lng: 77.59 },
+        title: "Tuesday walk",
+        scheduledFor: clockNow + 3 * 24 * 60 * 60 * 1000,
+      }),
+    );
+
+    const fromRequester = await send(requester, "booked-chat", "cmid-booked-r", "hello?");
+    const fromHelper = await send(helper, "booked-chat", "cmid-booked-h", "hi");
+
+    expect(fromRequester.ok).toBe(false);
+    // Not yet a participant at all — they have not said yes.
+    expect(fromHelper).toEqual({ ok: false, error: "not-a-participant" });
+    expect(await messages.list("booked-chat")).toHaveLength(0);
   });
 
   it("refuses `typing` from a non-participant and never relays into the task room", async () => {

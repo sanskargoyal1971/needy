@@ -24,6 +24,10 @@ export type ConnectionState =
 export interface EtaView {
   etaSeconds: number;
   distanceMeters: number;
+  /** Straight-line estimate rather than a routed one. */
+  approximate?: boolean;
+  /** Encoded road route from the helper to the task origin, when one was routed. */
+  polyline?: string;
 }
 
 /**

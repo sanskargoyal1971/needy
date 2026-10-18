@@ -55,6 +55,8 @@ import { backfillUserPii, canonicalisePhones } from "./auth/userPii.js";
 import { createAuthRouter, KYC_CALLBACK_PATH, kycRawBodyParser } from "./auth/router.js";
 import { createInMemoryTotpRepo, createPgTotpRepo, type TotpRepository } from "./auth/totpRepo.js";
 import { csrfProtection } from "./auth/csrf.js";
+import { createPushRouter } from "./http/push.js";
+import { createPushService, installPushService } from "./services/push.js";
 import { AuthService } from "./auth/service.js";
 import { OtpService } from "./auth/otp.js";
 import {
@@ -110,6 +112,7 @@ import {
  *  concrete implementations (Redis, in-memory repos, real clock) get chosen. */
 async function main(): Promise<void> {
   const redis = createRedisClients();
+  installPushService(createPushService({ config, redis: redis.client, logger }));
 
   // Dev-seed a couple of KYC-verified-style helper profiles so a matched reveal has real
   // data to render before a profile service exists. Swap for a Postgres-backed repo later.
@@ -489,6 +492,7 @@ async function main(): Promise<void> {
   app.use(createSosAdminRouter(deps));
   app.use(createAbuseRouter(deps));
   app.use(createServicesRouter(deps));
+  app.use(createPushRouter(deps));
   app.use(createHandoffRouter(deps));
   app.use(createHttpRouter(deps, pool ? { db: pool } : {}));
 

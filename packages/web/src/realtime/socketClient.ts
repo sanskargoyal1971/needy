@@ -450,7 +450,7 @@ export class RealNeedyClient implements NeedyDriver {
       if (taskId !== this.taskId) return;
       this.patch({ location: update });
     });
-    this.tracking.on("eta", ({ taskId, etaSeconds, distanceMeters }) => {
+    this.tracking.on("eta", ({ taskId, etaSeconds, distanceMeters, approximate, polyline }) => {
       if (taskId !== this.taskId) return;
       const milestone = nextMilestone(
         this.state.eta?.etaSeconds ?? null,
@@ -458,7 +458,7 @@ export class RealNeedyClient implements NeedyDriver {
         this.state.helper,
       );
       this.patch({
-        eta: { etaSeconds, distanceMeters },
+        eta: { etaSeconds, distanceMeters, approximate, polyline },
         milestones: milestone ? [...this.state.milestones, milestone] : this.state.milestones,
       });
     });

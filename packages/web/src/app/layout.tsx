@@ -22,6 +22,10 @@ export const metadata: Metadata = {
   title: "Needy | Immediate, verified assistance",
   description:
     "A hyperlocal trust platform that connects people who need immediate, verified assistance with ID-verified local helpers.",
+  // Installable: on an iPhone, web push only works for a site added to the Home Screen.
+  manifest: "/manifest.webmanifest",
+  icons: { icon: "/icon-192.png", apple: "/apple-touch-icon.png" },
+  appleWebApp: { capable: true, title: "Needy", statusBarStyle: "default" },
 };
 
 export default async function RootLayout({

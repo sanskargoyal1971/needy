@@ -3,12 +3,9 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Crosshair, Loader2, MapPin } from "lucide-react";
 import type { LatLng } from "@needy/shared";
-// The stylesheet is imported STATICALLY while the library itself is loaded lazily below.
-// Leaflet's JS touches `window` at import time, which throws during Next's server render of a
-// client component; its CSS does not, and Next's bundler only understands a static CSS import
-// anyway — a dynamic `import("…css")` is a type error and would not be emitted.
-import "leaflet/dist/leaflet.css";
 import { useAuth } from "@/auth/AuthProvider";
+import { GOOGLE_MAP_ID, loadGoogleMaps, markerContent, onMapsAuthFailure } from "@/lib/googleMaps";
+import { MapUnavailable } from "@/lib/MapUnavailable";
 
 /** ── Where are you? ────────────────────────────────────────────────────────
  *  A draggable pin on a real map, seeded from the device's own position.
@@ -23,9 +20,8 @@ import { useAuth } from "@/auth/AuthProvider";
  *   2. **Refusing location is not an error.** Plenty of people decline the prompt, and an
  *      elderly user on an old phone may simply have no GPS fix indoors. The pin stays
  *      draggable and the copy says what to do, rather than blocking the form on a permission.
- *   3. **Leaflet is loaded lazily.** It touches `window` at import time, so a static import
- *      in a page that Next renders on the server throws during the render, not at runtime in
- *      the browser where it would at least be obvious.
+ *   3. **Google Maps is loaded lazily**, on first mount, through the shared loader — the
+ *      SDK is a browser script and has nothing to do during Next's server render.
  */
 
 /** Bengaluru city centre. Only ever reached when there is no device fix AND no saved area —
@@ -41,7 +37,8 @@ export function OriginPicker({
 }) {
   const { state: auth } = useAuth();
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<unknown>(null);
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
   // Nothing to find when the form already has a point.
   const [locating, setLocating] = useState(value == null);
   const [note, setNote] = useState<string | null>(null);
@@ -122,62 +119,58 @@ export function OriginPicker({
     if (!start || !containerRef.current || mapRef.current) return;
     let disposed = false;
 
-    void (async () => {
-      const L = (await import("leaflet")).default;
-      if (disposed || !containerRef.current) return;
-      const value = start;
+    const offAuth = onMapsAuthFailure(() => setFailure("The Google Maps key was rejected."));
+    loadGoogleMaps()
+      .then(({ maps, marker }) => {
+        if (disposed || !containerRef.current) return;
+        const map = new maps.Map(containerRef.current, {
+          center: start,
+          zoom: 16,
+          mapId: GOOGLE_MAP_ID,
+          disableDefaultUI: true,
+          zoomControl: true,
+          clickableIcons: false,
+          // A pin the user drags is the input; the map itself does not need to scroll-zoom and
+          // trapping the page scroll inside it on a phone is a small hostility.
+          gestureHandling: "cooperative",
+        });
+        mapRef.current = map;
 
-      const map = L.map(containerRef.current, {
-        center: [value.lat, value.lng],
-        zoom: 16,
-        // A pin the user drags is the input; the map itself does not need to scroll-zoom and
-        // trapping the page scroll inside it on a phone is a small hostility.
-        scrollWheelZoom: false,
+        const pin = new marker.AdvancedMarkerElement({
+          map,
+          position: start,
+          gmpDraggable: true,
+          title: "Your location — drag to adjust",
+          content: markerContent(
+            `<div class="relative w-8 h-8 rounded-full bg-[#0F5C5C] shadow-[0_4px_12px_rgba(15,92,92,0.6)] flex items-center justify-center animate-pulse-slow border-[3px] border-white cursor-grab active:cursor-grabbing">
+               <div class="absolute inset-0 rounded-full animate-ping bg-[#0F5C5C]/40"></div>
+               <div class="w-2 h-2 rounded-full bg-white shadow-inner"></div>
+             </div>`,
+          ),
+        });
+        pin.addListener("dragend", () => {
+          const p = pin.position;
+          if (!p) return;
+          const ll = p instanceof google.maps.LatLng ? p.toJSON() : { lat: p.lat, lng: p.lng };
+          movePin({ lat: Number(ll.lat), lng: Number(ll.lng) });
+        });
+        // Tapping the map moves the pin too — dragging a small marker is hard with an unsteady
+        // hand, and this is the audience where that matters most.
+        map.addListener("click", (e: google.maps.MapMouseEvent) => {
+          if (!e.latLng) return;
+          const ll = e.latLng.toJSON();
+          pin.position = ll;
+          movePin(ll);
+        });
+      })
+      .catch((err: unknown) => {
+        if (!disposed)
+          setFailure(err instanceof Error ? err.message : "Google Maps failed to load.");
       });
-      mapRef.current = map;
-
-      L.tileLayer(
-        process.env.NEXT_PUBLIC_MAP_TILE_URL ??
-          "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        {
-          attribution:
-            process.env.NEXT_PUBLIC_MAP_ATTRIBUTION ?? "&copy; OpenStreetMap contributors",
-          maxZoom: 19,
-          // OpenStreetMap refuses tile requests with no Referer, and the document policy is
-          // `no-referrer`. Scoped to the tiles; `origin` never includes a path.
-          referrerPolicy: "origin",
-        },
-      ).addTo(map);
-
-      const customIcon = L.divIcon({
-        className: "",
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
-        html: `<div class="relative w-8 h-8 rounded-full bg-[#0F5C5C] shadow-[0_4px_12px_rgba(15,92,92,0.6)] flex items-center justify-center animate-pulse-slow border-[3px] border-white cursor-grab active:cursor-grabbing">
-                 <div class="absolute inset-0 rounded-full animate-ping bg-[#0F5C5C]/40"></div>
-                 <div class="w-2 h-2 rounded-full bg-white shadow-inner"></div>
-               </div>`,
-      });
-
-      const marker = L.marker([value.lat, value.lng], { draggable: true, icon: customIcon }).addTo(
-        map,
-      );
-      marker.on("dragend", () => {
-        const { lat, lng } = marker.getLatLng();
-        movePin({ lat, lng });
-      });
-      // Tapping the map moves the pin too — dragging a small marker is hard with an unsteady
-      // hand, and this is the audience where that matters most.
-      map.on("click", (e: { latlng: { lat: number; lng: number } }) => {
-        marker.setLatLng(e.latlng);
-        movePin({ lat: e.latlng.lat, lng: e.latlng.lng });
-      });
-    })();
 
     return () => {
       disposed = true;
-      const map = mapRef.current as { remove?: () => void } | null;
-      map?.remove?.();
+      offAuth();
       mapRef.current = null;
     };
     // Keyed on WHETHER a point exists, not on the point itself: the map is created once, at
@@ -189,7 +182,9 @@ export function OriginPicker({
   return (
     <div>
       <div className="overflow-hidden rounded-[24px] border border-white/50 bg-white/20 backdrop-blur-xl shadow-[0_20px_50px_rgba(15,92,92,0.2)] transform perspective-1000 rotate-x-1 relative z-10">
-        {locating ? (
+        {failure ? (
+          <MapUnavailable height={224} reason={failure} />
+        ) : locating ? (
           <div className="flex h-56 flex-col items-center justify-center gap-2 text-gray-500">
             <Loader2 className="animate-spin text-primary" aria-hidden />
             <span className="text-sm">Finding where you are…</span>

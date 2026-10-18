@@ -24,6 +24,7 @@
     "nanoid": "^5.0.7",
     "pg": "^8.13.0",
     "socket.io": "^4.8.0",
+    "web-push": "^3.6.7",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -34,6 +35,7 @@
     "@types/node": "^22.7.0",
     "@types/pg": "^8.11.10",
     "@types/supertest": "^6.0.2",
+    "@types/web-push": "^3.6.4",
     "ioredis-mock": "^8.13.1",
     "pg-mem": "^3.0.5",
     "socket.io-client": "^4.8.3",

@@ -99,10 +99,11 @@ groups:
             More than half of the {{ $labels.sweep }} passes failed over 5 minutes.
             matching_offer_expiry: lapsed offers are not being closed and searches do not widen.
             sos_escalation: unanswered alarms may not be paging on-call.
+            booking_dispatch: bookings and "ask again" requests are not reaching their helper.
 
       - alert: NeedySweepStalled
-        # Both sweeps run every second; a minute with no clean pass means the loop is stuck or
-        # failing on every item.
+        # The expiry and escalation sweeps run every second, booking dispatch every five; two
+        # minutes with no clean pass means the loop is stuck or failing on every item.
         expr: time() - needy_sweep_last_success_timestamp_seconds{job="needy-backend"} > 120
         for: 2m
         labels:

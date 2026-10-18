@@ -38,13 +38,24 @@ export function OfferCard({
   const lapsed = msLeft <= 0;
 
   return (
-    <li className="rounded-2xl border-2 border-gray-200 bg-white p-5 transition-colors hover:border-primary/40">
+    <li className="rounded-3xl border-2 border-accent/40 bg-white p-5 shadow-[0_14px_36px_rgba(255,122,89,0.18)]">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h3 className="font-display text-lg font-bold text-gray-900">{offer.title}</h3>
+          <p className="text-xs font-semibold uppercase tracking-wide text-accent">
+            {offer.direct ? "Asked for you by name" : "Someone nearby needs help"}
+          </p>
+          <h3 className="mt-1 font-display text-xl font-bold text-gray-900">{offer.title}</h3>
           <p className="mt-1 flex items-center gap-1.5 text-sm text-gray-600">
             <MapPin size={14} aria-hidden />
-            {formatDistance(offer.distanceMeters)} away
+            {[
+              offer.scheduledFor != null ? `Booked for ${formatWhen(offer.scheduledFor)}` : null,
+              offer.distanceMeters != null
+                ? `About ${formatDistance(offer.distanceMeters)} away`
+                : null,
+              "exact address once you accept",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
         {/* Reddens in the last ten seconds. Colour is doing a second job here, so the number
@@ -59,7 +70,7 @@ export function OfferCard({
           }`}
         >
           <Timer size={14} aria-hidden />
-          {lapsed ? "Gone" : `${secondsLeft}s`}
+          {lapsed ? "Gone" : formatLeft(secondsLeft)}
         </span>
       </div>
 
@@ -73,7 +84,7 @@ export function OfferCard({
             setTaking(true);
             onAccept();
           }}
-          className="flex-1 rounded-xl bg-primary px-4 py-3 font-semibold text-white transition-colors hover:bg-primary-dark disabled:bg-gray-300"
+          className="flex-1 rounded-2xl bg-primary px-4 py-4 text-lg font-semibold text-white transition-colors hover:bg-primary-dark disabled:bg-gray-300"
         >
           {lapsed ? "Too late" : taking ? "Taking it…" : "I'll help"}
         </button>
@@ -87,6 +98,21 @@ export function OfferCard({
       </div>
     </li>
   );
+}
+
+/** A booking is confirmed with an hour or more to spare; "5400s" is not a way to say that. */
+function formatLeft(seconds: number): string {
+  if (seconds < 120) return `${seconds}s`;
+  const minutes = Math.ceil(seconds / 60);
+  return minutes < 120 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
+}
+
+function formatWhen(ms: number): string {
+  return new Date(ms).toLocaleString("en-IN", {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 /** Metres under a kilometre, then one decimal. A helper deciding whether to walk needs "400 m"

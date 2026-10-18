@@ -1,4 +1,10 @@
-import { isTerminal, type ChatMessage, type Task, type MatchedHelper } from "@needy/shared";
+import {
+  isAwaitingNamedHelper,
+  isTerminal,
+  type ChatMessage,
+  type Task,
+  type MatchedHelper,
+} from "@needy/shared";
 
 /** Durable data lives behind these interfaces so Phase 1 can run on in-memory impls and
  *  later swap to Postgres without touching any namespace/service code. */
@@ -7,6 +13,9 @@ export interface TaskRepository {
   create(task: Task): Promise<Task>;
   update(taskId: string, patch: Partial<Task>): Promise<Task>;
   activeForUser(userId: string): Promise<Task[]>;
+  /** Tasks waiting on a named helper (see `isAwaitingNamedHelper`) that are due to be offered
+   *  to them: unscheduled ones at once, scheduled ones from `dueBy` onward. */
+  awaitingNamedHelper(dueBy: number): Promise<Task[]>;
 }
 
 export interface MessageRepository {
@@ -58,6 +67,11 @@ export function createInMemoryTaskRepo(): TaskRepository {
     async activeForUser(userId) {
       return [...tasks.values()].filter(
         (t) => (t.requesterId === userId || t.helperId === userId) && !isTerminal(t.state),
+      );
+    },
+    async awaitingNamedHelper(dueBy) {
+      return [...tasks.values()].filter(
+        (t) => isAwaitingNamedHelper(t) && (t.scheduledFor == null || t.scheduledFor <= dueBy),
       );
     },
   };

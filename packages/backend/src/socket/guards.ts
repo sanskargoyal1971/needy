@@ -1,5 +1,11 @@
 import type { Socket } from "socket.io";
-import { isTerminal, taskRoleOf, type Task, type TaskRole } from "@needy/shared";
+import {
+  isAwaitingNamedHelper,
+  isTerminal,
+  taskRoleOf,
+  type Task,
+  type TaskRole,
+} from "@needy/shared";
 import type { Deps } from "../domain/deps.js";
 import type { AuthClaims } from "../auth/jwt.js";
 import { emitSocketError } from "./validation.js";
@@ -39,7 +45,10 @@ export async function requireParticipant(
   ack?: (result: { ok: false; error: string }) => void,
 ): Promise<Participation | null> {
   const task = await deps.tasks.get(taskId);
-  const role = task ? taskRoleOf(task, userId) : null;
+  let role = task ? taskRoleOf(task, userId) : null;
+  // A helper named on a request they have not accepted is not part of it yet: no chat, no
+  // tracking, no alarm on someone else's booking. They join when they say yes.
+  if (task && role === "helper" && isAwaitingNamedHelper(task)) role = null;
 
   if (!task || !role) {
     emitSocketError(socket, {
@@ -67,7 +76,8 @@ export async function requireLiveParticipant(
 ): Promise<Participation | null> {
   const p = await requireParticipant(deps, socket, event, userId, taskId, ack);
   if (!p) return null;
-  if (isTerminal(p.task.state)) {
+  // Nothing is live until the named helper accepts: there is nobody on the other end yet.
+  if (isTerminal(p.task.state) || isAwaitingNamedHelper(p.task)) {
     emitSocketError(socket, {
       event,
       code: "NOT_AUTHORIZED",

@@ -153,6 +153,11 @@ services:
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       DIRECTIONS_PROVIDER: ${DIRECTIONS_PROVIDER:-}
       DIRECTIONS_API_KEY: ${DIRECTIONS_API_KEY:-}
+      DIRECTIONS_TRAVEL_MODE: ${DIRECTIONS_TRAVEL_MODE:-TWO_WHEELER}
+      # Web push. Optional: unset means push is off and alerts go over the socket only.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
       # The bearer the Prometheus scraper presents to GET /metrics. Unset = endpoint not mounted.
       # Caddy refuses /metrics publicly regardless; the scraper reaches backend:4000 on this
       # network (ops/README.md). At least 32 random characters.
@@ -235,6 +240,8 @@ services:
       args:
         NEXT_PUBLIC_API_URL: https://api.${DOMAIN:?set DOMAIN}
         NEXT_PUBLIC_SUPPORT_PHONE: ${SUPPORT_PHONE:-}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+        NEXT_PUBLIC_GOOGLE_MAP_ID: ${GOOGLE_MAP_ID:-}
     environment:
       NODE_ENV: production
       PORT: "3000"

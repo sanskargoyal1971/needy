@@ -33,7 +33,7 @@ export function Chat({
   onRead: (ids: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
-  const endRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const typingRef = useRef(false);
 
   // Mark the other party's unread messages as read whenever the list changes. Filtered to
@@ -45,8 +45,12 @@ export function Chat({
     if (unread.length > 0) onRead(unread);
   }, [messages, userId, onRead]);
 
+  // Scroll the message LIST to its end, never the page. `scrollIntoView` scrolled every
+  // scrollable ancestor too, so opening a task with any history yanked the whole screen down
+  // to the chat — past the map and the stage card, which are what someone opened it to see.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
   }, [messages.length, otherTyping]);
 
   // Stop advertising "typing" when the component goes away mid-compose, otherwise the other
@@ -77,7 +81,7 @@ export function Chat({
 
   return (
     <div className="flex flex-col rounded-2xl border border-gray-200 bg-white">
-      <div className="max-h-72 min-h-32 space-y-2 overflow-y-auto p-4">
+      <div ref={listRef} className="max-h-72 min-h-32 space-y-2 overflow-y-auto p-4">
         {messages.length === 0 && (
           <p className="py-6 text-center text-sm text-gray-500">
             Say hello, or tell {otherName} anything they need to know.
@@ -109,7 +113,6 @@ export function Chat({
             <span>{otherName} is typing</span>
           </div>
         )}
-        <div ref={endRef} />
       </div>
 
       <div className="flex items-center gap-2 border-t border-gray-100 p-3">

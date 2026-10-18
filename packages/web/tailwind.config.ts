@@ -37,12 +37,18 @@ const config: Config = {
       },
       // Decorative float lives in the shared <Float> / DepthStage components now, which can
       // pause off screen and honour reduced motion; a utility class can do neither. What is
-      // left here is used only inside Leaflet marker HTML strings, where React cannot reach.
+      // left here is used only inside map marker HTML strings, where React cannot reach.
       animation: {
         "pulse-slow": "pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite",
         glow: "glow 3s ease-in-out infinite alternate",
+        // The search ripple on the map: a ring that widens out from "you" and fades.
+        ripple: "ripple 3.2s cubic-bezier(0.2, 0.6, 0.35, 1) infinite",
       },
       keyframes: {
+        ripple: {
+          "0%": { transform: "scale(0.15)", opacity: "0.55" },
+          "100%": { transform: "scale(1)", opacity: "0" },
+        },
         glow: {
           "0%": { boxShadow: "0 0 15px rgba(255, 122, 89, 0.2)" },
           "100%": { boxShadow: "0 0 30px rgba(255, 122, 89, 0.6)" },

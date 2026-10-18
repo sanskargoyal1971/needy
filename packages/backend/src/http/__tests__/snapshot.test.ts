@@ -291,6 +291,45 @@ describe("GET /snapshot (§2.1 reconnect)", () => {
     }
   });
 
+  it("shows a named helper only the area of a booking they have not accepted", async () => {
+    const tokenFor = async (userId: string, role: string) =>
+      (await request(app).post("/dev/token").send({ userId, role, displayName: userId })).body
+        .token as string;
+    const helperToken = await tokenFor(HELPER_ID, "helper");
+    const requesterToken = await tokenFor("requester-1", "requester");
+    const door = { lat: 12.96114, lng: 77.63871 };
+    await deps.tasks.create(
+      makeTask({
+        id: "booked-task",
+        requesterId: "requester-1",
+        helperId: HELPER_ID,
+        category: "companionship",
+        state: "searching",
+        origin: door,
+        title: "Tuesday walk",
+        scheduledFor: NOW + 3 * 24 * 60 * 60 * 1000,
+      }),
+    );
+
+    const asHelper = await request(app)
+      .get("/tasks/booked-task")
+      .set("Authorization", `Bearer ${helperToken}`);
+    expect(asHelper.body.task.origin).toEqual({ lat: 12.961, lng: 77.639 });
+    const helperSnap = (
+      await request(app).get("/snapshot").set("Authorization", `Bearer ${helperToken}`)
+    ).body as SessionSnapshot;
+    expect(helperSnap.activeTasks.find((t) => t.task.id === "booked-task")!.task.origin).toEqual({
+      lat: 12.961,
+      lng: 77.639,
+    });
+
+    // The requester's own door is theirs to see.
+    const asRequester = await request(app)
+      .get("/tasks/booked-task")
+      .set("Authorization", `Bearer ${requesterToken}`);
+    expect(asRequester.body.task.origin).toEqual(door);
+  });
+
   it("returns 401 without a valid bearer token", async () => {
     const noHeader = await request(app).get("/snapshot");
     expect(noHeader.status).toBe(401);

@@ -14,6 +14,7 @@ import {
 import { AuthError } from "@/lib/authClient";
 import { Button, Field, FormError, TextInput } from "@/components/ui";
 import { paths } from "@/lib/paths";
+import { enablePush } from "@/lib/push";
 import { taskClient } from "@/lib/taskClient";
 import { OriginPicker } from "@/experience/OriginPicker";
 
@@ -65,7 +66,10 @@ function NewRequest() {
    * refused for a pairing reason. Until this parameter existed the refusal branch below was
    * unreachable, and with it the whole exception flow: the wizard had no entrance.
    */
-  const namedHelper = useSearchParams().get("helperId");
+  const searchParams = useSearchParams();
+  const namedHelper = searchParams.get("helperId");
+  /** A service chosen on the home screen's tiles. Only honoured if the catalog has it. */
+  const presetService = searchParams.get("service");
   const [scheduledFor, setScheduledFor] = useState("");
   const [services, setServices] = useState<ServiceDefinition[] | null>(null);
   const [code, setCode] = useState<string | null>(null);
@@ -81,12 +85,17 @@ function NewRequest() {
       try {
         const { services: list } = await taskClient.services();
         setServices(list);
+        const preset = list.find((s) => s.code === presetService);
+        if (preset) {
+          setCode(preset.code);
+          setTitle((t) => (t.trim() ? t : preset.name));
+        }
       } catch {
         setServices([]);
         setError("Could not load the list of services. Please try again.");
       }
     })();
-  }, []);
+  }, [presetService]);
 
   const selected = useMemo(() => services?.find((s) => s.code === code) ?? null, [services, code]);
   const category = code ? (CATEGORY_FOR_SERVICE[code] ?? "errand") : "errand";
@@ -94,6 +103,10 @@ function NewRequest() {
 
   const submit = useCallback(async () => {
     if (!code || !origin) return;
+    // Asked now, inside the click, because the search page says "you can close this page" —
+    // and that is only true if we can tell them when someone accepts. Not awaited: the
+    // request must not wait on a permission prompt.
+    void enablePush();
     setSubmitting(true);
     setError(null);
     setRefusal(null);
@@ -300,6 +313,9 @@ function NewRequest() {
         <Button onClick={submit} loading={submitting} disabled={!ready}>
           Find someone to help
         </Button>
+        <p className="mt-2 text-center text-xs text-gray-500">
+          We&apos;ll ask to send you a notification when someone accepts, so you can close the page.
+        </p>
       </div>
     </div>
   );

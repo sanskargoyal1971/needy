@@ -3,6 +3,8 @@ import {
   AVAILABILITY_TTL_MS,
   AWAY_AFTER_MS,
   HEARTBEAT_INTERVAL_MS,
+  isAwaitingNamedHelper,
+  isCommittedHelper,
   NS,
   type Presence,
 } from "@needy/shared";
@@ -164,8 +166,10 @@ export const registerPresence: NamespaceRegistrar = (deps) => {
             // de-lists the winner, but only the helper's own app stopped re-advertising: a
             // second device, or a reload that published before the task snapshot arrived, put
             // a busy helper straight back on the map and in line for a second offer.
-            const busy = (await deps.tasks.activeForUser(userId)).some(
-              (t) => t.helperId === userId,
+            // Committed tasks only: a booking they have not confirmed yet (days away, perhaps)
+            // must not keep them off the map in the meantime.
+            const busy = (await deps.tasks.activeForUser(userId)).some((t) =>
+              isCommittedHelper(t, userId),
             );
             if (busy) {
               await removeHelperGeo(client, userId);
@@ -248,8 +252,12 @@ export const registerPresence: NamespaceRegistrar = (deps) => {
           // Subscribing to yourself is always fine and needs no task.
           if (p.helperId !== userId) {
             const tasks = await deps.tasks.activeForUser(userId);
+            // An unconfirmed booking does not count: until the named helper accepts, the
+            // requester has no business watching whether they are online.
             const shares = tasks.some(
-              (t) => t.helperId === p.helperId || t.requesterId === p.helperId,
+              (t) =>
+                !isAwaitingNamedHelper(t) &&
+                (t.helperId === p.helperId || t.requesterId === p.helperId),
             );
             if (!shares) {
               emitSocketError(socket, {
