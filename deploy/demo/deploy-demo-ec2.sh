@@ -140,7 +140,11 @@ if [ "${1:-}" = "update" ]; then
   if [ "$OLD_DOMAIN" != "$DOMAIN" ]; then
     echo "Address changed: $OLD_DOMAIN → $DOMAIN"
     "${SSH[@]}" "sudo sed -i 's#^DOMAIN=.*#DOMAIN=$DOMAIN#' /etc/needy/demo.env"
-    ALLOW_CIDR="$ME" KEEP_WORLD=1 sync_firewall "$SG"
+    # KEEP_WORLD only *keeps* an existing world rule; a private demo has none, so add it.
+    for p in 80 443; do
+      aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$SG" \
+        --protocol tcp --port $p --cidr 0.0.0.0/0 >/dev/null 2>&1 || true
+    done
     NEW_CERT=1
   fi
 
