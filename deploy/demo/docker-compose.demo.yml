@@ -108,6 +108,14 @@ services:
       # Sandbox, but no POST /dev/token: the demo is public, so the sign-in-as-anyone route is
       # not registered at all rather than only refused by Caddy.
       DISABLE_DEV_TOKEN: "1"
+      # Real-road ETA and route lines (Google Routes API). Optional: blank = straight-line.
+      DIRECTIONS_PROVIDER: ${DIRECTIONS_PROVIDER:-}
+      DIRECTIONS_API_KEY: ${DIRECTIONS_API_KEY:-}
+      DIRECTIONS_TRAVEL_MODE: ${DIRECTIONS_TRAVEL_MODE:-TWO_WHEELER}
+      # Web push. Optional: blank = alerts over the open socket only.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
     # A named volume, not a tmpfs: uploads used to vanish on every restart or redeploy. The
     # image creates /uploads owned by `node`, so the volume starts writable.
     volumes:
@@ -128,12 +136,17 @@ services:
         # The SAME variable the backend's DEV_FIXED_OTP reads, so the note and the server can
         # never disagree. Changing the code means rebuilding web (it is inlined at build).
         NEXT_PUBLIC_DEV_FIXED_OTP: ${DEV_FIXED_OTP}
+        # Browser key for the Maps JavaScript API — public by design; restrict it by API.
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+        NEXT_PUBLIC_GOOGLE_MAP_ID: ${GOOGLE_MAP_ID:-}
     environment:
       NODE_ENV: production
       PORT: "3000"
       HOSTNAME: 0.0.0.0
       # Also read at runtime by proxy.ts to build the CSP connect-src.
       NEXT_PUBLIC_API_URL: https://api.${DOMAIN}
+      # Read by proxy.ts too: the CSP only opens to Google when a maps key is set.
+      NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
     depends_on:
       backend:
         condition: service_healthy

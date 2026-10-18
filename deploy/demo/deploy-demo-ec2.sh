@@ -121,11 +121,47 @@ if [ "${1:-}" = "update" ]; then
     --query "SecurityGroups[0].IpPermissions[?FromPort==\`443\`].IpRanges[].CidrIp" --output text \
     | tr '\t' '\n' | grep -cx '0.0.0.0/0' || true)
   SSH=(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i "$KEY_FILE" "ec2-user@$IP")
+  DOMAIN="${IP//./-}.sslip.io"
   if [ "$PUBLIC" -gt 0 ]; then
     ALLOW_CIDR="$ME" KEEP_WORLD=1 sync_firewall "$SG"
   else
     ALLOW_CIDR="$ME" sync_firewall "$SG"
     ALLOW_CIDR="$ME" sync_caddy
+  fi
+
+  # A stopped-and-started instance comes back on a NEW public IP, and the domain is derived
+  # from it. Everything keyed on the old one — the certificate, the API origin baked into the
+  # web build, CORS — would point at an address nobody owns any more. Re-point the domain and
+  # open 80/443 just long enough for Let's Encrypt to issue for the new name.
+  # Keep the last good env file: everything below edits it in place.
+  "${SSH[@]}" "sudo cp -p /etc/needy/demo.env /etc/needy/demo.env.bak"
+  OLD_DOMAIN=$("${SSH[@]}" "sudo sed -n 's/^DOMAIN=//p' /etc/needy/demo.env")
+  NEW_CERT=0
+  if [ "$OLD_DOMAIN" != "$DOMAIN" ]; then
+    echo "Address changed: $OLD_DOMAIN → $DOMAIN"
+    "${SSH[@]}" "sudo sed -i 's#^DOMAIN=.*#DOMAIN=$DOMAIN#' /etc/needy/demo.env"
+    ALLOW_CIDR="$ME" KEEP_WORLD=1 sync_firewall "$SG"
+    NEW_CERT=1
+  fi
+
+  # Optional integrations, written to the root-only env file and never printed.
+  #   GOOGLE_MAPS_API_KEY  from the caller's environment, if set (maps + Routes ETA)
+  #   VAPID key pair       generated once for this host if it has none (web push)
+  set_env() { # name, value — replace or append, value on stdin so it never hits argv
+    printf '%s' "$2" | "${SSH[@]}" "sudo sh -c 'v=\$(cat); umask 077; grep -v \"^$1=\" /etc/needy/demo.env > /etc/needy/demo.env.new; printf \"%s=%s\\n\" $1 \"\$v\" >> /etc/needy/demo.env.new; mv /etc/needy/demo.env.new /etc/needy/demo.env'"
+  }
+  if [ -n "${GOOGLE_MAPS_API_KEY:-}" ]; then
+    set_env GOOGLE_MAPS_API_KEY "$GOOGLE_MAPS_API_KEY"
+    set_env DIRECTIONS_PROVIDER google
+    set_env DIRECTIONS_API_KEY "${DIRECTIONS_API_KEY:-$GOOGLE_MAPS_API_KEY}"
+  fi
+  if ! "${SSH[@]}" "sudo grep -q '^VAPID_PRIVATE_KEY=.' /etc/needy/demo.env"; then
+    VAPID_JSON=$(node -e "process.stdout.write(JSON.stringify(require('./packages/backend/node_modules/web-push').generateVAPIDKeys()))" 2>/dev/null \
+      || node -e "process.stdout.write(JSON.stringify(require('web-push').generateVAPIDKeys()))")
+    set_env VAPID_PUBLIC_KEY "$(printf '%s' "$VAPID_JSON" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).publicKey))')"
+    set_env VAPID_PRIVATE_KEY "$(printf '%s' "$VAPID_JSON" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).privateKey))')"
+    set_env VAPID_SUBJECT "mailto:safety@needy.invalid"
+    unset VAPID_JSON
   fi
 
   rsync -az --delete \
@@ -137,6 +173,20 @@ if [ "${1:-}" = "update" ]; then
   echo "Rebuilding on the host..."
   "${SSH[@]}" "cd needy-app && sudo docker compose --project-directory . --env-file /etc/needy/demo.env \
     -f deploy/demo/docker-compose.demo.yml -p needy-demo up -d --build"
+
+  if [ "$NEW_CERT" = 1 ]; then
+    echo "Waiting for the HTTPS certificate for $DOMAIN..."
+    for _ in $(seq 1 60); do
+      curl -fsS -o /dev/null "https://$DOMAIN/" 2>/dev/null && break
+      sleep 5
+    done
+    # Issuance done (or given up on): back to whichever exposure the demo had.
+    if [ "$PUBLIC" -gt 0 ]; then
+      ALLOW_CIDR="$ME" KEEP_WORLD=1 sync_firewall "$SG"
+    else
+      ALLOW_CIDR="$ME" sync_firewall "$SG"
+    fi
+  fi
 
   # Nightly backup at 21:30 UTC (03:00 IST). Same-disk only — see deploy/demo/backup.sh.
   "${SSH[@]}" "sudo install -m 700 -o root -g root needy-app/deploy/demo/backup.sh /usr/local/bin/needy-demo-backup && \
